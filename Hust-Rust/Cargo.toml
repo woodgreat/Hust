@@ -1,0 +1,41 @@
+[package]
+name = "hust-rust"
+version = "0.1.0"
+edition = "2021"
+description = "Hust language adapter for Rust - 转译器 Rust 适配版本"
+authors = ["wood"]
+license = "MIT"
+repository = "https://github.com/woodgreat/Hust"
+
+[dependencies]
+# 语法分析
+syn = "1.0"
+quote = "1.0"
+proc-macro2 = "1.0"
+
+# 文件操作
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 错误处理
+thiserror = "1.0"
+anyhow = "1.0"
+
+# 命令行（旧版本，兼容性好）
+clap = { version = "=4.4.18", features = ["derive"] }
+
+# Rust 生态（用于调用 cargo）
+# 动态调用，不直接依赖
+
+[dev-dependencies]
+# 测试用
+
+[lib]
+name = "hust_rust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hust"
+path = "src/main.rs"
+
+[build-dependencies]
