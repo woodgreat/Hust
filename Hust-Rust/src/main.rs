@@ -2,8 +2,11 @@
 //! 用途：hust run main.hust
 
 use std::path::PathBuf;
+use std::process::Command;
 use clap::{Parser, Subcommand};
-use anyhow::Result;
+use anyhow::{Result, Context};
+
+use hust_rust::Translator;
 
 /// Hust 语言转译器 - Rust 适配版本
 #[derive(Parser)]
@@ -43,9 +46,45 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run { file } => {
-            println!("运行文件: {:?}", file);
-            // TODO: 实现运行逻辑
-            println!("TODO: 实现中...");
+            println!("[Hust] 运行文件: {:?}", file);
+            
+            // 1. 转译 Hust -> Rust
+            let translator = Translator::default();
+            let rust_code = translator.transpile_file(&file)
+                .context("转译失败")?;
+            
+            // 2. 创建临时目录
+            let temp_dir = std::env::temp_dir().join("hust_run");
+            std::fs::create_dir_all(&temp_dir)?;
+            
+            // 3. 创建 src 目录并写入转译后的 Rust 代码
+            let src_dir = temp_dir.join("src");
+            std::fs::create_dir_all(&src_dir)?;
+            let rs_file = src_dir.join("main.rs");
+            std::fs::write(&rs_file, &rust_code)
+                .context("写入临时文件失败")?;
+            
+            // 4. 创建 Cargo.toml
+            let cargo_toml = r#"[package]
+name = "hust_temp"
+version = "0.1.0"
+edition = "2021"
+"#;
+            std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml)?;
+            
+            // 5. 调用 cargo run
+            println!("[Hust] 正在编译并运行...");
+            let status = Command::new("cargo")
+                .arg("run")
+                .current_dir(&temp_dir)
+                .status()
+                .context("调用 cargo 失败")?;
+            
+            if !status.success() {
+                anyhow::bail!("运行失败");
+            }
+            
+            println!("[Hust] 完成");
             Ok(())
         }
         Commands::Build { project_dir } => {
