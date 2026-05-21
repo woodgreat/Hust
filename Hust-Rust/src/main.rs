@@ -47,43 +47,67 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Run { file } => {
             println!("[Hust] Running: {:?}", file);
-            
+
             // 1. Transpile Hust -> Rust
             let translator = Translator::default();
             let rust_code = translator.transpile_file(&file)
                 .context("Transpilation failed")?;
-            
-            // 2. Create temp directory
-            let temp_dir = std::env::temp_dir().join("hust_run");
+
+            // 2. Create build directory (in project root, not system temp)
+            let build_dir = std::env::current_dir()?.join("build");
+            let temp_dir = build_dir.join("temp");
+            let dist_dir = build_dir.join("dist");
             std::fs::create_dir_all(&temp_dir)?;
-            
+            std::fs::create_dir_all(&dist_dir)?;
+
             // 3. Create src directory and write transpiled Rust code
             let src_dir = temp_dir.join("src");
             std::fs::create_dir_all(&src_dir)?;
             let rs_file = src_dir.join("main.rs");
             std::fs::write(&rs_file, &rust_code)
                 .context("Failed to write temp file")?;
-            
-            // 4. Create Cargo.toml
+
+            // 4. Create Cargo.toml with dist as target directory
             let cargo_toml = r#"[package]
 name = "hust_temp"
 version = "0.1.0"
 edition = "2021"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
 "#;
             std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml)?;
-            
-            // 5. Call cargo run
-            println!("[Hust] Compiling and running...");
+
+            // 5. Call cargo build with output to dist
+            println!("[Hust] Compiling...");
             let status = Command::new("cargo")
-                .arg("run")
+                .arg("build")
+                .arg("--target-dir")
+                .arg(&dist_dir)
                 .current_dir(&temp_dir)
                 .status()
                 .context("Failed to invoke cargo")?;
-            
+
+            if !status.success() {
+                anyhow::bail!("Compilation failed");
+            }
+
+            // 6. Run the compiled binary
+            println!("[Hust] Running...");
+            let exe_name = if cfg!(windows) { "hust_temp.exe" } else { "hust_temp" };
+            let exe_path = dist_dir.join("debug").join(exe_name);
+
+            let status = Command::new(&exe_path)
+                .status()
+                .context("Failed to run executable")?;
+
             if !status.success() {
                 anyhow::bail!("Execution failed");
             }
-            
+
             println!("[Hust] Done");
             Ok(())
         }
