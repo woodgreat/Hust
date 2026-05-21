@@ -1,5 +1,5 @@
-//! Hust-Rust 命令行入口
-//! 用途：hust run main.hust
+//! Hust-Rust CLI Entry
+//! Usage: hust run main.hust
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -8,7 +8,7 @@ use anyhow::{Result, Context};
 
 use hust_rust::Translator;
 
-/// Hust 语言转译器 - Rust 适配版本
+/// Hust Language Transpiler - Rust Adapter
 #[derive(Parser)]
 #[command(author, version, about)]
 struct Cli {
@@ -18,25 +18,25 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// 运行 Hust 源文件
+    /// Run Hust source file
     Run {
-        /// 源文件路径
+        /// Source file path
         file: PathBuf,
     },
-    /// 构建项目
+    /// Build project
     Build {
-        /// 项目目录（默认当前目录）
+        /// Project directory (default: current directory)
         #[arg(short, long, default_value = ".")]
         project_dir: PathBuf,
     },
-    /// 检查语法
+    /// Check syntax
     Check {
-        /// 源文件路径
+        /// Source file path
         file: PathBuf,
     },
-    /// 格式化代码
+    /// Format code
     Fmt {
-        /// 源文件路径
+        /// Source file path
         file: PathBuf,
     },
 }
@@ -46,25 +46,25 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run { file } => {
-            println!("[Hust] 运行文件: {:?}", file);
+            println!("[Hust] Running: {:?}", file);
             
-            // 1. 转译 Hust -> Rust
+            // 1. Transpile Hust -> Rust
             let translator = Translator::default();
             let rust_code = translator.transpile_file(&file)
-                .context("转译失败")?;
+                .context("Transpilation failed")?;
             
-            // 2. 创建临时目录
+            // 2. Create temp directory
             let temp_dir = std::env::temp_dir().join("hust_run");
             std::fs::create_dir_all(&temp_dir)?;
             
-            // 3. 创建 src 目录并写入转译后的 Rust 代码
+            // 3. Create src directory and write transpiled Rust code
             let src_dir = temp_dir.join("src");
             std::fs::create_dir_all(&src_dir)?;
             let rs_file = src_dir.join("main.rs");
             std::fs::write(&rs_file, &rust_code)
-                .context("写入临时文件失败")?;
+                .context("Failed to write temp file")?;
             
-            // 4. 创建 Cargo.toml
+            // 4. Create Cargo.toml
             let cargo_toml = r#"[package]
 name = "hust_temp"
 version = "0.1.0"
@@ -72,37 +72,34 @@ edition = "2021"
 "#;
             std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml)?;
             
-            // 5. 调用 cargo run
-            println!("[Hust] 正在编译并运行...");
+            // 5. Call cargo run
+            println!("[Hust] Compiling and running...");
             let status = Command::new("cargo")
                 .arg("run")
                 .current_dir(&temp_dir)
                 .status()
-                .context("调用 cargo 失败")?;
+                .context("Failed to invoke cargo")?;
             
             if !status.success() {
-                anyhow::bail!("运行失败");
+                anyhow::bail!("Execution failed");
             }
             
-            println!("[Hust] 完成");
+            println!("[Hust] Done");
             Ok(())
         }
         Commands::Build { project_dir } => {
-            println!("构建项目: {:?}", project_dir);
-            // TODO: 实现构建逻辑
-            println!("TODO: 实现中...");
+            println!("Building project: {:?}", project_dir);
+            println!("TODO: Not implemented yet");
             Ok(())
         }
         Commands::Check { file } => {
-            println!("检查文件: {:?}", file);
-            // TODO: 实现检查逻辑
-            println!("TODO: 实现中...");
+            println!("Checking file: {:?}", file);
+            println!("TODO: Not implemented yet");
             Ok(())
         }
         Commands::Fmt { file } => {
-            println!("格式化文件: {:?}", file);
-            // TODO: 实现格式化逻辑
-            println!("TODO: 实现中...");
+            println!("Formatting file: {:?}", file);
+            println!("TODO: Not implemented yet");
             Ok(())
         }
     }

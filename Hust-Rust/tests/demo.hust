@@ -1,0 +1,13 @@
+// Hust V0.1 演示程序
+
+void main() {
+    // 变量声明（Hust风格：类型在前）
+    i32 count = 5;
+    i32 a = 10;
+    i32 b = 20;
+    
+    // 调用Rust宏（V0.1暂用原生宏）
+    println!("Hello from Hust!");
+    println!("Count is: {}", count);
+    println!("a + b = {}", a + b);
+}
