@@ -53,8 +53,13 @@ fn main() -> Result<()> {
             let rust_code = translator.transpile_file(&file)
                 .context("Transpilation failed")?;
 
-            // 2. Create build directory (in project root, not system temp)
-            let build_dir = std::env::current_dir()?.join("build");
+            // 2. Create build directory relative to hust.exe location
+            // This ensures build/ is always next to hust.exe, not in current working dir
+            let exe_dir = std::env::current_exe()?
+                .parent()
+                .context("Failed to get exe directory")?
+                .to_path_buf();
+            let build_dir = exe_dir.join("build");
             let temp_dir = build_dir.join("temp");
             let dist_dir = build_dir.join("dist");
             std::fs::create_dir_all(&temp_dir)?;
