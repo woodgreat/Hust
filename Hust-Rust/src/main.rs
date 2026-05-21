@@ -2,6 +2,12 @@
 //! Usage: hust run main.hust
 
 use std::path::PathBuf;
+
+/// Get Hust version in Wood format (4-digit with dot)
+/// Converts "0.1.0+20260521" -> "0.1.0.20260521"
+fn get_hust_version() -> &'static str {
+    env!("CARGO_PKG_VERSION").replace('+', ".").leak()
+}
 use std::process::Command;
 use clap::{Parser, Subcommand};
 use anyhow::{Result, Context};
@@ -10,7 +16,11 @@ use hust_rust::Translator;
 
 /// Hust Language Transpiler - Rust Adapter
 #[derive(Parser)]
-#[command(author, version, about)]
+#[command(
+    author,
+    about,
+    version = get_hust_version(),
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
