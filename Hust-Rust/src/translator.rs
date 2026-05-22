@@ -57,24 +57,30 @@ impl Translator {
         self.transpile(&source)
     }
 
-    /// Transpile source code (V0.1 minimal implementation)
+    /// Transpile source code (V0.2 with control flow)
     pub fn transpile(&self, source: &str) -> Result<String, TranspileError> {
         let mut output = source.to_string();
 
-        // V0.1 transform rules:
-        // 1. Variable declaration: "type var = value;" -> "let var: type = value;"
-        // 2. Function definition: "void name(...)" -> "fn name(...)"
-        // 3. Other content preserved as-is
+        // V0.2 transform rules (order matters!):
+        // 1. C-style for loops (must be before variable declaration)
+        // 2. Variable declarations (not inside for loops)
+        // 3. Function definitions
+        // 4. if/while condition parentheses removal
 
-        // Rule 1: Variable declaration transform
-        // Pattern: (type) (var) = (value);
-        // Supported types: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool, char, String
+        // Rule 1: Transform C-style for loops to Rust iterator style FIRST
+        // for (i32 i = 0; i < n; i = i + 1) -> for i in 0..n
+        output = self.transform_for_loop(&output)?;
+
+        // Rule 2: Variable declaration transform
         output = self.transform_variable_declarations(&output)?;
 
-        // Rule 2: Function definition transform
-        // void main() -> fn main()
-        // i32 add(...) -> fn add(...) -> i32
+        // Rule 3: Function definition transform
         output = self.transform_function_definitions(&output)?;
+
+        // Rule 4: Remove parentheses from if/while conditions (Rust style)
+        // if (x > 5) -> if x > 5
+        // while (x > 5) -> while x > 5
+        output = self.remove_condition_parens(&output)?;
 
         Ok(output)
     }
@@ -93,7 +99,9 @@ impl Translator {
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let type_name = &caps[1];
             let var_name = &caps[2];
-            format!("let {}: {} =", var_name, type_name)
+            // Hust: default is mutable, const is immutable
+            // Rust: default is immutable, mut is mutable
+            format!("let mut {}: {} =", var_name, type_name)
         });
 
         Ok(result.to_string())
@@ -131,6 +139,46 @@ impl Translator {
             let type_name = &caps[1];
             let param_name = &caps[2];
             format!("({}: {})", param_name, type_name)
+        });
+
+        Ok(result.to_string())
+    }
+
+    /// V0.2: Transform C-style for loop to Rust iterator style
+    /// for (i32 i = 0; i < n; i = i + 1) -> for i in 0..n
+    fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Pattern: for (type var = start; var < end; var = var + 1)
+        // Simplified: only handles i = i + 1 increment, no backreferences
+        let re = Regex::new(
+            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(\d+)\s*;\s*[a-zA-Z_][a-zA-Z0-9_]*\s*<\s*(\d+)\s*;\s*[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\+\s*1\s*\)"
+        ).map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let var_name = &caps[2];
+            let start = &caps[3];
+            let end = &caps[4];
+            format!("for {} in {}..{}", var_name, start, end)
+        });
+
+        Ok(result.to_string())
+    }
+
+    /// V0.2: Remove parentheses from if/while conditions (Rust style)
+    /// if (x > 5) -> if x > 5
+    fn remove_condition_parens(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Match: if (condition) or while (condition)
+        // Replace with: if condition or while condition
+        let re = Regex::new(r"\b(if|while)\s*\(\s*([^)]+)\s*\)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let keyword = &caps[1];
+            let condition = &caps[2];
+            format!("{} {}", keyword, condition)
         });
 
         Ok(result.to_string())
