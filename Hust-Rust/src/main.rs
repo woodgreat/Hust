@@ -82,9 +82,12 @@ fn main() -> Result<()> {
             std::fs::write(&rs_file, &rust_code)
                 .context("Failed to write temp file")?;
 
-            // 4. Create Cargo.toml with dist as target directory
-            let cargo_toml = r#"[package]
-name = "hust_temp"
+            // 4. Create Cargo.toml with source file name as package name
+            let src_stem = file.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("hust_temp");
+            let cargo_toml = format!(r#"[package]
+name = "{}"
 version = "0.1.0"
 edition = "2021"
 
@@ -93,7 +96,7 @@ opt-level = 0
 
 [profile.release]
 opt-level = 3
-"#;
+"#, src_stem);
             std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml)?;
 
             // 5. Call cargo build with output to dist
@@ -112,8 +115,16 @@ opt-level = 3
 
             // 6. Run the compiled binary
             println!("[Hust] Running...");
-            let exe_name = if cfg!(windows) { "hust_temp.exe" } else { "hust_temp" };
-            let exe_path = dist_dir.join("debug").join(exe_name);
+            // Get executable name from source file name
+            let src_stem = file.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("hust_temp");
+            let exe_name = if cfg!(windows) {
+                format!("{}.exe", src_stem)
+            } else {
+                src_stem.to_string()
+            };
+            let exe_path = dist_dir.join("debug").join(&exe_name);
 
             let status = Command::new(&exe_path)
                 .status()
@@ -158,9 +169,12 @@ opt-level = 3
             std::fs::write(&rs_file, &rust_code)
                 .context("Failed to write temp file")?;
 
-            // 5. Create Cargo.toml
-            let cargo_toml = r#"[package]
-name = "hust_temp"
+            // 5. Create Cargo.toml with source file name as package name
+            let src_stem = main_file.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("main");
+            let cargo_toml = format!(r#"[package]
+name = "{}"
 version = "0.1.0"
 edition = "2021"
 
@@ -169,7 +183,7 @@ opt-level = 0
 
 [profile.release]
 opt-level = 3
-"#;
+"#, src_stem);
             std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml)?;
 
             // 6. Call cargo build with output to dist
@@ -187,8 +201,15 @@ opt-level = 3
                 anyhow::bail!("Compilation failed");
             }
 
-            // 7. Copy executable to project directory
-            let exe_name = if cfg!(windows) { "hust_temp.exe" } else { "hust_temp" };
+            // 7. Copy executable to project directory with same name as source file
+            let src_stem = main_file.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("main");
+            let exe_name = if cfg!(windows) {
+                format!("{}.exe", src_stem)
+            } else {
+                src_stem.to_string()
+            };
             let exe_path = dist_dir.join("release").join(&exe_name);
             let output_exe = project_dir.join(&exe_name);
             std::fs::copy(&exe_path, &output_exe)
