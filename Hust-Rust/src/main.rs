@@ -127,8 +127,74 @@ opt-level = 3
             Ok(())
         }
         Commands::Build { project_dir } => {
-            println!("Building project: {:?}", project_dir);
-            println!("TODO: Not implemented yet");
+            println!("[Hust] Building project: {:?}", project_dir);
+
+            // 1. Find main.hust in project directory
+            let main_file = project_dir.join("main.hust");
+            if !main_file.exists() {
+                anyhow::bail!("main.hust not found in project directory");
+            }
+
+            // 2. Transpile Hust -> Rust
+            let translator = Translator::default();
+            let rust_code = translator.transpile_file(&main_file)
+                .context("Transpilation failed")?;
+
+            // 3. Create build directory relative to hust.exe
+            let exe_dir = std::env::current_exe()?
+                .parent()
+                .context("Failed to get exe directory")?
+                .to_path_buf();
+            let build_dir = exe_dir.join("build");
+            let temp_dir = build_dir.join("temp");
+            let dist_dir = build_dir.join("dist");
+            std::fs::create_dir_all(&temp_dir)?;
+            std::fs::create_dir_all(&dist_dir)?;
+
+            // 4. Create src directory and write transpiled Rust code
+            let src_dir = temp_dir.join("src");
+            std::fs::create_dir_all(&src_dir)?;
+            let rs_file = src_dir.join("main.rs");
+            std::fs::write(&rs_file, &rust_code)
+                .context("Failed to write temp file")?;
+
+            // 5. Create Cargo.toml
+            let cargo_toml = r#"[package]
+name = "hust_temp"
+version = "0.1.0"
+edition = "2021"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+"#;
+            std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml)?;
+
+            // 6. Call cargo build with output to dist
+            println!("[Hust] Compiling...");
+            let status = Command::new("cargo")
+                .arg("build")
+                .arg("--release")
+                .arg("--target-dir")
+                .arg(&dist_dir)
+                .current_dir(&temp_dir)
+                .status()
+                .context("Failed to invoke cargo")?;
+
+            if !status.success() {
+                anyhow::bail!("Compilation failed");
+            }
+
+            // 7. Copy executable to project directory
+            let exe_name = if cfg!(windows) { "hust_temp.exe" } else { "hust_temp" };
+            let exe_path = dist_dir.join("release").join(&exe_name);
+            let output_exe = project_dir.join(&exe_name);
+            std::fs::copy(&exe_path, &output_exe)
+                .context("Failed to copy executable")?;
+
+            println!("[Hust] Build complete: {:?}", output_exe);
             Ok(())
         }
         Commands::Check { file } => {
