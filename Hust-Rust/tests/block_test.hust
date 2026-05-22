@@ -1,0 +1,17 @@
+void main() {
+    i32 x = 10;
+    
+    // 嵌套代码块
+    {
+        i32 y = 20;
+        println!("y: {}", y);
+    }
+    
+    // if 代码块
+    if (x > 5) {
+        i32 z = 30;
+        println!("z: {}", z);
+    }
+    
+    println!("x: {}", x);
+}

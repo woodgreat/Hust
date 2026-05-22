@@ -192,7 +192,7 @@ impl Translator {
     }
 }
 
-/// 主入口函数
+/// Main entry function
 pub fn transpile(source: &str) -> Result<String, TranspileError> {
     let translator = Translator::default();
     translator.transpile(source)

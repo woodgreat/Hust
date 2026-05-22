@@ -1,18 +1,18 @@
-//! Hust-Rust 库核心
-//! 提供转译器功能和插件系统
+//! Hust-Rust Library Core
+//! Provides transpiler functionality and plugin system
 
 pub mod translator;
 pub mod plugins;
 
-// 重新导出
+// Re-exports
 pub use translator::{Translator, TranspileOptions, TranspileError};
 pub use plugins::{Plugin, PluginError, PluginManager};
 
-// 主错误类型
+// Main error type
 pub use thiserror::Error as HustError;
 
-/// 结果类型别名
+/// Result type alias
 pub type HustResult<T> = std::result::Result<T, translator::TranspileError>;
 
-/// 版本信息
+/// Version info
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

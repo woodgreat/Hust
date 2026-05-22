@@ -1,70 +1,71 @@
-//! 插件系统模块
-//! 提供可扩展的转换插件接口
+//! Plugin System Module
+//! Provides extensible transformation plugin interface
 
 use thiserror::Error;
 
-/// 插件错误
+/// Plugin Error
 #[derive(Error, Debug)]
 pub enum PluginError {
-    #[error("插件加载失败: {0}")]
+    #[error("Plugin load failed: {0}")]
     LoadError(String),
-    
-    #[error("插件执行失败: {0}")]
+
+    #[error("Plugin execution failed: {0}")]
     ExecutionError(String),
-    
-    #[error("插件不存在: {0}")]
+
+    #[error("Plugin not found: {0}")]
     NotFound(String),
 }
 
-/// 插件 trait - 所有转换插件必须实现
+/// Plugin trait - all transformation plugins must implement
 pub trait Plugin {
-    /// 插件名称
+    /// Plugin name
     fn name(&self) -> &str;
-    
-    /// 插件描述
+
+    /// Plugin description
     fn description(&self) -> &str;
-    
-    /// 版本
+
+    /// Version
     fn version(&self) -> &str;
-    
-    /// 转换代码
-    /// 输入源代码，返回转换后的代码
+
+    /// Transform code
+    /// Input source code, return transformed code
     fn transform(&self, source: &str) -> Result<String, PluginError>;
-    
-    /// 优先级（数值越小越先执行）
+
+    /// Priority (smaller value executes first)
     fn priority(&self) -> u32 {
         100
     }
 }
 
-/// 插件管理器
+/// Plugin Manager
 pub struct PluginManager {
     plugins: Vec<Box<dyn Plugin>>,
 }
 
 impl PluginManager {
-    /// 创建新管理器
+    /// Create new manager
     pub fn new() -> Self {
         Self { plugins: Vec::new() }
+
     }
-    
-    /// 注册插件
+
+    /// Register plugin
     pub fn register(&mut self, plugin: Box<dyn Plugin>) {
         self.plugins.push(plugin);
     }
-    
-    /// 执行所有插件（按优先级排序）
+
+    /// Execute all plugins (sorted by priority)
     pub fn execute_all(&self, source: &str) -> Result<String, PluginError> {
-        // 按优先级排序
+        // Sort by priority
         let mut sorted = self.plugins.iter().collect::<Vec<_>>();
         sorted.sort_by_key(|p| p.priority());
-        
-        // 依次执行
+
+        // Execute sequentially
         let mut result = source.to_string();
         for plugin in sorted {
             result = plugin.transform(&result)?;
         }
-        
+
         Ok(result)
     }
 }
@@ -75,20 +76,20 @@ impl Default for PluginManager {
     }
 }
 
-// 内置插件示例
+// Built-in plugin examples
 mod builtins {
     use super::*;
-    
-    /// 语法简化插件
+
+    /// Syntax simplification plugin
     pub struct SyntaxSimplifyPlugin;
-    
+
     impl Plugin for SyntaxSimplifyPlugin {
         fn name(&self) -> &str { "syntax-simplify" }
-        fn description(&self) -> &str { "简化语法糖，让代码更简洁" }
+        fn description(&self) -> &str { "Simplify syntax sugar for cleaner code" }
         fn version(&self) -> &str { "0.1.0" }
-        
+
         fn transform(&self, source: &str) -> Result<String, PluginError> {
-            // TODO: 实现简化逻辑
+            // TODO: Implement simplification logic
             Ok(source.to_string())
         }
     }
