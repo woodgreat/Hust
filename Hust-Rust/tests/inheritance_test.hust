@@ -22,10 +22,10 @@ class Dog extends Animal {
 
 void main() {
     Dog d;
-    d.age = 5;
+    d.animal.age = 5;
     
-    d.eat();
-    println!("Age: {}", d.getAge());
+    d.animal.eat();
+    println!("Age: {}", d.animal.getAge());
     d.bark();
     
     println!("Inheritance test passed!");
