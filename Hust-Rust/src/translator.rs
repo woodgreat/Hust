@@ -87,6 +87,10 @@ impl Translator {
         // String s = "hello"; -> let mut s: String = "hello".to_string();
         output = self.transform_string_init(&output)?;
 
+        // Rule 6: Transform pass to ()
+        // pass; -> ();
+        output = self.transform_pass(&output)?;
+
         Ok(output)
     }
 
@@ -232,6 +236,19 @@ impl Translator {
                 format!("let mut {}: String = {};", var_name, value)
             }
         });
+
+        Ok(result.to_string())
+    }
+
+    /// V0.3: Transform pass to ()
+    /// pass; -> ();
+    fn transform_pass(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        let re = Regex::new(r"\bpass\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, "();");
 
         Ok(result.to_string())
     }
