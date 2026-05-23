@@ -569,14 +569,20 @@ impl Translator {
                 continue;
             }
 
-            // Check if it's a method (has { or ; at end, and has ())
-            if line.contains("(") && line.contains(")") {
-                // Method declaration
+            // Method: has ( and ) AND has { (method body start)
+            // Field: has ; but no (
+            if line.contains("(") && line.contains(")") && line.contains("{") {
+                // Method declaration with inline body
                 if let Some(method) = self.parse_method(line) {
                     methods.push(method);
                 }
-            } else if line.contains(";") {
-                // Field declaration
+            } else if line.contains("(") && line.contains(")") && line.ends_with(";") {
+                // Method declaration without body (abstract/interface style)
+                if let Some(method) = self.parse_method(line) {
+                    methods.push(method);
+                }
+            } else if line.contains(";") && !line.contains("(") {
+                // Field declaration: Type name;
                 if let Some(field) = self.parse_field(line) {
                     fields.push(field);
                 }
@@ -663,26 +669,84 @@ impl Translator {
     }
 
     /// Generate Rust impl block from class methods
+    /// If implements interfaces, generates separate impl blocks
     fn generate_impl(
         &self,
         class_name: &str,
         methods: &[ClassMethod],
-        parent_class: Option<&str>,
+        _parent_class: Option<&str>,
         interfaces: Option<&str>,
     ) -> String {
-        let mut result = format!("impl {}", class_name);
+        let mut result = String::new();
 
-        // Add trait implementations if implements interfaces
+        // Generate trait implementations for interfaces
         if let Some(ifs) = interfaces {
             let if_names: Vec<&str> = ifs.split(',').map(|s| s.trim()).collect();
             for if_name in if_names {
-                result.push_str(format!(" {} for {}", if_name, class_name).as_str());
+                let trait_impl = self.generate_trait_impl(class_name, if_name, methods);
+                result.push_str(&trait_impl);
             }
         }
 
-        result.push_str(" {\n");
+        // Generate inherent impl block for class methods
+        let inherent_impl = self.generate_inherent_impl(class_name, methods);
+        result.push_str(&inherent_impl);
 
-        // Generate methods
+        result
+    }
+
+    /// Generate trait implementation for an interface
+    fn generate_trait_impl(
+        &self,
+        class_name: &str,
+        interface_name: &str,
+        methods: &[ClassMethod],
+    ) -> String {
+        let mut result = format!("impl {} for {} {{", interface_name, class_name);
+
+        // Only include public methods in trait impl
+        for method in methods {
+            if !matches!(method.visibility, Visibility::Public) {
+                continue;
+            }
+
+            let rust_name = self.to_snake_case(&method.name);
+            let rust_params = self.transform_method_params(&method.params);
+
+            let needs_mut = method.body.as_ref()
+                .map(|b| b.contains("self.") && b.contains("="))
+                .unwrap_or(false);
+            let self_param = if needs_mut { "&mut self" } else { "&self" };
+
+            let sig = if method.ret_type == "void" {
+                format!("\n    fn {}({}{}) {{", rust_name, self_param, rust_params)
+            } else {
+                format!("\n    fn {}({}{}) -> {} {{", rust_name, self_param, rust_params, method.ret_type)
+            };
+
+            result.push_str(&sig);
+
+            if let Some(ref body) = method.body {
+                let body_content = body.trim_start_matches('{').trim_end_matches('}');
+                let transformed_body = self.transform_self_references(body_content);
+                result.push_str(&transformed_body);
+            }
+
+            result.push_str("\n    }");
+        }
+
+        result.push_str("\n}\n");
+        result
+    }
+
+    /// Generate inherent impl block (class methods)
+    fn generate_inherent_impl(
+        &self,
+        class_name: &str,
+        methods: &[ClassMethod],
+    ) -> String {
+        let mut result = format!("impl {} {{", class_name);
+
         for method in methods {
             let vis = match method.visibility {
                 Visibility::Public => "pub ",
@@ -692,22 +756,19 @@ impl Translator {
             let rust_name = self.to_snake_case(&method.name);
             let rust_params = self.transform_method_params(&method.params);
 
-            // Check if method mutates self (simple heuristic: contains self.x = )
             let needs_mut = method.body.as_ref()
                 .map(|b| b.contains("self.") && b.contains("="))
                 .unwrap_or(false);
-
             let self_param = if needs_mut { "&mut self" } else { "&self" };
 
             let sig = if method.ret_type == "void" {
-                format!("    {}fn {}({}{}) {{", vis, rust_name, self_param, rust_params)
+                format!("\n    {}fn {}({}{}) {{", vis, rust_name, self_param, rust_params)
             } else {
-                format!("    {}fn {}({}{}) -> {} {{", vis, rust_name, self_param, rust_params, method.ret_type)
+                format!("\n    {}fn {}({}{}) -> {} {{", vis, rust_name, self_param, rust_params, method.ret_type)
             };
 
             result.push_str(&sig);
 
-            // Add method body or placeholder
             if let Some(ref body) = method.body {
                 let body_content = body.trim_start_matches('{').trim_end_matches('}');
                 let transformed_body = self.transform_self_references(body_content);
@@ -716,10 +777,10 @@ impl Translator {
                 result.push_str("()");
             }
 
-            result.push_str("\n    }\n");
+            result.push_str("\n    }");
         }
 
-        result.push_str("}\n");
+        result.push_str("\n}\n");
         result
     }
 

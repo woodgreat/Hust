@@ -1,0 +1,30 @@
+// Interface test - V0.6
+
+interface Drawable {
+    public void draw();
+    public i32 getArea();
+}
+
+class Rectangle implements Drawable {
+    i32 width;
+    i32 height;
+    
+    public void draw() {
+        println!("Drawing rectangle");
+    }
+    
+    public i32 getArea() {
+        return self.width * self.height;
+    }
+}
+
+void main() {
+    Rectangle r;
+    r.width = 10;
+    r.height = 5;
+    
+    r.draw();
+    println!("Area: {}", r.getArea());
+    
+    println!("Interface test passed!");
+}
