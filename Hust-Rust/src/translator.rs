@@ -73,50 +73,55 @@ impl Translator {
         self.transpile(&source)
     }
 
-    /// Transpile source code (V0.5 with module support)
+    /// Transpile source code (V0.6 with class support)
     pub fn transpile(&self, source: &str) -> Result<String, TranspileError> {
         let mut output = source.to_string();
 
-        // V0.5 transform rules (order matters!):
-        // 1. Remove use statements (processed separately)
-        // 2. Function definitions with pub visibility
-        // 3. Multi-dimensional arrays
-        // 4. Fixed arrays
-        // 5. Dynamic arrays
-        // 6. C-style for loops
-        // 7. Variable declarations
-        // 8. if/while condition parentheses removal
+        // V0.6 transform rules (order matters!):
+        // 1. Interface definitions (before class to handle implements)
+        // 2. Class definitions (before functions to handle methods)
+        // 3. Remove use statements
+        // 4. Function definitions with visibility
+        // 5-12. Other transformations...
 
-        // Rule 1: Remove use statements (they're handled at module level)
+        // Rule 1: Transform interface definitions to traits
+        // interface Shape { public f64 area(); } -> trait Shape { fn area(&self) -> f64; }
+        output = self.transform_interface_definitions(&output)?;
+
+        // Rule 2: Transform class definitions
+        // class Point { i32 x; public i32 getX() { return self.x; } }
+        // -> struct Point { x: i32 } impl Point { fn get_x(&self) -> i32 { self.x } }
+        output = self.transform_class_definitions(&output)?;
+
+        // Rule 3: Remove use statements (they're handled at module level)
         output = self.remove_use_statements(&output)?;
 
-        // Rule 2: Function definition transform with pub visibility
-        // pub void func() -> pub fn func()
-        // void func() -> fn func() (private by default)
+        // Rule 4: Function definition transform with visibility
+        // public void func() -> pub fn func()
         output = self.transform_function_definitions(&output)?;
 
-        // Rule 3: Transform multi-dimensional array declaration
+        // Rule 5: Transform multi-dimensional array declaration
         output = self.transform_multi_array_decl(&output)?;
 
-        // Rule 4: Array declaration transform (fixed arrays)
+        // Rule 6: Array declaration transform (fixed arrays)
         output = self.transform_array_declarations(&output)?;
 
-        // Rule 5: Transform dynamic array declaration
+        // Rule 7: Transform dynamic array declaration
         output = self.transform_dynamic_array_decl(&output)?;
 
-        // Rule 6: Transform C-style for loops
+        // Rule 8: Transform C-style for loops
         output = self.transform_for_loop(&output)?;
 
-        // Rule 7: Variable declaration transform
+        // Rule 9: Variable declaration transform
         output = self.transform_variable_declarations(&output)?;
 
-        // Rule 8: Remove parentheses from if/while conditions
+        // Rule 10: Remove parentheses from if/while conditions
         output = self.remove_condition_parens(&output)?;
 
-        // Rule 9: Transform String initialization
+        // Rule 11: Transform String initialization
         output = self.transform_string_init(&output)?;
 
-        // Rule 10: Transform pass to ()
+        // Rule 12: Transform pass to ()
         output = self.transform_pass(&output)?;
 
         Ok(output)
@@ -398,6 +403,310 @@ impl Translator {
 
         Ok(all_code)
     }
+
+    /// V0.6: Transform interface definitions to Rust traits
+    /// interface Shape { public f64 area(); } -> trait Shape { fn area(&self) -> f64; }
+    fn transform_interface_definitions(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Match interface definition
+        // interface Name { method declarations }
+        let re = Regex::new(r"(?m)^\s*interface\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{([^}]+)\}")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let interface_name = &caps[1];
+            let body = &caps[2];
+
+            // Transform method declarations in interface
+            let trait_body = self.transform_interface_methods(body);
+
+            format!("trait {} {{{}}}\n", interface_name, trait_body)
+        });
+
+        Ok(result.to_string())
+    }
+
+    /// Transform interface method declarations to trait method signatures
+    fn transform_interface_methods(&self, body: &str) -> String {
+        use regex::Regex;
+
+        let mut result = Vec::new();
+
+        // Match method declarations: public ReturnType methodName(params);
+        let re = Regex::new(r"(?m)^\s*(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*;").unwrap();
+
+        for caps in re.captures_iter(body) {
+            let ret_type = &caps[2];
+            let method_name = &caps[3];
+            let params = &caps[4];
+
+            // Convert method name to snake_case
+            let rust_method = self.to_snake_case(method_name);
+
+            // Transform parameters
+            let rust_params = self.transform_method_params(params);
+
+            // Build signature
+            let sig = if ret_type == "void" {
+                format!("fn {}(&self{});", rust_method, rust_params)
+            } else {
+                format!("fn {}(&self{}) -> {};", rust_method, rust_params, ret_type)
+            };
+
+            result.push(sig);
+        }
+
+        if result.is_empty() {
+            String::new()
+        } else {
+            format!("\n    {}\n", result.join("\n    "))
+        }
+    }
+
+    /// V0.6: Transform class definitions to Rust struct + impl
+    fn transform_class_definitions(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Match class definition with optional extends and implements
+        // Note: This is a simplified version that matches class Name { ... }
+        // The body is matched non-greedily up to the first }
+        let re = Regex::new(r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+(\w+))?\s*(?:implements\s+([\w,\s]+))?\s*\{([\s\S]*?)\n\}")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let class_name = &caps[1];
+            let parent_class = caps.get(2).map(|m| m.as_str());
+            let interfaces = caps.get(3).map(|m| m.as_str());
+            let body = &caps[4];
+
+            // Parse class body into fields and methods
+            let (fields, methods) = self.parse_class_body(body);
+
+            // Generate struct
+            let struct_def = self.generate_struct(class_name, &fields, parent_class);
+
+            // Generate impl block
+            let impl_def = self.generate_impl(class_name, &methods, parent_class, interfaces);
+
+            format!("{}\n{}", struct_def, impl_def)
+        });
+
+        Ok(result.to_string())
+    }
+
+    /// Parse class body into fields and methods
+    fn parse_class_body(&self, body: &str) -> (Vec<ClassField>, Vec<ClassMethod>) {
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+
+        for line in body.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("//") {
+                continue;
+            }
+
+            // Check if it's a method (has { or ; at end, and has ())
+            if line.contains("(") && line.contains(")") {
+                // Method declaration
+                if let Some(method) = self.parse_method(line) {
+                    methods.push(method);
+                }
+            } else if line.contains(";") {
+                // Field declaration
+                if let Some(field) = self.parse_field(line) {
+                    fields.push(field);
+                }
+            }
+        }
+
+        (fields, methods)
+    }
+
+    /// Parse a field declaration
+    fn parse_field(&self, line: &str) -> Option<ClassField> {
+        // Pattern: [visibility] Type name;
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        let mut idx = 0;
+        let visibility = if parts.get(idx) == Some(&"public") {
+            idx += 1;
+            Visibility::Public
+        } else {
+            Visibility::Private
+        };
+
+        if parts.len() < idx + 2 {
+            return None;
+        }
+
+        let type_name = parts[idx];
+        let field_name = parts[idx + 1].trim_end_matches(";");
+
+        Some(ClassField {
+            name: field_name.to_string(),
+            type_name: type_name.to_string(),
+            visibility,
+        })
+    }
+
+    /// Parse a method declaration
+    fn parse_method(&self, line: &str) -> Option<ClassMethod> {
+        use regex::Regex;
+
+        // Pattern: [public] ReturnType name(params) [{ body }] [;]
+        let re = Regex::new(r"^\s*(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*(\{[^}]*\})?\s*;?").unwrap();
+
+        let caps = re.captures(line)?;
+
+        let is_public = caps.get(1).is_some();
+        let ret_type = caps[2].to_string();
+        let name = caps[3].to_string();
+        let params = caps[4].to_string();
+        let body = caps.get(5).map(|m| m.as_str().to_string());
+
+        Some(ClassMethod {
+            name,
+            ret_type,
+            params,
+            body,
+            visibility: if is_public { Visibility::Public } else { Visibility::Private },
+        })
+    }
+
+    /// Generate Rust struct from class fields
+    fn generate_struct(
+        &self,
+        class_name: &str,
+        fields: &[ClassField],
+        parent_class: Option<&str>,
+    ) -> String {
+        let mut result = format!("struct {} {{", class_name);
+
+        // If has parent, include parent as field
+        if let Some(parent) = parent_class {
+            result.push_str(format!("\n    {}: {},", self.to_snake_case(parent), parent).as_str());
+        }
+
+        // Add own fields
+        for field in fields {
+            let rust_field = self.to_snake_case(&field.name);
+            result.push_str(format!("\n    {}: {},", rust_field, field.type_name).as_str());
+        }
+
+        result.push_str("\n}\n");
+        result
+    }
+
+    /// Generate Rust impl block from class methods
+    fn generate_impl(
+        &self,
+        class_name: &str,
+        methods: &[ClassMethod],
+        parent_class: Option<&str>,
+        interfaces: Option<&str>,
+    ) -> String {
+        let mut result = format!("impl {}", class_name);
+
+        // Add trait implementations if implements interfaces
+        if let Some(ifs) = interfaces {
+            let if_names: Vec<&str> = ifs.split(',').map(|s| s.trim()).collect();
+            for if_name in if_names {
+                result.push_str(format!(" {} for {}", if_name, class_name).as_str());
+            }
+        }
+
+        result.push_str(" {\n");
+
+        // Generate methods
+        for method in methods {
+            let vis = match method.visibility {
+                Visibility::Public => "pub ",
+                Visibility::Private => "",
+            };
+
+            let rust_name = self.to_snake_case(&method.name);
+            let rust_params = self.transform_method_params(&method.params);
+
+            let sig = if method.ret_type == "void" {
+                format!("    {}fn {}(&self{}) {{", vis, rust_name, rust_params)
+            } else {
+                format!("    {}fn {}(&self{}) -> {} {{", vis, rust_name, rust_params, method.ret_type)
+            };
+
+            result.push_str(&sig);
+
+            // Add method body or placeholder
+            if let Some(ref body) = method.body {
+                let body_content = body.trim_start_matches('{').trim_end_matches('}');
+                let transformed_body = self.transform_self_references(body_content);
+                result.push_str(&transformed_body);
+            } else {
+                result.push_str("()");
+            }
+
+            result.push_str("\n    }\n");
+        }
+
+        result.push_str("}\n");
+        result
+    }
+
+    /// Transform method parameters (add comma before self params)
+    fn transform_method_params(&self, params: &str) -> String {
+        if params.trim().is_empty() {
+            String::new()
+        } else {
+            format!(", {}", self.transform_params(params))
+        }
+    }
+
+    /// Transform self.x to self.x (Rust style)
+    fn transform_self_references(&self, body: &str) -> String {
+        body.to_string()
+    }
+
+    /// Convert camelCase to snake_case
+    fn to_snake_case(&self, name: &str) -> String {
+        let mut result = String::new();
+        let chars: Vec<char> = name.chars().collect();
+
+        for (i, c) in chars.iter().enumerate() {
+            if c.is_uppercase() && i > 0 {
+                result.push('_');
+                result.push(c.to_ascii_lowercase());
+            } else {
+                result.push(c.to_ascii_lowercase());
+            }
+        }
+
+        result
+    }
+}
+
+/// Class field representation
+#[derive(Debug)]
+struct ClassField {
+    name: String,
+    type_name: String,
+    visibility: Visibility,
+}
+
+/// Class method representation
+#[derive(Debug)]
+struct ClassMethod {
+    name: String,
+    ret_type: String,
+    params: String,
+    body: Option<String>,
+    visibility: Visibility,
+}
+
+/// Visibility enum
+#[derive(Debug)]
+enum Visibility {
+    Public,
+    Private,
 }
 
 /// Main entry function

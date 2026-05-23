@@ -1,0 +1,15 @@
+// Simple class test - V0.6
+
+class Point {
+    i32 x;
+    i32 y;
+}
+
+void main() {
+    Point p;
+    p.x = 10;
+    p.y = 20;
+    
+    println!("Point: ({}, {})", p.x, p.y);
+    println!("Simple class test passed!");
+}
