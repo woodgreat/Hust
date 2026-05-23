@@ -75,7 +75,11 @@ impl Translator {
         // for (i32 i = 0; i < n; i = i + 1) -> for i in 0..n
         output = self.transform_for_loop(&output)?;
 
-        // Rule 3: Variable declaration transform (not inside for loops)
+        // Rule 3: Array declaration transform
+        // i32[5] arr = {1,2,3,4,5}; -> let mut arr: [i32; 5] = [1,2,3,4,5];
+        output = self.transform_array_declarations(&output)?;
+
+        // Rule 4: Variable declaration transform (not inside for loops)
         output = self.transform_variable_declarations(&output)?;
 
         // Rule 4: Remove parentheses from if/while conditions (Rust style)
@@ -91,7 +95,33 @@ impl Translator {
         // pass; -> ();
         output = self.transform_pass(&output)?;
 
+        // Rule 7: Transform array .len() method
+        // arr.len() -> arr.len()
+        // (Rust has same syntax, but we need to ensure it's recognized)
+        // No transformation needed for now
+
         Ok(output)
+    }
+
+    /// V0.4: Transform array declarations
+    /// i32[5] arr = {1,2,3,4,5}; -> let mut arr: [i32; 5] = [1,2,3,4,5];
+    fn transform_array_declarations(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Match: type[size] name = {elements};
+        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([^}]+)\}")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let size = &caps[2];
+            let var_name = &caps[3];
+            let elements = &caps[4];
+            // Convert {1, 2, 3} to [1, 2, 3]
+            format!("let mut {}: [{}; {}] = [{}];", var_name, type_name, size, elements)
+        });
+
+        Ok(result.to_string())
     }
 
     /// V0.1: Transform variable declarations
