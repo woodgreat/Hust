@@ -1,0 +1,32 @@
+// Inheritance test - V0.6
+
+class Animal {
+    i32 age;
+    
+    public void eat() {
+        println!("Animal eating");
+    }
+    
+    public i32 getAge() {
+        return self.age;
+    }
+}
+
+class Dog extends Animal {
+    String name;
+    
+    public void bark() {
+        println!("Woof!");
+    }
+}
+
+void main() {
+    Dog d;
+    d.age = 5;
+    
+    d.eat();
+    println!("Age: {}", d.getAge());
+    d.bark();
+    
+    println!("Inheritance test passed!");
+}

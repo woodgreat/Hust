@@ -532,9 +532,8 @@ impl Translator {
         use regex::Regex;
 
         // Match class definition with optional extends and implements
-        // Note: This is a simplified version that matches class Name { ... }
-        // The body is matched non-greedily up to the first }
-        let re = Regex::new(r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+(\w+))?\s*(?:implements\s+([\w,\s]+))?\s*\{([\s\S]*?)\n\}")
+        // The body is matched up to a line containing only }
+        let re = Regex::new(r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+(\w+))?\s*(?:implements\s+([\w,\s]+))?\s*\{([\s\S]*?)^\}")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
@@ -559,30 +558,36 @@ impl Translator {
     }
 
     /// Parse class body into fields and methods
+    /// First extracts all methods, then treats remaining lines as fields
     fn parse_class_body(&self, body: &str) -> (Vec<ClassField>, Vec<ClassMethod>) {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
+        let mut remaining = body.to_string();
 
-        for line in body.lines() {
+        // Extract all methods first (supports multi-line with (?s))
+        use regex::Regex;
+        let method_re = Regex::new(r"(?s)(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*\{[^{}]*\}").unwrap();
+
+        for caps in method_re.captures_iter(body) {
+            let full_match = caps.get(0).unwrap();
+            let method_text = full_match.as_str();
+
+            if let Some(method) = self.parse_method(method_text) {
+                methods.push(method);
+                // Remove this method from remaining text
+                remaining = remaining.replace(method_text, "");
+            }
+        }
+
+        // Parse remaining lines as fields
+        for line in remaining.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with("//") {
                 continue;
             }
 
-            // Method: has ( and ) AND has { (method body start)
-            // Field: has ; but no (
-            if line.contains("(") && line.contains(")") && line.contains("{") {
-                // Method declaration with inline body
-                if let Some(method) = self.parse_method(line) {
-                    methods.push(method);
-                }
-            } else if line.contains("(") && line.contains(")") && line.ends_with(";") {
-                // Method declaration without body (abstract/interface style)
-                if let Some(method) = self.parse_method(line) {
-                    methods.push(method);
-                }
-            } else if line.contains(";") && !line.contains("(") {
-                // Field declaration: Type name;
+            // Field declaration: Type name;
+            if line.contains(";") && !line.contains("(") {
                 if let Some(field) = self.parse_field(line) {
                     fields.push(field);
                 }
@@ -619,14 +624,15 @@ impl Translator {
         })
     }
 
-    /// Parse a method declaration
-    fn parse_method(&self, line: &str) -> Option<ClassMethod> {
+    /// Parse a method declaration (supports multi-line with (?s))
+    fn parse_method(&self, text: &str) -> Option<ClassMethod> {
         use regex::Regex;
 
-        // Pattern: [public] ReturnType name(params) [{ body }] [;]
-        let re = Regex::new(r"^\s*(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*(\{[^}]*\})?\s*;?").unwrap();
+        // Pattern: [public] ReturnType name(params) [{ body }]
+        // (?s) makes . match newlines
+        let re = Regex::new(r"(?s)^\s*(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*(\{[^{}]*\})?").unwrap();
 
-        let caps = re.captures(line)?;
+        let caps = re.captures(text)?;
 
         let is_public = caps.get(1).is_some();
         let ret_type = caps[2].to_string();
