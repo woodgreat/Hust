@@ -17,8 +17,8 @@ use hust_rust::{Translator, ProjectConfig, ModuleResolver};
 /// Hust Language Transpiler - Rust Adapter
 #[derive(Parser)]
 #[command(
-    author,
-    about,
+    name = "hust",
+    about = "Hust language transpiler for Rust",
     version = get_hust_version(),
 )]
 struct Cli {

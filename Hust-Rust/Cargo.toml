@@ -2,7 +2,7 @@
 name = "hust-rust"
 version = "0.1.6+20260523"
 edition = "2021"
-description = "Hust language adapter for Rust - 转译器 Rust 适配版本"
+description = "Hust language transpiler for Rust"
 authors = ["wood"]
 license = "MIT"
 repository = "https://github.com/woodgreat/Hust"
