@@ -61,44 +61,51 @@ impl Translator {
     pub fn transpile(&self, source: &str) -> Result<String, TranspileError> {
         let mut output = source.to_string();
 
-        // V0.2/V0.3 transform rules (order matters!):
+        // V0.4 transform rules (order matters!):
         // 1. Function definitions FIRST (before variable declarations)
-        // 2. C-style for loops
-        // 3. Variable declarations
-        // 4. if/while condition parentheses removal
+        // 2. Multi-dimensional arrays (before for loops to avoid { } conflicts)
+        // 3. Fixed arrays
+        // 4. Dynamic arrays
+        // 5. C-style for loops
+        // 6. Variable declarations
+        // 7. if/while condition parentheses removal
 
         // Rule 1: Function definition transform FIRST
         // This handles return types and parameter types
         output = self.transform_function_definitions(&output)?;
 
-        // Rule 2: Transform C-style for loops to Rust iterator style
-        // for (i32 i = 0; i < n; i = i + 1) -> for i in 0..n
-        output = self.transform_for_loop(&output)?;
+        // Rule 2: Transform multi-dimensional array declaration FIRST
+        // i32[3][4] matrix = {{...},{...}}; -> let mut matrix: [[i32; 4]; 3] = [[...],[...]];
+        // Must be before for loops to avoid { } syntax conflicts
+        output = self.transform_multi_array_decl(&output)?;
 
-        // Rule 3: Array declaration transform
+        // Rule 3: Array declaration transform (fixed arrays)
         // i32[5] arr = {1,2,3,4,5}; -> let mut arr: [i32; 5] = [1,2,3,4,5];
         output = self.transform_array_declarations(&output)?;
 
-        // Rule 4: Variable declaration transform (not inside for loops)
+        // Rule 4: Transform dynamic array declaration
+        // i32[] arr; -> let mut arr: Vec<i32> = Vec::new();
+        output = self.transform_dynamic_array_decl(&output)?;
+
+        // Rule 5: Transform C-style for loops to Rust iterator style
+        // for (i32 i = 0; i < n; i = i + 1) -> for i in 0..n
+        output = self.transform_for_loop(&output)?;
+
+        // Rule 6: Variable declaration transform (not inside for loops)
         output = self.transform_variable_declarations(&output)?;
 
-        // Rule 4: Remove parentheses from if/while conditions (Rust style)
+        // Rule 7: Remove parentheses from if/while conditions (Rust style)
         // if (x > 5) -> if x > 5
         // while (x > 5) -> while x > 5
         output = self.remove_condition_parens(&output)?;
 
-        // Rule 5: Transform String initialization
+        // Rule 8: Transform String initialization
         // String s = "hello"; -> let mut s: String = "hello".to_string();
         output = self.transform_string_init(&output)?;
 
-        // Rule 6: Transform pass to ()
+        // Rule 9: Transform pass to ()
         // pass; -> ();
         output = self.transform_pass(&output)?;
-
-        // Rule 7: Transform array .len() method
-        // arr.len() -> arr.len()
-        // (Rust has same syntax, but we need to ensure it's recognized)
-        // No transformation needed for now
 
         Ok(output)
     }
@@ -212,15 +219,15 @@ impl Translator {
         use regex::Regex;
 
         // Pattern: for (type var = start; var < end; var = var + 1)
-        // Simplified: only handles i = i + 1 increment, no backreferences
+        // Handles both numeric literals and expressions like dynamic.len()
         let re = Regex::new(
-            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(\d+)\s*;\s*[a-zA-Z_][a-zA-Z0-9_]*\s*<\s*(\d+)\s*;\s*[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\+\s*1\s*\)"
+            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(\d+)\s*;\s*[a-zA-Z_][a-zA-Z0-9_]*\s*<\s*([^;]+)\s*;\s*[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\+\s*1\s*\)"
         ).map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let var_name = &caps[2];
             let start = &caps[3];
-            let end = &caps[4];
+            let end = &caps[4].trim();
             format!("for {} in {}..{}", var_name, start, end)
         });
 
@@ -279,6 +286,49 @@ impl Translator {
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, "();");
+
+        Ok(result.to_string())
+    }
+
+    /// V0.4: Transform dynamic array declaration
+    /// i32[] arr; -> let mut arr: Vec<i32> = Vec::new();
+    fn transform_dynamic_array_decl(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Match: type[] name;
+        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let var_name = &caps[2];
+            format!("let mut {}: Vec<{}> = Vec::new();", var_name, type_name)
+        });
+
+        Ok(result.to_string())
+    }
+
+    /// V0.4: Transform multi-dimensional array declaration
+    /// i32[3][4] matrix = {{1,2,3,4},{5,6,7,8},{9,10,11,12}};
+    /// -> let mut matrix: [[i32; 4]; 3] = [[1,2,3,4],[5,6,7,8],[9,10,11,12]];
+    fn transform_multi_array_decl(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Match: type[size1][size2] name = { {...}, {...} };
+        // Use multiline mode and match nested braces by finding the closing brace
+        let re = Regex::new(r"(?m)\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d+)\]\[(\d+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([\s\S]*?)\}\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let size1 = &caps[2];
+            let size2 = &caps[3];
+            let var_name = &caps[4];
+            let elements = &caps[5];
+            // Convert {{...},{...}} to [[...],[...]]
+            let rust_elements = elements.replace("{", "[").replace("}", "]").replace(";", "");
+            format!("let mut {}: [[{}; {}]; {}] = [{}];", var_name, type_name, size2, size1, rust_elements.trim())
+        });
 
         Ok(result.to_string())
     }
