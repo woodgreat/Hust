@@ -195,7 +195,7 @@ opt-level = 0
 
 [profile.release]
 opt-level = 3
-"#, config.package.name, config.package.version);
+"#, config.package.name, config.package.cargo_version());
             std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml)?;
 
             // 8. Call cargo build with output to dist

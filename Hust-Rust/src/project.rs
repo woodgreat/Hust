@@ -36,9 +36,33 @@ pub struct ProjectConfig {
 #[derive(Debug, Clone, Default)]
 pub struct PackageConfig {
     pub name: String,
-    pub version: String,
+    pub version: String, // Wood format: 0.1.0.20260523 (4 digits)
     pub author: Option<String>,
     pub entry: String, // Entry file, default: main.hust
+}
+
+impl PackageConfig {
+    /// Get version in Wood format (4-digit with dot)
+    /// Converts "0.1.0" -> "0.1.0.0" or keeps "0.1.0.20260523"
+    pub fn wood_version(&self) -> String {
+        let parts: Vec<&str> = self.version.split('.').collect();
+        match parts.len() {
+            4 => self.version.clone(), // Already 4 digits
+            3 => format!("{}.0", self.version), // Add 4th digit
+            _ => "0.1.0.0".to_string(), // Default fallback
+        }
+    }
+
+    /// Get version for Cargo.toml (SemVer compatible)
+    /// Converts "0.1.0.20260523" -> "0.1.0+20260523"
+    pub fn cargo_version(&self) -> String {
+        let parts: Vec<&str> = self.version.split('.').collect();
+        if parts.len() == 4 {
+            format!("{}.{}.{}+{}", parts[0], parts[1], parts[2], parts[3])
+        } else {
+            self.version.clone()
+        }
+    }
 }
 
 impl ProjectConfig {
