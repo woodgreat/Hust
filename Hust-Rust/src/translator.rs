@@ -1,8 +1,11 @@
 //! Transpiler Core Module
 //! Transpiles Hust code to Rust code
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use thiserror::Error;
+
+use crate::project::Module;
 
 /// Transpile Error
 #[derive(Error, Debug)]
@@ -29,6 +32,19 @@ pub struct TranspileOptions {
     pub debug: bool,
     /// Whether to enable all plugins
     pub enable_all_plugins: bool,
+    /// Module context for multi-file compilation
+    pub module_context: Option<ModuleContext>,
+}
+
+/// Module context for transpilation
+#[derive(Debug, Clone, Default)]
+pub struct ModuleContext {
+    /// Current module name
+    pub current_module: String,
+    /// Imported module names
+    pub imports: Vec<String>,
+    /// Public functions in this module (for re-export)
+    pub public_functions: HashSet<String>,
 }
 
 /// Transpiler
@@ -57,57 +73,66 @@ impl Translator {
         self.transpile(&source)
     }
 
-    /// Transpile source code (V0.2 with control flow)
+    /// Transpile source code (V0.5 with module support)
     pub fn transpile(&self, source: &str) -> Result<String, TranspileError> {
         let mut output = source.to_string();
 
-        // V0.4 transform rules (order matters!):
-        // 1. Function definitions FIRST (before variable declarations)
-        // 2. Multi-dimensional arrays (before for loops to avoid { } conflicts)
-        // 3. Fixed arrays
-        // 4. Dynamic arrays
-        // 5. C-style for loops
-        // 6. Variable declarations
-        // 7. if/while condition parentheses removal
+        // V0.5 transform rules (order matters!):
+        // 1. Remove use statements (processed separately)
+        // 2. Function definitions with pub visibility
+        // 3. Multi-dimensional arrays
+        // 4. Fixed arrays
+        // 5. Dynamic arrays
+        // 6. C-style for loops
+        // 7. Variable declarations
+        // 8. if/while condition parentheses removal
 
-        // Rule 1: Function definition transform FIRST
-        // This handles return types and parameter types
+        // Rule 1: Remove use statements (they're handled at module level)
+        output = self.remove_use_statements(&output)?;
+
+        // Rule 2: Function definition transform with pub visibility
+        // pub void func() -> pub fn func()
+        // void func() -> fn func() (private by default)
         output = self.transform_function_definitions(&output)?;
 
-        // Rule 2: Transform multi-dimensional array declaration FIRST
-        // i32[3][4] matrix = {{...},{...}}; -> let mut matrix: [[i32; 4]; 3] = [[...],[...]];
-        // Must be before for loops to avoid { } syntax conflicts
+        // Rule 3: Transform multi-dimensional array declaration
         output = self.transform_multi_array_decl(&output)?;
 
-        // Rule 3: Array declaration transform (fixed arrays)
-        // i32[5] arr = {1,2,3,4,5}; -> let mut arr: [i32; 5] = [1,2,3,4,5];
+        // Rule 4: Array declaration transform (fixed arrays)
         output = self.transform_array_declarations(&output)?;
 
-        // Rule 4: Transform dynamic array declaration
-        // i32[] arr; -> let mut arr: Vec<i32> = Vec::new();
+        // Rule 5: Transform dynamic array declaration
         output = self.transform_dynamic_array_decl(&output)?;
 
-        // Rule 5: Transform C-style for loops to Rust iterator style
-        // for (i32 i = 0; i < n; i = i + 1) -> for i in 0..n
+        // Rule 6: Transform C-style for loops
         output = self.transform_for_loop(&output)?;
 
-        // Rule 6: Variable declaration transform (not inside for loops)
+        // Rule 7: Variable declaration transform
         output = self.transform_variable_declarations(&output)?;
 
-        // Rule 7: Remove parentheses from if/while conditions (Rust style)
-        // if (x > 5) -> if x > 5
-        // while (x > 5) -> while x > 5
+        // Rule 8: Remove parentheses from if/while conditions
         output = self.remove_condition_parens(&output)?;
 
-        // Rule 8: Transform String initialization
-        // String s = "hello"; -> let mut s: String = "hello".to_string();
+        // Rule 9: Transform String initialization
         output = self.transform_string_init(&output)?;
 
-        // Rule 9: Transform pass to ()
-        // pass; -> ();
+        // Rule 10: Transform pass to ()
         output = self.transform_pass(&output)?;
 
         Ok(output)
+    }
+
+    /// V0.5: Remove use statements (handled at module level)
+    fn remove_use_statements(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Match: use module_name;
+        let re = Regex::new(r"(?m)^\s*use\s+[a-zA-Z_][a-zA-Z0-9_]*\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, "");
+
+        Ok(result.to_string())
     }
 
     /// V0.4: Transform array declarations
@@ -153,30 +178,34 @@ impl Translator {
         Ok(result.to_string())
     }
 
-    /// V0.3: Transform function definitions with return types
+    /// V0.5: Transform function definitions with return types and visibility
     /// void main() -> fn main()
-    /// i32 add(i32 a, i32 b) -> fn add(a: i32, b: i32) -> i32
+    /// pub i32 add(i32 a, i32 b) -> pub fn add(a: i32, b: i32) -> i32
     fn transform_function_definitions(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Pattern: type name(params) { body }
-        // Capture return type, name, and parameters
-        let re = Regex::new(r"\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
+        // Pattern: [pub] type name(params) { body }
+        // Capture optional pub, return type, name, and parameters
+        let re = Regex::new(r"(?m)^\s*(pub\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
-            let ret_type = &caps[1];
-            let func_name = &caps[2];
-            let params = &caps[3];
-            
+            let is_pub = caps.get(1).is_some();
+            let ret_type = &caps[2];
+            let func_name = &caps[3];
+            let params = &caps[4];
+
             // Transform parameters: "i32 a, i32 b" -> "a: i32, b: i32"
             let transformed_params = self.transform_params(params);
-            
+
+            // Build visibility prefix
+            let vis = if is_pub { "pub " } else { "" };
+
             // Build function signature
             if ret_type == "void" {
-                format!("fn {}({}) {{", func_name, transformed_params)
+                format!("{}fn {}({}) {{", vis, func_name, transformed_params)
             } else {
-                format!("fn {}({}) -> {} {{", func_name, transformed_params, ret_type)
+                format!("{}fn {}({}) -> {} {{", vis, func_name, transformed_params, ret_type)
             }
         });
 
@@ -338,6 +367,36 @@ impl Translator {
         let result = self.transpile_file(input_path)?;
         std::fs::write(output_path, result)?;
         Ok(())
+    }
+
+    /// V0.5: Transpile multiple modules into a single Rust file
+    /// Merges all modules, handling imports and visibility
+    pub fn transpile_modules(&self,
+        modules: &[Module],
+        entry_module: &Module,
+    ) -> Result<String, TranspileError> {
+        let mut all_code = String::new();
+
+        // Add a comment header
+        all_code.push_str("// Generated by Hust transpiler\n");
+        all_code.push_str("// Multi-module compilation\n\n");
+
+        // Transpile each module (except entry) as a separate section
+        for module in modules {
+            if module.name != entry_module.name {
+                all_code.push_str(&format!("// Module: {}\n", module.name));
+                let transpiled = self.transpile(&module.source)?;
+                all_code.push_str(&transpiled);
+                all_code.push_str("\n\n");
+            }
+        }
+
+        // Transpile entry module last (main function)
+        all_code.push_str(&format!("// Entry module: {}\n", entry_module.name));
+        let entry_transpiled = self.transpile(&entry_module.source)?;
+        all_code.push_str(&entry_transpiled);
+
+        Ok(all_code)
     }
 }
 

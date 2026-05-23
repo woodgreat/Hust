@@ -1,11 +1,13 @@
 //! Hust-Rust Library Core
 //! Provides transpiler functionality and plugin system
 
+pub mod project;
 pub mod translator;
 pub mod plugins;
 
 // Re-exports
-pub use translator::{Translator, TranspileOptions, TranspileError};
+pub use project::{ProjectConfig, Module, ModuleResolver, ProjectError};
+pub use translator::{Translator, TranspileOptions, ModuleContext, TranspileError};
 pub use plugins::{Plugin, PluginError, PluginManager};
 
 // Main error type

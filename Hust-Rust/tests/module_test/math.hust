@@ -1,0 +1,18 @@
+// Math module - provides basic math functions
+
+pub i32 add(i32 a, i32 b) {
+    return a + b;
+}
+
+pub i32 subtract(i32 a, i32 b) {
+    return a - b;
+}
+
+pub i32 multiply(i32 a, i32 b) {
+    return a * b;
+}
+
+// Private function - not exported
+i32 internal_helper(i32 x) {
+    return x * 2;
+}

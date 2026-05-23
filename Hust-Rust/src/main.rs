@@ -12,7 +12,7 @@ use std::process::Command;
 use clap::{Parser, Subcommand};
 use anyhow::{Result, Context};
 
-use hust_rust::Translator;
+use hust_rust::{Translator, ProjectConfig, ModuleResolver};
 
 /// Hust Language Transpiler - Rust Adapter
 #[derive(Parser)]
@@ -140,18 +140,33 @@ opt-level = 3
         Commands::Build { project_dir } => {
             println!("[Hust] Building project: {:?}", project_dir);
 
-            // 1. Find main.hust in project directory
-            let main_file = project_dir.join("main.hust");
-            if !main_file.exists() {
-                anyhow::bail!("main.hust not found in project directory");
+            // 1. Load project configuration
+            let config = ProjectConfig::load(&project_dir)
+                .context("Failed to load project configuration")?;
+
+            // 2. Find entry file
+            let entry_file = project_dir.join(&config.package.entry);
+            if !entry_file.exists() {
+                anyhow::bail!("Entry file '{}' not found in project directory", config.package.entry);
             }
 
-            // 2. Transpile Hust -> Rust
-            let translator = Translator::default();
-            let rust_code = translator.transpile_file(&main_file)
-                .context("Transpilation failed")?;
+            // 3. Resolve all module dependencies
+            println!("[Hust] Resolving modules...");
+            let mut resolver = ModuleResolver::new();
+            let modules = resolver.resolve(&entry_file,&config,&project_dir
+            ).context("Failed to resolve module dependencies")?;
 
-            // 3. Create build directory relative to hust.exe
+            println!("[Hust] Found {} module(s)", modules.len());
+
+            // 4. Transpile all modules into single Rust file
+            let translator = Translator::default();
+            let entry_module = modules.last()
+                .context("No entry module found")?;
+            let rust_code = translator.transpile_modules(&modules,
+                entry_module
+            ).context("Transpilation failed")?;
+
+            // 5. Create build directory relative to hust.exe
             let exe_dir = std::env::current_exe()?
                 .parent()
                 .context("Failed to get exe directory")?
@@ -162,20 +177,17 @@ opt-level = 3
             std::fs::create_dir_all(&temp_dir)?;
             std::fs::create_dir_all(&dist_dir)?;
 
-            // 4. Create src directory and write transpiled Rust code
+            // 6. Create src directory and write transpiled Rust code
             let src_dir = temp_dir.join("src");
             std::fs::create_dir_all(&src_dir)?;
             let rs_file = src_dir.join("main.rs");
             std::fs::write(&rs_file, &rust_code)
                 .context("Failed to write temp file")?;
 
-            // 5. Create Cargo.toml with source file name as package name
-            let src_stem = main_file.file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("main");
+            // 7. Create Cargo.toml with project name
             let cargo_toml = format!(r#"[package]
 name = "{}"
-version = "0.1.0"
+version = "{}"
 edition = "2021"
 
 [profile.dev]
@@ -183,10 +195,10 @@ opt-level = 0
 
 [profile.release]
 opt-level = 3
-"#, src_stem);
+"#, config.package.name, config.package.version);
             std::fs::write(temp_dir.join("Cargo.toml"), cargo_toml)?;
 
-            // 6. Call cargo build with output to dist
+            // 8. Call cargo build with output to dist
             println!("[Hust] Compiling...");
             let status = Command::new("cargo")
                 .arg("build")
@@ -201,14 +213,11 @@ opt-level = 3
                 anyhow::bail!("Compilation failed");
             }
 
-            // 7. Copy executable to project directory with same name as source file
-            let src_stem = main_file.file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("main");
+            // 9. Copy executable to project directory
             let exe_name = if cfg!(windows) {
-                format!("{}.exe", src_stem)
+                format!("{}.exe", config.package.name)
             } else {
-                src_stem.to_string()
+                config.package.name.clone()
             };
             let exe_path = dist_dir.join("release").join(&exe_name);
             let output_exe = project_dir.join(&exe_name);

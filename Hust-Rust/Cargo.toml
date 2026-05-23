@@ -1,6 +1,6 @@
 [package]
 name = "hust-rust"
-version = "0.1.4+20260523"
+version = "0.1.5+20260523"
 edition = "2021"
 description = "Hust language adapter for Rust - 转译器 Rust 适配版本"
 authors = ["wood"]
