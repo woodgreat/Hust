@@ -124,7 +124,70 @@ impl Translator {
         // Rule 12: Transform pass to ()
         output = self.transform_pass(&output)?;
 
+        // Rule 13: Transform class instantiation
+        // ClassName var; -> let mut var: ClassName = ClassName { ... };
+        output = self.transform_class_instantiation(&output)?;
+
+        // Rule 14: Transform method calls from camelCase to snake_case
+        // obj.methodName() -> obj.method_name()
+        output = self.transform_method_calls(&output)?;
+
         Ok(output)
+    }
+
+    /// V0.6: Transform method calls from camelCase to snake_case
+    fn transform_method_calls(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Pattern: .methodName( -> .method_name(
+        let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let method_name = &caps[1];
+            let rust_method = self.to_snake_case(method_name);
+            format!(".{}(", rust_method)
+        });
+
+        Ok(result.to_string())
+    }
+
+    /// V0.6: Transform class instantiation
+    /// ClassName var; -> let mut var: ClassName = ClassName { field: default };
+    fn transform_class_instantiation(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Pattern: ClassName var;
+        // Match capitalized word followed by variable name
+        let re = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let class_name = &caps[1];
+            let var_name = &caps[2];
+
+            // Check if it looks like a class name (starts with uppercase)
+            // and not a primitive type
+            if self.is_primitive_type(class_name) {
+                // Keep as-is for primitive types
+                format!("{} {};", class_name, var_name)
+            } else {
+                // Transform to Rust struct instantiation with default values
+                // For now, use Default::default() - requires #[derive(Default)]
+                format!("let mut {}: {} = {}::default();", var_name, class_name, class_name)
+            }
+        });
+
+        Ok(result.to_string())
+    }
+
+    /// Check if a type name is a primitive type
+    fn is_primitive_type(&self, type_name: &str) -> bool {
+        matches!(type_name,
+            "i8" | "i16" | "i32" | "i64" |
+            "u8" | "u16" | "u32" | "u64" |
+            "f32" | "f64" | "bool" | "char" | "String"
+        )
     }
 
     /// V0.5: Remove use statements (handled at module level)
@@ -581,7 +644,8 @@ impl Translator {
         fields: &[ClassField],
         parent_class: Option<&str>,
     ) -> String {
-        let mut result = format!("struct {} {{", class_name);
+        // Add derive macros for Default
+        let mut result = format!("#[derive(Default)]\nstruct {} {{", class_name);
 
         // If has parent, include parent as field
         if let Some(parent) = parent_class {
@@ -628,10 +692,17 @@ impl Translator {
             let rust_name = self.to_snake_case(&method.name);
             let rust_params = self.transform_method_params(&method.params);
 
+            // Check if method mutates self (simple heuristic: contains self.x = )
+            let needs_mut = method.body.as_ref()
+                .map(|b| b.contains("self.") && b.contains("="))
+                .unwrap_or(false);
+
+            let self_param = if needs_mut { "&mut self" } else { "&self" };
+
             let sig = if method.ret_type == "void" {
-                format!("    {}fn {}(&self{}) {{", vis, rust_name, rust_params)
+                format!("    {}fn {}({}{}) {{", vis, rust_name, self_param, rust_params)
             } else {
-                format!("    {}fn {}(&self{}) -> {} {{", vis, rust_name, rust_params, method.ret_type)
+                format!("    {}fn {}({}{}) -> {} {{", vis, rust_name, self_param, rust_params, method.ret_type)
             };
 
             result.push_str(&sig);
@@ -661,9 +732,23 @@ impl Translator {
         }
     }
 
-    /// Transform self.x to self.x (Rust style)
+    /// Transform method body content
+    /// - self.x -> self.x
+    /// - method calls: obj.methodName() -> obj.method_name()
     fn transform_self_references(&self, body: &str) -> String {
-        body.to_string()
+        let mut result = body.to_string();
+
+        // Transform method calls from camelCase to snake_case
+        // Pattern: .methodName( -> .method_name(
+        use regex::Regex;
+        let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(").unwrap();
+        result = re.replace_all(&result, |caps: &regex::Captures| {
+            let method_name = &caps[1];
+            let rust_method = self.to_snake_case(method_name);
+            format!(".{}(", rust_method)
+        }).to_string();
+
+        result
     }
 
     /// Convert camelCase to snake_case
