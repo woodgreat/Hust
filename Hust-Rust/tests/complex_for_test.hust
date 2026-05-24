@@ -1,0 +1,25 @@
+// Test complex for loop conditions
+void main() {
+    i16[4] testerNumber = {2, 17, 25, 97};
+
+    for (i16 i = 0; i < 4; i++) {
+        println!("{} is {}", testerNumber[i], isPrime(testerNumber[i]));
+    }
+}
+
+bool isPrime(i16 n) {
+    if(n <= 1) {
+        return false;
+    }
+
+    if(n == 2) {
+        return true;
+    }
+
+    for (i16 i = 2; (i*i <= n); i = i + 1) {
+        if (n % i == 0) {
+            return false;
+        }
+    }
+    return true;
+}

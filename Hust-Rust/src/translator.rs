@@ -109,11 +109,11 @@ impl Translator {
         // Rule 7: Transform dynamic array declaration
         output = self.transform_dynamic_array_decl(&output)?;
 
-        // Rule 8: Variable declaration transform (skip for loop vars)
-        output = self.transform_variable_declarations(&output)?;
-
-        // Rule 9: Transform C-style for loops
+        // Rule 8: Transform C-style for loops (MUST run BEFORE variable declarations)
         output = self.transform_for_loop(&output)?;
+
+        // Rule 9: Variable declaration transform
+        output = self.transform_variable_declarations(&output)?;
 
         // Rule 10: Remove parentheses from if/while conditions
         output = self.remove_condition_parens(&output)?;
@@ -368,8 +368,9 @@ impl Translator {
         let mut result = source.to_string();
 
         // Pattern for C-style for loops: for (type var = init; condition; update) {
+        // Use [^;]+ for init and condition to handle any content including parens
         let for_re = Regex::new(
-            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^)]+)\s*;\s*([^)]+)\)\s*\{"
+            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^;]+)\s*;\s*([^)]+)\)\s*\{"
         ).map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         // First pass: normalize i++ and i-- to i = i + 1
@@ -391,32 +392,51 @@ impl Translator {
 
             let full_match = caps.get(0).unwrap();
             let var_name = &caps[2];
-            let full_init = caps[3].trim();  // "i32 i = 0"
-            let condition = caps[4].trim();   // "i < 4"
+            let full_init = caps[3].trim();  // "i16 i = 0"
+            let condition = caps[4].trim();   // "i < 4" or "(i*i <= n)"
             let _update = caps[5].trim();      // "i = i + 1"
 
             let start_pos = full_match.start();
             let end_pos = full_match.end();
 
-            // Parse: extract the value from "i32 i = 0" -> "0"
-            let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
-            
-            // Parse condition: "i < 4" -> (op, limit) = ("<", "4")
-            let (op, limit) = self.parse_condition(condition);
-            
-            // Determine if inclusive
-            let inclusive = op == "<=" || op == ">=";
-            
-            // Build Rust for loop: "for var in start..end"
-            // For i < 4: for i in 0..4
-            // For i <= 4: for i in 0..=4
-            let end_marker = if inclusive { "=" } else { "" };
-            let rust_for = format!("for {} in {}..{}{}{{", var_name, init_value, limit, end_marker);
+            // Check if condition contains complex expression (with parentheses or operators)
+            // If so, we can't use range-based for, fall back to while loop
+            let has_complex_condition = condition.contains('(') || condition.contains('*') || 
+                                        condition.contains('/') || !condition.trim().chars().all(|c| c.is_alphanumeric() || c == '<' || c == '>' || c == '=' || c == ' ');
 
-            let before = &result[..start_pos];
-            let after = &result[end_pos..];  // Skip the opening {
-            
-            result = format!("{}{}{}", before, rust_for, after);
+            if has_complex_condition {
+                // Fall back to while loop for complex conditions like (i*i <= n)
+                // Parse: extract the value from "i16 i = 0" -> "0"
+                let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
+                
+                // Clean the condition by removing outer parentheses if present
+                let clean_condition = condition.trim().trim_start_matches('(').trim_end_matches(')').trim();
+                
+                let rust_while = format!("let mut {}: {} = {}; while {} {{", var_name, "i16", init_value, clean_condition);
+                
+                let before = &result[..start_pos];
+                let after = &result[end_pos..];  // Skip the opening {
+                
+                result = format!("{}{}{}", before, rust_while, after);
+            } else {
+                // Parse: extract the value from "i16 i = 0" -> "0"
+                let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
+                
+                // Parse condition: "i < 4" -> (op, limit) = ("<", "4")
+                let (op, limit) = self.parse_condition(condition);
+                
+                // Determine if inclusive
+                let inclusive = op == "<=" || op == ">=";
+                
+                // Build Rust for loop: "for var in start..end"
+                let end_marker = if inclusive { "=" } else { "" };
+                let rust_for = format!("for {} in {}..{}{{", var_name, init_value, limit);
+
+                let before = &result[..start_pos];
+                let after = &result[end_pos..];  // Skip the opening {
+                
+                result = format!("{}{}{}", before, rust_for, after);
+            }
         }
 
         Ok(result)
@@ -543,15 +563,16 @@ impl Translator {
     fn remove_condition_parens(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Match: if (condition) or while (condition)
-        // Replace with: if condition or while condition
-        let re = Regex::new(r"\b(if|while)\s*\(\s*([^)]+)\s*\)")
+        // Match: if (condition) { or while (condition) {
+        // But NOT for loop headers
+        // Replace with: if condition { or while condition {
+        let re = Regex::new(r"\b(if|while)\s*\(\s*([^)]+)\s*\)\s*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let keyword = &caps[1];
             let condition = &caps[2];
-            format!("{} {}", keyword, condition)
+            format!("{} {} {{", keyword, condition)
         });
 
         Ok(result.to_string())
