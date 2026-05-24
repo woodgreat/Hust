@@ -109,11 +109,11 @@ impl Translator {
         // Rule 7: Transform dynamic array declaration
         output = self.transform_dynamic_array_decl(&output)?;
 
-        // Rule 8: Transform C-style for loops
-        output = self.transform_for_loop(&output)?;
-
-        // Rule 9: Variable declaration transform
+        // Rule 8: Variable declaration transform (skip for loop vars)
         output = self.transform_variable_declarations(&output)?;
+
+        // Rule 9: Transform C-style for loops
+        output = self.transform_for_loop(&output)?;
 
         // Rule 10: Remove parentheses from if/while conditions
         output = self.remove_condition_parens(&output)?;
@@ -225,22 +225,44 @@ impl Translator {
     }
 
     /// V0.1: Transform variable declarations
-    /// i32 x = 42; -> let x: i32 = 42;
+    /// i32 x = 42; -> let mut x: i32 = 42;
+    /// const i32 x = 42; -> let x: i32 = 42; (inside functions)
+    /// const i32 x = 42; -> const x: i32 = 42; (global scope)
     fn transform_variable_declarations(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Match: type var = value;
+        // Match: [const] type var = value;
         // Type: i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String
         // Var name: [a-zA-Z_][a-zA-Z0-9_]*
-        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=")
+        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
-            let type_name = &caps[1];
-            let var_name = &caps[2];
-            // Hust: default is mutable, const is immutable
-            // Rust: default is immutable, mut is mutable
-            format!("let mut {}: {} =", var_name, type_name)
+            let is_const = caps.get(1).is_some();
+            let type_name = &caps[2];
+            let var_name = &caps[3];
+            
+            // Get the full match and check if this is inside a for loop header
+            let full_match = caps.get(0).unwrap();
+            let start = full_match.start();
+            
+            // Look at the 15 characters before this match
+            let before_start = if start >= 15 { start - 15 } else { 0 };
+            let before = &source[before_start..start];
+            
+            // If preceded by "for (" (possibly with whitespace), this is a for loop variable
+            // Don't transform it - the for loop transformer will handle it
+            let is_for_loop_var = before.contains("for (") || before.contains("for(");
+            
+            if is_const {
+                format!("const {}: {} =", var_name, type_name)
+            } else if is_for_loop_var {
+                // Keep original format - for loop transformer will handle this
+                format!("{} {} =", type_name, var_name)
+            } else {
+                // regular variable: mutable in Rust ("let mut")
+                format!("let mut {}: {} =", var_name, type_name)
+            }
         });
 
         Ok(result.to_string())
@@ -254,6 +276,8 @@ impl Translator {
 
         // Pattern: [pub] type name(params) { body }
         // Capture optional pub, return type, name, and parameters
+        // Note: Must NOT match variable declarations like "i32 i = 0;" or "i32 i();"
+        // So we require that the name is followed by (params) directly without = in between
         let re = Regex::new(r"(?m)^\s*(pub\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
@@ -310,25 +334,208 @@ impl Translator {
         result.join(", ")
     }
 
-    /// V0.2: Transform C-style for loop to Rust iterator style
-    /// for (i32 i = 0; i < n; i = i + 1) -> for i in 0..n
-    fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
+    /// V0.2: Transform i++ and i-- to i += 1 and i -= 1
+    /// i++ -> i += 1
+    /// i-- -> i -= 1
+    fn transform_increment_decrement(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Pattern: for (type var = start; var < end; var = var + 1)
-        // Handles both numeric literals and expressions like dynamic.len()
-        let re = Regex::new(
-            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(\d+)\s*;\s*[a-zA-Z_][a-zA-Z0-9_]*\s*<\s*([^;]+)\s*;\s*[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\+\s*1\s*\)"
-        ).map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        // Match var++ or var--
+        let re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(\+\+|--)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
-            let var_name = &caps[2];
-            let start = &caps[3];
-            let end = &caps[4].trim();
-            format!("for {} in {}..{}", var_name, start, end)
+            let var_name = &caps[1];
+            let op = &caps[2];
+            if op == "++" {
+                format!("{} += 1;", var_name)
+            } else {
+                format!("{} -= 1;", var_name)
+            }
         });
 
         Ok(result.to_string())
+    }
+
+    /// V0.2: Transform C-style for loop to Rust while loop
+    /// for (i32 i = 0; i < n; i = i + 1) { body }
+    /// -> let mut i: i32 = 0; while i < n { body; i = i + 1; }
+    /// for (i32 i = 0; i < n; i++) { body } (with ++ shorthand)
+    /// -> let mut i: i32 = 0; while i < n { body; i += 1; }
+    fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        let mut result = source.to_string();
+
+        // Pattern for C-style for loops: for (type var = init; condition; update) {
+        let for_re = Regex::new(
+            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^)]+)\s*;\s*([^)]+)\)\s*\{"
+        ).map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        // First pass: normalize i++ and i-- to i = i + 1
+        let increment_re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\+\+")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        result = increment_re.replace_all(&result, "$1 = $1 + 1").to_string();
+        
+        // Handle i-- pattern
+        let decrement_re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\-\-")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        result = decrement_re.replace_all(&result, "$1 = $1 - 1").to_string();
+
+        // Now transform for loops to Rust's range-based for
+        loop {
+            let caps = match for_re.captures(&result) {
+                Some(c) => c,
+                None => break,
+            };
+
+            let full_match = caps.get(0).unwrap();
+            let var_name = &caps[2];
+            let full_init = caps[3].trim();  // "i32 i = 0"
+            let condition = caps[4].trim();   // "i < 4"
+            let _update = caps[5].trim();      // "i = i + 1"
+
+            let start_pos = full_match.start();
+            let end_pos = full_match.end();
+
+            // Parse: extract the value from "i32 i = 0" -> "0"
+            let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
+            
+            // Parse condition: "i < 4" -> (op, limit) = ("<", "4")
+            let (op, limit) = self.parse_condition(condition);
+            
+            // Determine if inclusive
+            let inclusive = op == "<=" || op == ">=";
+            
+            // Build Rust for loop: "for var in start..end"
+            // For i < 4: for i in 0..4
+            // For i <= 4: for i in 0..=4
+            let end_marker = if inclusive { "=" } else { "" };
+            let rust_for = format!("for {} in {}..{}{}{{", var_name, init_value, limit, end_marker);
+
+            let before = &result[..start_pos];
+            let after = &result[end_pos..];  // Skip the opening {
+            
+            result = format!("{}{}{}", before, rust_for, after);
+        }
+
+        Ok(result)
+    }
+    
+    /// Parse condition like "i < 4" and return (op, limit)
+    fn parse_condition<'a>(&self, condition: &'a str) -> (&'a str, &'a str) {
+        if condition.contains("<=") {
+            ("<=", condition.split("<=").nth(1).unwrap_or("0").trim())
+        } else if condition.contains('<') {
+            ("<", condition.split('<').nth(1).unwrap_or("0").trim())
+        } else if condition.contains(">=") {
+            (">=", condition.split(">=").nth(1).unwrap_or("0").trim())
+        } else if condition.contains('>') {
+            (">", condition.split('>').nth(1).unwrap_or("0").trim())
+        } else {
+            ("<", "0")
+        }
+    }
+
+    /// Find the end position of a for loop (including the closing brace)
+    fn find_for_loop_end(&self, source: &str, start: usize) -> Option<usize> {
+        let mut paren_depth = 0;
+        let mut brace_depth = 0;
+        let mut in_for = false;
+
+        for (i, c) in source[start..].chars().enumerate() {
+            match c {
+                '(' => {
+                    if in_for {
+                        paren_depth += 1;
+                    }
+                }
+                ')' => {
+                    if in_for {
+                        if paren_depth == 0 {
+                            // Next character should be {
+                            let rest = &source[start + i + 1..];
+                            if let Some(j) = rest.find('{') {
+                                // Find the matching }
+                                let after_brace = &rest[j + 1..];
+                                let mut bd = 1;
+                                for (k, rc) in after_brace.chars().enumerate() {
+                                    match rc {
+                                        '{' => bd += 1,
+                                        '}' => {
+                                            bd -= 1;
+                                            if bd == 0 {
+                                                return Some(start + i + 1 + j + 1 + k + 1);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            return None;
+                        }
+                        paren_depth -= 1;
+                    }
+                }
+                'f' if source[start + i..].starts_with("for (") => {
+                    in_for = true;
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Transform a single for loop to while loop
+    /// After transform_for_loop_vars, the input is:
+    /// for (COND; UPDATE) {
+    ///     body
+    /// }
+    fn transform_single_for_loop(&self, for_loop: &str) -> Option<String> {
+        use regex::Regex;
+
+        // Pattern: for (COND; VAR = VAR OP NUM)\s*{ or for (COND; VAR = VAR OP NUM) {
+        // Allow optional whitespace and newline between ) and {
+        let re = Regex::new(
+            r"for\s*\(\s*([^;]+)\s*;\s*([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*([\+\-])\s*(\d+)\s*\)\s*\{?"
+        ).ok()?;
+
+        let caps = re.captures(for_loop)?;
+
+        let condition = &caps[1].trim();
+        let update_var = &caps[2];
+        let update_op = &caps[4];
+
+        // Find the body - look for the opening { after the for loop header
+        // and get everything until the matching }
+        let after_header = &for_loop[caps.get(0).unwrap().end()..];
+        let body_start = after_header.find('{')?;
+        let body_rest = &after_header[body_start..];
+
+        // Find the matching closing brace
+        let mut depth = 0;
+        let mut body_end = 0;
+        for (i, c) in body_rest.chars().enumerate() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        body_end = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let body = &body_rest[1..body_end]; // Skip the opening {
+
+        // Build update statement based on operator
+        let update_stmt = format!("{} {}= 1;", update_var, update_op);
+
+        // Build the while loop
+        Some(format!("while {} {{{}{}\n}}", condition, body, update_stmt))
     }
 
     /// V0.2: Remove parentheses from if/while conditions (Rust style)
