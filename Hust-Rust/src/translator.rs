@@ -412,11 +412,25 @@ impl Translator {
                 // Clean the condition by removing outer parentheses if present
                 let clean_condition = condition.trim().trim_start_matches('(').trim_end_matches(')').trim();
                 
-                let rust_while = format!("let mut {}: {} = {}; while {} {{", var_name, "i16", init_value, clean_condition);
+                // Get the update expression - we'll add it at the START of the body
+                // because Rust while doesn't auto-increment like C for loops
+                let update_str = caps[5].trim();
+                let update_stmt = if update_str.contains("++") {
+                    format!("{};", update_str.replace("++", " += 1"))
+                } else if update_str.contains("--") {
+                    format!("{};", update_str.replace("--", " -= 1"))
+                } else {
+                    // "i = i + 1" -> "i += 1;"
+                    format!("{};", update_str)
+                };
+                
+                // Replace: "for (init; condition; update) {" -> "let mut var = init; while condition { update;"
+                let rust_while = format!("let mut {}: {} = {}; while {} {{{}", var_name, "i16", init_value, clean_condition, update_stmt);
                 
                 let before = &result[..start_pos];
                 let after = &result[end_pos..];  // Skip the opening {
                 
+                // after is the body with its closing brace - don't add anything extra
                 result = format!("{}{}{}", before, rust_while, after);
             } else {
                 // Parse: extract the value from "i16 i = 0" -> "0"
