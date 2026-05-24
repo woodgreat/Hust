@@ -208,8 +208,9 @@ impl Translator {
     fn transform_array_declarations(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Match: type[size] name = {elements};
-        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([^}]+)\}")
+// Match: type[size] name = {elements};
+        // Include the trailing semicolon in the match so we replace it completely
+        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([^}]+)\};")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
@@ -217,7 +218,7 @@ impl Translator {
             let size = &caps[2];
             let var_name = &caps[3];
             let elements = &caps[4];
-            // Convert {1, 2, 3} to [1, 2, 3]
+            // Convert {1, 2, 3} to [1, 2, 3], use single semicolon
             format!("let mut {}: [{}; {}] = [{}];", var_name, type_name, size, elements)
         });
 
