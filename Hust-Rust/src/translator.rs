@@ -132,8 +132,12 @@ impl Translator {
         // obj.methodName() -> obj.method_name()
         output = self.transform_method_calls(&output)?;
 
-        // Rule 15: Transform C-style type cast (type)expr to expr as type
+// Rule 15: Transform C-style type cast (type)expr to expr as type
         output = self.transform_type_cast(&output)?;
+
+        // Rule 16: Normalize float literals
+        // f32 x = 0; -> f32 x = 0.0;
+        output = self.transform_float_literals(&output)?;
 
         Ok(output)
     }
@@ -158,19 +162,49 @@ Ok(result.to_string())
 /// V0.7: Transform C-style type cast (type)expr to expr as type
     /// (f32)sum -> sum as f32
     /// (i32)(a + b) -> (a + b) as i32
-    /// (f32)(sum / 10) -> (sum / 10) as f32
+    /// (f32)(sum / 10) -> sum as f32 / 10 as f32 [distribute to operands for float]
     fn transform_type_cast(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Pattern 1: (type)(expression) - handles nested parens
-        // e.g., (f32)(sum / 10) -> (sum / 10) as f32
-        let re_nested = Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char)\)\s*\(([^)]+)\)")
+        // Pattern 1: (f32) or (f64) wrapping an expression with operators
+        // Distribute the cast to operands for floating point types
+        // e.g., (f32)(sum / 10) -> sum as f32 / 10 as f32
+        let re_float = Regex::new(r"\((f32|f64)\)\s*\(([^)]+)\)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let mut result = re_nested.replace_all(source, |caps: &regex::Captures| {
+        let mut result = re_float.replace_all(source, |caps: &regex::Captures| {
             let type_name = &caps[1];
             let expr = &caps[2];
-            format!("({}) as {}", expr, type_name)
+            // Distribute cast to each operand in the expression
+            let mut res = String::new();
+            let mut depth = 0;
+            let mut last_op_pos = 0;
+            let chars: Vec<char> = expr.chars().collect();
+
+            for (i, c) in chars.iter().enumerate() {
+                match c {
+                    '(' => { depth += 1; }
+                    ')' => { depth -= 1; }
+                    '+' | '-' | '*' | '/' if depth == 0 => {
+                        let operand = expr[last_op_pos..i].trim();
+                        if !operand.is_empty() {
+                            res.push_str(operand);
+                            res.push_str(&format!(" as {}", type_name));
+                        }
+                        res.push(*c);
+                        last_op_pos = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+
+            let last_operand = expr[last_op_pos..].trim();
+            if !last_operand.is_empty() {
+                res.push_str(last_operand);
+                res.push_str(&format!(" as {}", type_name));
+            }
+
+            res
         }).to_string();
 
         // Pattern 2: (type)simple_expr - handles simple expressions without parens
@@ -185,6 +219,59 @@ Ok(result.to_string())
         }).to_string();
 
         Ok(result)
+    }
+
+    /// Distribute type cast to operands in an expression
+    /// e.g., "sum / 10" with f32 -> "sum as f32 / 10 as f32"
+    fn distribute_cast_to_operands(&self, expr: &str, type_name: &str) -> String {
+        // Find operators and split the expression
+        let mut result = String::new();
+        let mut depth = 0;
+        let mut i = 0;
+
+        while i < expr.len() {
+            let c = expr.chars().nth(i).unwrap();
+            match c {
+                '(' => { depth += 1; result.push(c); }
+                ')' => { depth -= 1; result.push(c); }
+                '+' | '-' | '*' | '/' if depth == 0 => {
+                    // This is a top-level operator
+                    // Insert "as type" before the operator
+                    result.push_str(&format!(" as {}", type_name));
+                    result.push(c);
+                }
+                _ => { result.push(c); }
+            }
+            i += 1;
+        }
+
+        // Add cast to the last operand
+        result = result.trim().to_string();
+        if !result.ends_with(&format!("as {}", type_name)) {
+            result.push_str(&format!(" as {}", type_name));
+        }
+
+        result
+    }
+
+    /// V0.7: Normalize float literals
+    /// f32 x = 0; -> f32 x = 0.0;
+    /// Handles: f32/f64 types assigned integer values
+    fn transform_float_literals(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Match: f32 or f64 variable assignments where the value is an integer
+        // Pattern: : f32 = integer or : f64 = integer
+        let re = Regex::new(r":\s*(f32|f64)\s*=\s*(\d+)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let value = &caps[2];
+            format!(": {} = {}.0;", type_name, value)
+        });
+
+        Ok(result.to_string())
     }
 
     /// V0.6: Transform class instantiation
