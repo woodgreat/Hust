@@ -1,0 +1,6 @@
+void main() {
+    for (i16 j = 0; j < 3; j++)
+    {
+        println!("j is {}", j);
+    }
+}

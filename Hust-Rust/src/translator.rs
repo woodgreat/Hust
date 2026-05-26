@@ -527,42 +527,12 @@ Ok(result.to_string())
             let has_complex_condition = condition.contains('(') || condition.contains('*') || 
                                         condition.contains('/') || !condition.trim().chars().all(|c| c.is_alphanumeric() || c == '<' || c == '>' || c == '=' || c == ' ');
 
-            if has_complex_condition {
-                // Fall back to while loop for complex conditions like (i*i <= n)
-                // Parse: extract the value from "i16 i = 0" -> "0"
-                let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
-                
-                // Clean the condition by removing outer parentheses if present
-                let clean_condition = condition.trim().trim_start_matches('(').trim_end_matches(')').trim();
-                
-                // Get the update expression - we'll add it at the START of the body
-                // because Rust while doesn't auto-increment like C for loops
-                let update_str = caps[5].trim();
-                let update_stmt = if update_str.contains("++") {
-                    format!("{};", update_str.replace("++", " += 1"))
-                } else if update_str.contains("--") {
-                    format!("{};", update_str.replace("--", " -= 1"))
-                } else {
-                    // "i = i + 1" -> "i += 1;"
-                    format!("{};", update_str)
-                };
-                
-// Replace: "for (init; condition; update) {" -> "let mut var = init; while condition { update;"
-                // Use usize for loop variable to support array indexing
-                let rust_while = format!("let mut {}: usize = {}; while {} {{{}", var_name, init_value, clean_condition, update_stmt);
-
-                let before = &result[..start_pos];
-                let after = &result[end_pos..];  // Skip the opening {
-
-                // after is the body with its closing brace - don't add anything extra
-                result = format!("{}{}{}", before, rust_while, after);
-            } else {
-                // Simple condition: use while loop with usize for array indexing support
+if has_complex_condition {
+                // Fall back to while loop for complex conditions
                 let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
                 let clean_condition = condition.trim().trim_start_matches('(').trim_end_matches(')').trim();
 
-                // Build while loop with usize for array indexing
-                // Include update statement at start of body
+                // Get update statement
                 let update_str = caps[5].trim();
                 let update_stmt = if update_str.contains("++") {
                     format!("{};", update_str.replace("++", " += 1"))
@@ -572,18 +542,38 @@ Ok(result.to_string())
                     format!("{};", update_str)
                 };
 
-                let rust_while = format!("let mut {}: usize = {}; while {} {{{}", var_name, init_value, clean_condition, update_stmt);
+// Build while loop - update at START of body (stable)
+                let rust_while = format!("let mut {}: usize = {}; while {} {{", var_name, init_value, clean_condition);
 
                 let before = &result[..start_pos];
                 let after = &result[end_pos..];
+                result = format!("{}{}{}{}", before, rust_while, update_stmt, after);
+            } else {
+                // Simple condition
+                let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
+                let clean_condition = condition.trim().trim_start_matches('(').trim_end_matches(')').trim();
 
-                result = format!("{}{}{}", before, rust_while, after);
+                let update_str = caps[5].trim();
+                let update_stmt = if update_str.contains("++") {
+                    format!("{};", update_str.replace("++", " += 1"))
+                } else if update_str.contains("--") {
+                    format!("{};", update_str.replace("--", " -= 1"))
+                } else {
+                    format!("{};", update_str)
+                };
+
+// Build while loop - update at START of body (stable)
+                let rust_while = format!("let mut {}: usize = {}; while {} {{", var_name, init_value, clean_condition);
+
+                let before = &result[..start_pos];
+                let after = &result[end_pos..];
+                result = format!("{}{}{}{}", before, rust_while, update_stmt, after);
             }
         }
 
         Ok(result)
     }
-    
+
     /// Parse condition like "i < 4" and return (op, limit)
     fn parse_condition<'a>(&self, condition: &'a str) -> (&'a str, &'a str) {
         if condition.contains("<=") {
@@ -694,7 +684,7 @@ Ok(result.to_string())
         let body = &body_rest[1..body_end]; // Skip the opening {
 
         // Build update statement based on operator
-        let update_stmt = format!("{} {}= 1;", update_var, update_op);
+        let update_stmt = format!("{}= 1;", update_var);
 
         // Build the while loop
         Some(format!("while {} {{{}{}\n}}", condition, body, update_stmt))
