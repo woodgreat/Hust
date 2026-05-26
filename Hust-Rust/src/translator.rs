@@ -158,21 +158,33 @@ Ok(result.to_string())
 /// V0.7: Transform C-style type cast (type)expr to expr as type
     /// (f32)sum -> sum as f32
     /// (i32)(a + b) -> (a + b) as i32
+    /// (f32)(sum / 10) -> (sum / 10) as f32
     fn transform_type_cast(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Pattern: (type)expr where type is a primitive type
-        // Examples: (f32)sum, (i32)(a + b)
-        let re = Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char)\)\s*([^\s;,\)]+)")
+        // Pattern 1: (type)(expression) - handles nested parens
+        // e.g., (f32)(sum / 10) -> (sum / 10) as f32
+        let re_nested = Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char)\)\s*\(([^)]+)\)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let result = re.replace_all(source, |caps: &regex::Captures| {
+        let mut result = re_nested.replace_all(source, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let expr = &caps[2];
+            format!("({}) as {}", expr, type_name)
+        }).to_string();
+
+        // Pattern 2: (type)simple_expr - handles simple expressions without parens
+        // e.g., (f32)sum -> sum as f32
+        let re_simple = Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char)\)\s*([^\s;,\)]+)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        result = re_simple.replace_all(&result, |caps: &regex::Captures| {
             let type_name = &caps[1];
             let expr = &caps[2];
             format!("{} as {}", expr, type_name)
-        });
+        }).to_string();
 
-        Ok(result.to_string())
+        Ok(result)
     }
 
     /// V0.6: Transform class instantiation
