@@ -1,0 +1,6 @@
+void main() {
+    i32 sum = 100;
+    i32 count = 10;
+    f32 avg = (f32)sum / count;
+    println!("avg = {}", avg);
+}

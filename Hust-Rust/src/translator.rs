@@ -128,9 +128,12 @@ impl Translator {
         // ClassName var; -> let mut var: ClassName = ClassName { ... };
         output = self.transform_class_instantiation(&output)?;
 
-        // Rule 14: Transform method calls from camelCase to snake_case
+// Rule 14: Transform method calls from camelCase to snake_case
         // obj.methodName() -> obj.method_name()
         output = self.transform_method_calls(&output)?;
+
+        // Rule 15: Transform C-style type cast (type)expr to expr as type
+        output = self.transform_type_cast(&output)?;
 
         Ok(output)
     }
@@ -147,6 +150,26 @@ impl Translator {
             let method_name = &caps[1];
             let rust_method = self.to_snake_case(method_name);
             format!(".{}(", rust_method)
+        });
+
+Ok(result.to_string())
+    }
+
+/// V0.7: Transform C-style type cast (type)expr to expr as type
+    /// (f32)sum -> sum as f32
+    /// (i32)(a + b) -> (a + b) as i32
+    fn transform_type_cast(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Pattern: (type)expr where type is a primitive type
+        // Examples: (f32)sum, (i32)(a + b)
+        let re = Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char)\)\s*([^\s;,\)]+)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let expr = &caps[2];
+            format!("{} as {}", expr, type_name)
         });
 
         Ok(result.to_string())
