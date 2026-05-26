@@ -547,32 +547,37 @@ Ok(result.to_string())
                     format!("{};", update_str)
                 };
                 
-                // Replace: "for (init; condition; update) {" -> "let mut var = init; while condition { update;"
-                let rust_while = format!("let mut {}: {} = {}; while {} {{{}", var_name, "i16", init_value, clean_condition, update_stmt);
-                
-                let before = &result[..start_pos];
-                let after = &result[end_pos..];  // Skip the opening {
-                
-                // after is the body with its closing brace - don't add anything extra
-                result = format!("{}{}{}", before, rust_while, after);
-            } else {
-                // Parse: extract the value from "i16 i = 0" -> "0"
-                let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
-                
-                // Parse condition: "i < 4" -> (op, limit) = ("<", "4")
-                let (op, limit) = self.parse_condition(condition);
-                
-                // Determine if inclusive
-                let inclusive = op == "<=" || op == ">=";
-                
-                // Build Rust for loop: "for var in start..end"
-                let end_marker = if inclusive { "=" } else { "" };
-                let rust_for = format!("for {} in {}..{}{{", var_name, init_value, limit);
+// Replace: "for (init; condition; update) {" -> "let mut var = init; while condition { update;"
+                // Use usize for loop variable to support array indexing
+                let rust_while = format!("let mut {}: usize = {}; while {} {{{}", var_name, init_value, clean_condition, update_stmt);
 
                 let before = &result[..start_pos];
                 let after = &result[end_pos..];  // Skip the opening {
-                
-                result = format!("{}{}{}", before, rust_for, after);
+
+                // after is the body with its closing brace - don't add anything extra
+                result = format!("{}{}{}", before, rust_while, after);
+            } else {
+                // Simple condition: use while loop with usize for array indexing support
+                let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
+                let clean_condition = condition.trim().trim_start_matches('(').trim_end_matches(')').trim();
+
+                // Build while loop with usize for array indexing
+                // Include update statement at start of body
+                let update_str = caps[5].trim();
+                let update_stmt = if update_str.contains("++") {
+                    format!("{};", update_str.replace("++", " += 1"))
+                } else if update_str.contains("--") {
+                    format!("{};", update_str.replace("--", " -= 1"))
+                } else {
+                    format!("{};", update_str)
+                };
+
+                let rust_while = format!("let mut {}: usize = {}; while {} {{{}", var_name, init_value, clean_condition, update_stmt);
+
+                let before = &result[..start_pos];
+                let after = &result[end_pos..];
+
+                result = format!("{}{}{}", before, rust_while, after);
             }
         }
 
