@@ -485,15 +485,15 @@ Ok(result.to_string())
     /// -> let mut i: i32 = 0; while i < n { body; i = i + 1; }
     /// for (i32 i = 0; i < n; i++) { body } (with ++ shorthand)
     /// -> let mut i: i32 = 0; while i < n { body; i += 1; }
-    fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
+fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
         let mut result = source.to_string();
 
-        // Pattern for C-style for loops: for (type var = init; condition; update) {
-        // Use [^;]+ for init and condition to handle any content including parens
+        // Pattern to match entire for loop including body
+        // for (type var = init; condition; update) { body }
         let for_re = Regex::new(
-            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^;]+)\s*;\s*([^)]+)\)\s*\{"
+            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^;]+)\s*;\s*([^\)]+)\)\s*\{([\s\S]*?)\n\s*\}"
         ).map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         // First pass: normalize i++ and i-- to i = i + 1
@@ -506,72 +506,100 @@ Ok(result.to_string())
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         result = decrement_re.replace_all(&result, "$1 = $1 - 1").to_string();
 
-        // Now transform for loops to Rust's range-based for
+        // Now transform for loops
         loop {
             let caps = match for_re.captures(&result) {
                 Some(c) => c,
                 None => break,
             };
 
-            let full_match = caps.get(0).unwrap();
+            let var_type = &caps[1];
             let var_name = &caps[2];
-            let full_init = caps[3].trim();  // "i16 i = 0"
-            let condition = caps[4].trim();   // "i < 4" or "(i*i <= n)"
-            let _update = caps[5].trim();      // "i = i + 1"
+            let init_value = caps[3].trim();
+            let condition = caps[4].trim();
+            let update = caps[5].trim();
 
-            let start_pos = full_match.start();
-            let end_pos = full_match.end();
+            // Extract body (strip leading newline/whitespace, trailing whitespace and closing brace)
+            let full_body = caps.get(6).map(|m| m.as_str()).unwrap_or("");
+            let body = full_body.trim();
+            
+            // Build update statement
+            let update_stmt = format!("{};", update);
 
-            // Check if condition contains complex expression (with parentheses or operators)
-            // If so, we can't use range-based for, fall back to while loop
-            let has_complex_condition = condition.contains('(') || condition.contains('*') || 
-                                        condition.contains('/') || !condition.trim().chars().all(|c| c.is_alphanumeric() || c == '<' || c == '>' || c == '=' || c == ' ');
+            // Build while loop with update at END of body
+            let rust_while = format!(
+                "let mut {}: usize = {}; while {} {{{}{}{}}}",
+                var_name, init_value, condition, body, update_stmt, ""
+            );
 
-if has_complex_condition {
-                // Fall back to while loop for complex conditions
-                let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
-                let clean_condition = condition.trim().trim_start_matches('(').trim_end_matches(')').trim();
+            let full_match = caps.get(0).unwrap();
+            let start = full_match.start();
+            let end = full_match.end();
 
-                // Get update statement
-                let update_str = caps[5].trim();
-                let update_stmt = if update_str.contains("++") {
-                    format!("{};", update_str.replace("++", " += 1"))
-                } else if update_str.contains("--") {
-                    format!("{};", update_str.replace("--", " -= 1"))
-                } else {
-                    format!("{};", update_str)
-                };
-
-// Build while loop - update at START of body (stable)
-                let rust_while = format!("let mut {}: usize = {}; while {} {{", var_name, init_value, clean_condition);
-
-                let before = &result[..start_pos];
-                let after = &result[end_pos..];
-                result = format!("{}{}{}{}", before, rust_while, update_stmt, after);
-            } else {
-                // Simple condition
-                let init_value = full_init.split('=').last().unwrap_or("0").trim().to_string();
-                let clean_condition = condition.trim().trim_start_matches('(').trim_end_matches(')').trim();
-
-                let update_str = caps[5].trim();
-                let update_stmt = if update_str.contains("++") {
-                    format!("{};", update_str.replace("++", " += 1"))
-                } else if update_str.contains("--") {
-                    format!("{};", update_str.replace("--", " -= 1"))
-                } else {
-                    format!("{};", update_str)
-                };
-
-// Build while loop - update at START of body (stable)
-                let rust_while = format!("let mut {}: usize = {}; while {} {{", var_name, init_value, clean_condition);
-
-                let before = &result[..start_pos];
-                let after = &result[end_pos..];
-                result = format!("{}{}{}{}", before, rust_while, update_stmt, after);
-            }
+            result = format!("{}{}{}", &result[..start], rust_while, &result[end..]);
         }
 
         Ok(result)
+    }
+
+/// Add markers around for loop bodies to protect content
+    fn protect_for_bodies(source: &str) -> String {
+        use regex::Regex;
+        
+        let mut result = source.to_string();
+        loop {
+            let for_pattern = Regex::new(r"for\s*\([^)]+\)\s*\{").unwrap();
+            
+            if let Some(m) = for_pattern.find(&result) {
+                let marker = "###FOR_MARKER###";
+                result = format!("{}{}{}", &result[..m.end()], marker, &result[m.end()..]);
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
+    /// Extract body between markers
+    fn extract_protected_body(source: &str) -> (String, String) {
+        let marker = "###FOR_MARKER###";
+        if let Some(pos) = source.find(marker) {
+            let after_marker = &source[pos + marker.len()..];
+            // Find matching closing brace
+            let mut depth = 1;
+            let mut in_string = false;
+            let mut escape = false;
+            
+            for (i, c) in after_marker.chars().enumerate() {
+                if escape {
+                    escape = false;
+                    continue;
+                }
+                if c == '\\' {
+                    escape = true;
+                    continue;
+                }
+                if c == '"' {
+                    in_string = !in_string;
+                    continue;
+                }
+                
+                if !in_string {
+                    match c {
+                        '{' => depth += 1,
+                        '}' => depth -= 1,
+                        _ => {}
+                    }
+                }
+                
+                if depth == 0 {
+                    let body = &after_marker[..i];
+                    let after = &after_marker[i + 1..];
+                    return (body.to_string(), after.to_string());
+                }
+            }
+        }
+        (source.to_string(), String::new())
     }
 
     /// Parse condition like "i < 4" and return (op, limit)
