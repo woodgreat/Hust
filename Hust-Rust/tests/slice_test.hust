@@ -1,0 +1,6 @@
+void main() {
+    i32[10] scores = {95, 76, 88, 92, 78, 85, 90, 82, 94, 89};
+    i32[] first5Scores = scores[0..5];
+    
+    println!("First 5 scores: {} {} {} {} {}", first5Scores[0], first5Scores[1], first5Scores[2], first5Scores[3], first5Scores[4]);
+}

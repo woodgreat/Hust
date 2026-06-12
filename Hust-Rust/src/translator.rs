@@ -132,10 +132,14 @@ impl Translator {
         // obj.methodName() -> obj.method_name()
         output = self.transform_method_calls(&output)?;
 
-// Rule 15: Transform C-style type cast (type)expr to expr as type
+        // Rule 15: Transform array slices
+        // i32[] first5Scores = scores[0..5]; -> let first5Scores: &[i32] = &scores[0..5];
+        output = self.transform_array_slices(&output)?;
+
+// Rule 16: Transform C-style type cast (type)expr to expr as type
         output = self.transform_type_cast(&output)?;
 
-        // Rule 16: Normalize float literals
+        // Rule 17: Normalize float literals
         // f32 x = 0; -> f32 x = 0.0;
         output = self.transform_float_literals(&output)?;
 
@@ -269,6 +273,28 @@ Ok(result.to_string())
             let type_name = &caps[1];
             let value = &caps[2];
             format!(": {} = {}.0;", type_name, value)
+        });
+
+Ok(result.to_string())
+    }
+
+    /// V0.4: Transform array slices
+    /// i32[] front = arr[0..3]; -> let front: &[i32] = &arr[0..3];
+    fn transform_array_slices(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Pattern: type[] var_name = array[start..end];
+        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*)\[(\d+)\.\.(\d+)\];")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let var_name = &caps[2];
+            let array_name = &caps[3];
+            let start = &caps[4];
+            let end = &caps[5];
+
+            format!("let {}: &[{}] = &{}[{}..{}];", var_name, type_name, array_name, start, end)
         });
 
         Ok(result.to_string())
