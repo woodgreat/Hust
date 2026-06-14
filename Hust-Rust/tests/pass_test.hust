@@ -1,0 +1,11 @@
+void main() {
+    i32 x = 5;
+    
+    if (x > 0) {
+        pass;  // TODO: implement positive case
+    } else {
+        println!("negative");
+    }
+    
+    println!("done");
+}

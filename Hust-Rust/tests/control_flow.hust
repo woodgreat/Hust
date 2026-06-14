@@ -1,0 +1,24 @@
+void main() {
+    i32 x = 10;
+
+    // if/else test
+    if (x > 5) {
+        println!("x is greater than 5");
+    } else {
+        println!("x is not greater than 5");
+    }
+
+    // while loop test
+    i32 count = 3;
+    while (count > 0) {
+        println!("count: {}", count);
+        count = count - 1;
+    }
+
+    // for loop test
+    for (i32 i = 0; i < 3; i = i + 1) {
+        println!("i: {}", i);
+    }
+
+    println!("Done!");
+}

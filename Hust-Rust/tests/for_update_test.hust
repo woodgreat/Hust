@@ -1,0 +1,8 @@
+void main() {
+    i32[5] scores = {95, 76, 88, 92, 78};
+
+    for (i16 j = 0; j < 5; j++)
+    {
+        println!("scores[{}] is {}", j, scores[j]);
+    }
+}

@@ -1,0 +1,18 @@
+void main() {
+    // Fixed array declaration
+    i32[5] scores = {85, 90, 78, 92, 88};
+    
+    // Calculate sum
+    i32 sum = 0;
+    for (i32 i = 0; i < 5; i = i + 1) {
+        sum = sum + scores[i];
+    }
+    
+    i32 avg = sum / 5;
+    println!("Sum: {}", sum);
+    println!("Average: {}", avg);
+    
+    // Modify element
+    scores[0] = 95;
+    println!("First score: {}", scores[0]);
+}

@@ -1,0 +1,18 @@
+// Class test v2 - simplified methods
+
+class Point {
+    i32 x;
+    i32 y;
+    
+    public i32 getX() { return self.x; }
+    public i32 getY() { return self.y; }
+    public void setX(i32 val) { self.x = val; }
+}
+
+void main() {
+    Point p;
+    p.setX(10);
+    
+    println!("X: {}", p.getX());
+    println!("Class v2 test passed!");
+}
