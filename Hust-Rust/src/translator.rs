@@ -516,10 +516,9 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
 
         let mut result = source.to_string();
 
-        // Pattern to match entire for loop including body
-        // for (type var = init; condition; update) { body }
-        let for_re = Regex::new(
-            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^;]+)\s*;\s*([^\)]+)\)\s*\{([\s\S]*?)\n\s*\}"
+        // Pattern to match for loop header (body extracted via brace-matching)
+        let header_re = Regex::new(
+            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^;]+)\s*;\s*([^\)]+)\)"
         ).map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         // Step 1: Add markers to preserve prefix/postfix information
@@ -544,11 +543,18 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
         result = prefix_decrement_re.replace_all(&result, "###HUST_PREFIX###--$1###HUST_END###").to_string();
 
         // Step 2: Transform for loops using markers
+        // Use two-pass approach: regex for header, brace-matching for body
         loop {
-            let caps = match for_re.captures(&result) {
-                Some(c) => c,
+            // Only match the for loop header (no body capture)
+            let header_match = match header_re.find(&result) {
+                Some(m) => m,
                 None => break,
             };
+
+            let header_text = header_match.as_str();
+            let caps = header_re.captures(&result).ok_or_else(|| {
+                TranspileError::TransformError("Failed to capture for loop header".to_string())
+            })?;
 
             let var_type = &caps[1];
             let var_name = &caps[2];
@@ -556,9 +562,48 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             let condition = caps[4].trim();
             let update = caps[5].trim();
 
-            // Extract body (strip leading newline/whitespace, trailing whitespace and closing brace)
-            let full_body = caps.get(6).map(|m| m.as_str()).unwrap_or("");
-            let body = full_body.trim();
+            // Find the body using brace-depth matching
+            let after_header = &result[header_match.end()..];
+            let open_brace_idx = match after_header.find('{') {
+                Some(idx) => idx,
+                None => break, // malformed for loop
+            };
+            
+            let body_start_abs = header_match.end() + open_brace_idx + 1;
+            
+            // Count brace depth to find matching }
+            let mut brace_depth = 1;
+            let mut in_string = false;
+            let mut body_end_abs = body_start_abs;
+            let body_src = &result[body_start_abs..];
+            
+            for (i, c) in body_src.char_indices() {
+                if c == '"' {
+                    in_string = !in_string;
+                }
+                if !in_string {
+                    match c {
+                        '{' => brace_depth += 1,
+                        '}' => {
+                            brace_depth -= 1;
+                            if brace_depth == 0 {
+                                body_end_abs = body_start_abs + i;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            
+            if brace_depth != 0 {
+                break; // malformed, no matching closing brace
+            }
+            
+            // Extract body content
+            let body = result[body_start_abs..body_end_abs].trim();
+            let full_for_start = header_match.start();
+            let full_for_end = body_end_abs + 1; // include the closing }
 
             // Detect if update uses increment/decrement operators
             let is_prefix = update.contains("###HUST_PREFIX###");
@@ -627,11 +672,7 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                 }
             };
 
-            let full_match = caps.get(0).unwrap();
-            let start = full_match.start();
-            let end = full_match.end();
-
-            result = format!("{}{}{}", &result[..start], rust_while, &result[end..]);
+            result = format!("{}{}{}", &result[..full_for_start], rust_while, &result[full_for_end..]);
         }
 
         // Step 3: Remove all markers (safety cleanup)
