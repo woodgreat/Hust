@@ -143,6 +143,10 @@ impl Translator {
         // f32 x = 0; -> f32 x = 0.0;
         output = self.transform_float_literals(&output)?;
 
+        // Rule 18: Transform array indices to use as usize
+        // Rust requires usize for array indexing: scores[i] -> scores[(i) as usize]
+        output = self.transform_array_indices(&output)?;
+
         Ok(output)
     }
 
@@ -161,6 +165,29 @@ impl Translator {
         });
 
 Ok(result.to_string())
+    }
+
+    /// V0.9: Transform array index expressions to use as usize
+    /// Rust requires usize for array indexing, but Hust uses signed types.
+    /// scores[i] -> scores[(i) as usize], arr[j-1] -> arr[(j-1) as usize]
+    fn transform_array_indices(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        let re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\[([^\[\]]+?)\]")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let array_name = &caps[1];
+            let index_expr = &caps[2];
+
+            // Don't transform slices (contains ..) or simple integer literals
+            if index_expr.contains("..") || index_expr.trim().parse::<i64>().is_ok() {
+                format!("{}[{}]", array_name, index_expr)
+            } else {
+                format!("{}[({}) as usize]", array_name, index_expr)
+            }
+        });
+
+        Ok(result.to_string())
     }
 
 /// V0.7: Transform C-style type cast (type)expr to expr as type
@@ -644,8 +671,8 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             // But in the for loop update clause, they behave identically.
             let rust_while = if is_prefix || is_postfix {
                 format!(
-"let mut {}: i32 = {}; while {} {{{}\n{}}}",
-                    var_name, init_value, condition, body, update_stmt
+"let mut {}: {} = {}; while {} {{{}\n{}}}",
+                    var_name, var_type, init_value, condition, body, update_stmt
                 )
             } else {
                 // Check if update is a code block { ... }
@@ -660,14 +687,14 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                         .replace("###HUST_END###", "");
                     // Place processed block content after loop body (as inline)
                     format!(
-"let mut {}: i32 = {}; while {} {{{}\n{}}}",
-                        var_name, init_value, condition, body, processed_block
+"let mut {}: {} = {}; while {} {{{}\n{}}}",
+                        var_name, var_type, init_value, condition, body, processed_block
                     )
                 } else {
                     // No ++/-- operator and not a code block, use update as-is
                     format!(
-"let mut {}: i32 = {}; while {} {{{}\n{}}}",
-                        var_name, init_value, condition, body, update
+"let mut {}: {} = {}; while {} {{{}\n{}}}",
+                        var_name, var_type, init_value, condition, body, update
                     )
                 }
             };
