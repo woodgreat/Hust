@@ -644,7 +644,7 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             // But in the for loop update clause, they behave identically.
             let rust_while = if is_prefix || is_postfix {
                 format!(
-                    "let mut {}: usize = {}; while {} {{{}{}}}",
+                    "let mut {}: usize = {}; while {} {{{}\n{}}}",
                     var_name, init_value, condition, body, update_stmt
                 )
             } else {
@@ -658,15 +658,15 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                         .replace("###HUST_PREFIX###", "")
                         .replace("###HUST_POSTFIX###", "")
                         .replace("###HUST_END###", "");
-                    // Place processed block content after loop body
+                    // Place processed block content after loop body (as inline)
                     format!(
-                        "let mut {}: usize = {}; while {} {{{}{}}}",
+                        "let mut {}: usize = {}; while {} {{{}\n{}}}",
                         var_name, init_value, condition, body, processed_block
                     )
                 } else {
                     // No ++/-- operator and not a code block, use update as-is
                     format!(
-                        "let mut {}: usize = {}; while {} {{{}{}}}",
+                        "let mut {}: usize = {}; while {} {{{}\n{}}}",
                         var_name, init_value, condition, body, update
                     )
                 }
