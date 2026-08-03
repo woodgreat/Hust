@@ -1,0 +1,8 @@
+void main() {
+    i16 count = 0;
+
+    // 测试带操作符
+    for(i16 i=0; i<3; { count++; }) {
+        println!("i = {}, count = {}", i, count);
+    }
+}

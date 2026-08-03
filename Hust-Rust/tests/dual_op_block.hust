@@ -1,0 +1,9 @@
+void main() {
+    i16 count = 0;
+    i16 other = 10;
+
+    // 测试两个操作符
+    for(i16 i=0; i<3; { count++; other--; }) {
+        println!("i = {}, count = {}, other = {}", i, count, other);
+    }
+}

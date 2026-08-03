@@ -1,0 +1,8 @@
+void main() {
+    // 简单的代码块测试
+    for(i16 i=0; i<3; i++) {
+        println!("Line 1");
+        println!("Line 2");
+        println!("Line 3");
+    }
+}
