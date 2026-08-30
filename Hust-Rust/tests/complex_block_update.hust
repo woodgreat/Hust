@@ -1,0 +1,8 @@
+void main() {
+    i16 count = 0;
+
+    // 测试复杂代码块形式的更新
+    for(i16 i=0; i<5; { i++; count++; }) {
+        println!("i = {}, count = {}", i, count);
+    }
+}

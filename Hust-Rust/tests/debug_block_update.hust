@@ -1,0 +1,8 @@
+void main() {
+    i16 count = 0;
+
+    // 测试简单单语句
+    for(i16 i=0; i<3; { count = count + 1; }) {
+        println!("i = {}, count = {}", i, count);
+    }
+}

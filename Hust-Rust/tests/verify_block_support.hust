@@ -1,0 +1,12 @@
+void main() {
+    // 测试单语句for循环
+    for(i16 i=0; i<2; i++)
+        println!("Single statement i = {}", i);
+
+    // 测试代码块for循环
+    for(i16 j=0; j<2; j++) {
+        println!("Block statement j = {}", j);
+        println!("Inside code block");
+        j = j + 1;  // 在代码块内手动修改循环变量
+    }
+}

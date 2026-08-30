@@ -1,0 +1,96 @@
+void main()
+{
+  i32[10] scores = {85, 90, 78, 92, 88, 76, 95, 89, 84, 91};
+
+  i32 sum =0;
+  i32 maxValue =scores[0];
+  i32 minValue =scores[0];
+  f32 avg=0;
+
+  for (i16 k = 0; k <= 9; k++)
+  {
+    println!("1 >> scores[{}] is {}", k, scores[k]);
+
+  }
+
+  //sort the array in order : big --> small
+  for(i16 i=9; i>6; i--)
+  {
+    println!("* start loop >> i =  {}", i);
+    i32 round_small =scores[i];
+
+    for(i16 j=0;j<i;j++)
+    {
+      if( scores[j] < round_small )
+      {//switch the 2 cells
+        scores[i] =scores[j];
+        scores[j] =round_small;
+      }
+
+    }
+
+    scores[i] =round_small;
+
+    for (i16 k = 0; k <= 9; k++)
+    {
+      println!("2 >> scores[{}] is {}", k, scores[k]);
+
+    }
+
+    println!("* end loop >> i =  {}", i);
+    println!("-----");
+
+  }
+
+
+  while(true)
+  {};
+
+
+  println!("=======================");
+
+  for (i16 k = 0; k <= 9; k++)
+  {
+    println!("3 >> scores[{}] is {}", k, scores[k]);
+
+  }
+
+
+  println!("=======================");
+
+
+  i32[] first5Scores =scores[0..5];
+  i32 first5Sum =0;
+  f32 first5Avg =0;
+  for (i16 j = 1; j <= 5; j++)
+  {
+    first5Sum += scores[j-1];
+  }
+  first5Avg =(f32)(first5Sum /5);
+
+
+
+  for (i16 j = 1; j <= 10; j++)
+  {
+    sum =sum + scores[j-1];
+
+    if(scores[j-1] > maxValue)
+    {
+      maxValue =scores[j-1];
+    }
+
+    if(scores[j-1] < minValue)
+    {
+      minValue =scores[j-1];
+    }
+  }
+
+  
+  avg =(f32)(sum /10);
+
+  println!("All scores sum: {}",sum);
+  println!("All scores avg: {}",avg);
+  println!("Max: {}, Min: {}",maxValue,minValue);
+  println!("Top 5 avg: {}",first5Avg);
+
+}

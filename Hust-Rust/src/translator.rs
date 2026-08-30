@@ -143,6 +143,10 @@ impl Translator {
         // f32 x = 0; -> f32 x = 0.0;
         output = self.transform_float_literals(&output)?;
 
+        // Rule 18: Transform array indices to use as usize
+        // Rust requires usize for array indexing: scores[i] -> scores[(i) as usize]
+        output = self.transform_array_indices(&output)?;
+
         Ok(output)
     }
 
@@ -161,6 +165,29 @@ impl Translator {
         });
 
 Ok(result.to_string())
+    }
+
+    /// V0.9: Transform array index expressions to use as usize
+    /// Rust requires usize for array indexing, but Hust uses signed types.
+    /// scores[i] -> scores[(i) as usize], arr[j-1] -> arr[(j-1) as usize]
+    fn transform_array_indices(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        let re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\[([^\[\]]+?)\]")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let array_name = &caps[1];
+            let index_expr = &caps[2];
+
+            // Don't transform slices (contains ..) or simple integer literals
+            if index_expr.contains("..") || index_expr.trim().parse::<i64>().is_ok() {
+                format!("{}[{}]", array_name, index_expr)
+            } else {
+                format!("{}[({}) as usize]", array_name, index_expr)
+            }
+        });
+
+        Ok(result.to_string())
     }
 
 /// V0.7: Transform C-style type cast (type)expr to expr as type
@@ -516,28 +543,45 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
 
         let mut result = source.to_string();
 
-        // Pattern to match entire for loop including body
-        // for (type var = init; condition; update) { body }
-        let for_re = Regex::new(
-            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^;]+)\s*;\s*([^\)]+)\)\s*\{([\s\S]*?)\n\s*\}"
+        // Pattern to match for loop header (body extracted via brace-matching)
+        let header_re = Regex::new(
+            r"for\s*\(\s*(i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^;]+)\s*;\s*([^\)]+)\)"
         ).map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        // First pass: normalize i++ and i-- to i = i + 1
-        let increment_re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\+\+")
+        // Step 1: Add markers to preserve prefix/postfix information
+        // Postfix: i++ -> ###HUST_POSTFIX###i++###HUST_END###
+        let postfix_increment_re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\+\+")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        result = increment_re.replace_all(&result, "$1 = $1 + 1").to_string();
-        
-        // Handle i-- pattern
-        let decrement_re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\-\-")
-            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        result = decrement_re.replace_all(&result, "$1 = $1 - 1").to_string();
+        result = postfix_increment_re.replace_all(&result, "###HUST_POSTFIX###$1++###HUST_END###").to_string();
 
-        // Now transform for loops
+        // Postfix: i-- -> ###HUST_POSTFIX###i--###HUST_END###
+        let postfix_decrement_re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\-\-")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        result = postfix_decrement_re.replace_all(&result, "###HUST_POSTFIX###$1--###HUST_END###").to_string();
+
+        // Prefix: ++i -> ###HUST_PREFIX###++i###HUST_END###
+        let prefix_increment_re = Regex::new(r"\+\+\s*([a-zA-Z_][a-zA-Z0-9_]*)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        result = prefix_increment_re.replace_all(&result, "###HUST_PREFIX###++$1###HUST_END###").to_string();
+
+        // Prefix: --i -> ###HUST_PREFIX###--i###HUST_END###
+        let prefix_decrement_re = Regex::new(r"\-\-\s*([a-zA-Z_][a-zA-Z0-9_]*)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        result = prefix_decrement_re.replace_all(&result, "###HUST_PREFIX###--$1###HUST_END###").to_string();
+
+        // Step 2: Transform for loops using markers
+        // Use two-pass approach: regex for header, brace-matching for body
         loop {
-            let caps = match for_re.captures(&result) {
-                Some(c) => c,
+            // Only match the for loop header (no body capture)
+            let header_match = match header_re.find(&result) {
+                Some(m) => m,
                 None => break,
             };
+
+            let header_text = header_match.as_str();
+            let caps = header_re.captures(&result).ok_or_else(|| {
+                TranspileError::TransformError("Failed to capture for loop header".to_string())
+            })?;
 
             let var_type = &caps[1];
             let var_name = &caps[2];
@@ -545,24 +589,130 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             let condition = caps[4].trim();
             let update = caps[5].trim();
 
-            // Extract body (strip leading newline/whitespace, trailing whitespace and closing brace)
-            let full_body = caps.get(6).map(|m| m.as_str()).unwrap_or("");
-            let body = full_body.trim();
+            // Find the body using brace-depth matching
+            let after_header = &result[header_match.end()..];
+            let open_brace_idx = match after_header.find('{') {
+                Some(idx) => idx,
+                None => break, // malformed for loop
+            };
             
-            // Build update statement
-            let update_stmt = format!("{};", update);
+            let body_start_abs = header_match.end() + open_brace_idx + 1;
+            
+            // Count brace depth to find matching }
+            let mut brace_depth = 1;
+            let mut in_string = false;
+            let mut body_end_abs = body_start_abs;
+            let body_src = &result[body_start_abs..];
+            
+            for (i, c) in body_src.char_indices() {
+                if c == '"' {
+                    in_string = !in_string;
+                }
+                if !in_string {
+                    match c {
+                        '{' => brace_depth += 1,
+                        '}' => {
+                            brace_depth -= 1;
+                            if brace_depth == 0 {
+                                body_end_abs = body_start_abs + i;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            
+            if brace_depth != 0 {
+                break; // malformed, no matching closing brace
+            }
+            
+            // Extract body content
+            let body = result[body_start_abs..body_end_abs].trim();
+            let full_for_start = header_match.start();
+            let full_for_end = body_end_abs + 1; // include the closing }
 
-            // Build while loop with update at END of body
-            let rust_while = format!(
-                "let mut {}: usize = {}; while {} {{{}{}{}}}",
-                var_name, init_value, condition, body, update_stmt, ""
-            );
+            // Detect if update uses increment/decrement operators
+            let is_prefix = update.contains("###HUST_PREFIX###");
+            let is_postfix = update.contains("###HUST_POSTFIX###");
 
-            let full_match = caps.get(0).unwrap();
-            let start = full_match.start();
-            let end = full_match.end();
+            // Extract variable name from the marked update
+            let update_var_name = if is_prefix {
+                // Extract from ###HUST_PREFIX###++i###HUST_END###
+                let re = Regex::new(r"###HUST_PREFIX###\+\+([a-zA-Z_][a-zA-Z0-9_]*)###HUST_END###")
+                    .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                re.captures(update)
+                    .and_then(|c| c.get(1).map(|m| m.as_str()))
+                    .unwrap_or(var_name)
+            } else if is_postfix {
+                // Extract from ###HUST_POSTFIX###i++###HUST_END###
+                let re = Regex::new(r"###HUST_POSTFIX###([a-zA-Z_][a-zA-Z0-9_]*)\+\+###HUST_END###")
+                    .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                re.captures(update)
+                    .and_then(|c| c.get(1).map(|m| m.as_str()))
+                    .unwrap_or(var_name)
+            } else {
+                var_name
+            };
 
-            result = format!("{}{}{}", &result[..start], rust_while, &result[end..]);
+            // Build update statement: var = var + 1 or var = var - 1
+            let is_increment = update.contains("++");
+            let update_stmt = if is_increment {
+                format!("{} = {} + 1;", update_var_name, update_var_name)
+            } else {
+                format!("{} = {} - 1;", update_var_name, update_var_name)
+            };
+
+            // Build while loop
+            // Note: In for loops, both prefix (++i) and postfix (i++) operators
+            // are executed AFTER the loop body, not before the condition check.
+            // The prefix/postfix difference only matters in expressions like:
+            //   j = i++;  vs  j = ++i;
+            // But in the for loop update clause, they behave identically.
+            let rust_while = if is_prefix || is_postfix {
+                format!(
+"let mut {}: {} = {}; while {} {{{}\n{}}}",
+                    var_name, var_type, init_value, condition, body, update_stmt
+                )
+            } else {
+                // Check if update is a code block { ... }
+                let update_trimmed = update.trim();
+                if update_trimmed.starts_with('{') && update_trimmed.ends_with('}') {
+                    // Extract content inside { ... }
+                    let block_content = &update_trimmed[1..update_trimmed.len()-1].trim();
+                    // Remove markers from block content and convert to assignment statements
+                    let processed_block = block_content
+                        .replace("###HUST_PREFIX###", "")
+                        .replace("###HUST_POSTFIX###", "")
+                        .replace("###HUST_END###", "");
+                    // Place processed block content after loop body (as inline)
+                    format!(
+"let mut {}: {} = {}; while {} {{{}\n{}}}",
+                        var_name, var_type, init_value, condition, body, processed_block
+                    )
+                } else {
+                    // No ++/-- operator and not a code block, use update as-is
+                    format!(
+"let mut {}: {} = {}; while {} {{{}\n{}}}",
+                        var_name, var_type, init_value, condition, body, update
+                    )
+                }
+            };
+
+            result = format!("{}{}{}", &result[..full_for_start], rust_while, &result[full_for_end..]);
+        }
+
+        // Step 3: Remove all markers (safety cleanup)
+        // This ensures no markers remain in final output
+        result = result.replace("###HUST_PREFIX###", "")
+                       .replace("###HUST_POSTFIX###", "")
+                       .replace("###HUST_END###", "");
+
+        // Step 4: Safety check - verify no markers remain
+        if result.contains("###HUST_") {
+            return Err(TranspileError::TransformError(
+                "Internal error: Hust markers not properly removed".to_string()
+            ));
         }
 
         Ok(result)
