@@ -1,0 +1,23 @@
+// Multi-dimensional array stress test: 6D (2^6 = 64 elements, all 1)
+// Same verification chain as multi_dim_4.hust, pushed to 6 levels:
+// declaration wrapping, 6-layer nested for, 6-deep as-usize index peeling.
+// Sum == 64 proves full coverage of all 64 elements.
+// Expected output: arr6: sum = 64
+void main() {
+    i32[2][2][2][2][2][2] arr6 = {{{{{{1,1},{1,1}},{{1,1},{1,1}}},{{{1,1},{1,1}},{{1,1},{1,1}}}},{{{{1,1},{1,1}},{{1,1},{1,1}}},{{{1,1},{1,1}},{{1,1},{1,1}}}}},{{{{{1,1},{1,1}},{{1,1},{1,1}}},{{{1,1},{1,1}},{{1,1},{1,1}}}},{{{{1,1},{1,1}},{{1,1},{1,1}}},{{{1,1},{1,1}},{{1,1},{1,1}}}}}};
+    i32 sum = 0;
+    for (i32 i = 0; i < 2; i++) {
+        for (i32 j = 0; j < 2; j++) {
+            for (i32 k = 0; k < 2; k++) {
+                for (i32 l = 0; l < 2; l++) {
+                    for (i32 m = 0; m < 2; m++) {
+                        for (i32 n = 0; n < 2; n++) {
+                            sum = sum + arr6[i][j][k][l][m][n];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!("arr6: sum = {}", sum);
+}
