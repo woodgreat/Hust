@@ -183,11 +183,14 @@ impl Translator {
 
         let mut result = source.to_string();
 
-        // Phase 1: variable-name host — x[i], scores[idx]
-        let re_var = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\[([^\[\]]+)\]")
+        // 2-phase peeling. Index pattern starts with [a-zA-Z_]: untransformed
+        // indices begin with a letter, transformed ones with '(' — so already
+        // converted levels DO NOT MATCH and their ']' stays available as the
+        // host for the next inner level (otherwise each pass consumes it and
+        // 3+ dimensional chains stall one level short of convergence).
+        let re_var = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\[([a-zA-Z_][^\[\]]*)\]")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        // Phase 2: ']' host — the inner access of a nested array: ][j]
-        let re_bracket = Regex::new(r"\]\[([^\[\]]+)\]")
+        let re_bracket = Regex::new(r"\]\[([a-zA-Z_][^\[\]]*)\]")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let is_transformable = |idx: &str| -> bool {
@@ -1109,33 +1112,49 @@ impl Translator {
     }
 
     /// V0.4: Transform multi-dimensional array declaration
+    /// 2026.09.08 dimension generalization (拆离法 sibling):
     /// i32[3][4] matrix = {{1,2,3,4},{5,6,7,8},{9,10,11,12}};
     /// -> let mut matrix: [[i32; 4]; 3] = [[1,2,3,4],[5,6,7,8],[9,10,11,12]];
+    /// i32[2][2][2] cube = {{{1,2},{3,4}},{{5,6},{7,8}}};
+    /// -> let mut cube: [[[i32; 2]; 2]; 2] = [[[1,2],[3,4]],[[5,6],[7,8]]];
+    /// The regex captures the whole dimension string "[s1][s2]...[sn]" WITHOUT
+    /// counting levels; the Rust type is built by looping dims right-to-left
+    /// (rightmost = innermost), matching the 2-D behavior this replaces.
     fn transform_multi_array_decl(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Match: type[size1][size2] name = { {...}, {...} };
-        // Use multiline mode and match nested braces by finding the closing brace
-        let re = Regex::new(r"(?m)\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d+)\]\[(\d+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([\s\S]*?)\}\s*;")
+        // 2+ adjacent dimension groups; 1-D is handled by transform_array_declarations
+        let re = Regex::new(
+            r"(?m)\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[\d+\]){2,})\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([\s\S]*?)\}\s*;",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let dim_re = Regex::new(r"\[(\d+)\]")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let type_name = &caps[1];
-            let size1 = &caps[2];
-            let size2 = &caps[3];
-            let var_name = &caps[4];
-            let elements = &caps[5];
-            // Convert {{...},{...}} to [[...],[...]]
+            let dims_str = &caps[2];
+            let var_name = &caps[3];
+            let elements = &caps[4];
+
+            // Build Rust type: loop dims right-to-left, rightmost dim innermost
+            let mut ty = type_name.to_string();
+            let dims: Vec<_> = dim_re.captures_iter(dims_str).collect();
+            for d in dims.iter().rev() {
+                ty = format!("[{}; {}]", ty, &d[1]);
+            }
+
+            // Element braces -> brackets (per-char replace, depth-agnostic)
             let rust_elements = elements
                 .replace("{", "[")
                 .replace("}", "]")
                 .replace(";", "");
+
             format!(
-                "let mut {}: [[{}; {}]; {}] = [{}];",
+                "let mut {}: {} = [{}];",
                 var_name,
-                type_name,
-                size2,
-                size1,
+                ty,
                 rust_elements.trim()
             )
         });
