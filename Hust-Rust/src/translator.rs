@@ -128,7 +128,7 @@ impl Translator {
         // ClassName var; -> let mut var: ClassName = ClassName { ... };
         output = self.transform_class_instantiation(&output)?;
 
-// Rule 14: Transform method calls from camelCase to snake_case
+        // Rule 14: Transform method calls from camelCase to snake_case
         // obj.methodName() -> obj.method_name()
         output = self.transform_method_calls(&output)?;
 
@@ -136,7 +136,7 @@ impl Translator {
         // i32[] first5Scores = scores[0..5]; -> let first5Scores: &[i32] = &scores[0..5];
         output = self.transform_array_slices(&output)?;
 
-// Rule 16: Transform C-style type cast (type)expr to expr as type
+        // Rule 16: Transform C-style type cast (type)expr to expr as type
         output = self.transform_type_cast(&output)?;
 
         // Rule 17: Normalize float literals
@@ -164,33 +164,69 @@ impl Translator {
             format!(".{}(", rust_method)
         });
 
-Ok(result.to_string())
+        Ok(result.to_string())
     }
 
     /// V0.9: Transform array index expressions to use as usize
     /// Rust requires usize for array indexing, but Hust uses signed types.
     /// scores[i] -> scores[(i) as usize], arr[j-1] -> arr[(j-1) as usize]
+    /// Handles nested arrays: matrix[i][j] -> matrix[(i) as usize][(j) as usize]
+    ///
+    /// Design note (拆离法, two-phase):
+    /// Phase 1 hosts are variable names:  x[i]        -> x[(i) as usize]
+    /// Phase 2 hosts are ']' (prev level): ][j]       -> ][(j) as usize
+    /// Phase 1 consumes the ']' that Phase 2 needs as a host, so one pass
+    /// cannot reach inner levels of nested arrays. Alternating phases in a
+    /// loop peels one nesting level per iteration; converges in depth passes.
     fn transform_array_indices(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
-        let re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\[([^\[\]]+?)\]")
+
+        let mut result = source.to_string();
+
+        // Phase 1: variable-name host — x[i], scores[idx]
+        let re_var = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\[([^\[\]]+)\]")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        // Phase 2: ']' host — the inner access of a nested array: ][j]
+        let re_bracket = Regex::new(r"\]\[([^\[\]]+)\]")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let result = re.replace_all(source, |caps: &regex::Captures| {
-            let array_name = &caps[1];
-            let index_expr = &caps[2];
+        let is_transformable = |idx: &str| -> bool {
+            !idx.contains(" as usize") && !idx.contains("..") && idx.parse::<i64>().is_err()
+        };
 
-            // Don't transform slices (contains ..) or simple integer literals
-            if index_expr.contains("..") || index_expr.trim().parse::<i64>().is_ok() {
-                format!("{}[{}]", array_name, index_expr)
-            } else {
-                format!("{}[({}) as usize]", array_name, index_expr)
-            }
-        });
+        let mut changed = true;
+        let mut rounds = 0;
+        while changed && rounds < 10 {
+            changed = false;
+            rounds += 1;
 
-        Ok(result.to_string())
+            let pass1 = re_var.replace_all(&result, |caps: &regex::Captures| {
+                let idx = caps[2].trim();
+                if is_transformable(idx) {
+                    changed = true;
+                    format!("{}[({}) as usize]", &caps[1], idx)
+                } else {
+                    caps[0].to_string()
+                }
+            });
+            result = pass1.to_string();
+
+            let pass2 = re_bracket.replace_all(&result, |caps: &regex::Captures| {
+                let idx = caps[1].trim();
+                if is_transformable(idx) {
+                    changed = true;
+                    format!("][({}) as usize]", idx)
+                } else {
+                    caps[0].to_string()
+                }
+            });
+            result = pass2.to_string();
+        }
+
+        Ok(result)
     }
 
-/// V0.7: Transform C-style type cast (type)expr to expr as type
+    /// V0.7: Transform C-style type cast (type)expr to expr as type
     /// (f32)sum -> sum as f32
     /// (i32)(a + b) -> (a + b) as i32
     /// (f32)(sum / 10) -> sum as f32 / 10 as f32 [distribute to operands for float]
@@ -203,51 +239,60 @@ Ok(result.to_string())
         let re_float = Regex::new(r"\((f32|f64)\)\s*\(([^)]+)\)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let mut result = re_float.replace_all(source, |caps: &regex::Captures| {
-            let type_name = &caps[1];
-            let expr = &caps[2];
-            // Distribute cast to each operand in the expression
-            let mut res = String::new();
-            let mut depth = 0;
-            let mut last_op_pos = 0;
-            let chars: Vec<char> = expr.chars().collect();
+        let mut result = re_float
+            .replace_all(source, |caps: &regex::Captures| {
+                let type_name = &caps[1];
+                let expr = &caps[2];
+                // Distribute cast to each operand in the expression
+                let mut res = String::new();
+                let mut depth = 0;
+                let mut last_op_pos = 0;
+                let chars: Vec<char> = expr.chars().collect();
 
-            for (i, c) in chars.iter().enumerate() {
-                match c {
-                    '(' => { depth += 1; }
-                    ')' => { depth -= 1; }
-                    '+' | '-' | '*' | '/' if depth == 0 => {
-                        let operand = expr[last_op_pos..i].trim();
-                        if !operand.is_empty() {
-                            res.push_str(operand);
-                            res.push_str(&format!(" as {}", type_name));
+                for (i, c) in chars.iter().enumerate() {
+                    match c {
+                        '(' => {
+                            depth += 1;
                         }
-                        res.push(*c);
-                        last_op_pos = i + 1;
+                        ')' => {
+                            depth -= 1;
+                        }
+                        '+' | '-' | '*' | '/' if depth == 0 => {
+                            let operand = expr[last_op_pos..i].trim();
+                            if !operand.is_empty() {
+                                res.push_str(operand);
+                                res.push_str(&format!(" as {}", type_name));
+                            }
+                            res.push(*c);
+                            last_op_pos = i + 1;
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
-            }
 
-            let last_operand = expr[last_op_pos..].trim();
-            if !last_operand.is_empty() {
-                res.push_str(last_operand);
-                res.push_str(&format!(" as {}", type_name));
-            }
+                let last_operand = expr[last_op_pos..].trim();
+                if !last_operand.is_empty() {
+                    res.push_str(last_operand);
+                    res.push_str(&format!(" as {}", type_name));
+                }
 
-            res
-        }).to_string();
+                res
+            })
+            .to_string();
 
         // Pattern 2: (type)simple_expr - handles simple expressions without parens
         // e.g., (f32)sum -> sum as f32
-        let re_simple = Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char)\)\s*([^\s;,\)]+)")
-            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let re_simple =
+            Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char)\)\s*([^\s;,\)]+)")
+                .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        result = re_simple.replace_all(&result, |caps: &regex::Captures| {
-            let type_name = &caps[1];
-            let expr = &caps[2];
-            format!("{} as {}", expr, type_name)
-        }).to_string();
+        result = re_simple
+            .replace_all(&result, |caps: &regex::Captures| {
+                let type_name = &caps[1];
+                let expr = &caps[2];
+                format!("{} as {}", expr, type_name)
+            })
+            .to_string();
 
         Ok(result)
     }
@@ -263,15 +308,23 @@ Ok(result.to_string())
         while i < expr.len() {
             let c = expr.chars().nth(i).unwrap();
             match c {
-                '(' => { depth += 1; result.push(c); }
-                ')' => { depth -= 1; result.push(c); }
+                '(' => {
+                    depth += 1;
+                    result.push(c);
+                }
+                ')' => {
+                    depth -= 1;
+                    result.push(c);
+                }
                 '+' | '-' | '*' | '/' if depth == 0 => {
                     // This is a top-level operator
                     // Insert "as type" before the operator
                     result.push_str(&format!(" as {}", type_name));
                     result.push(c);
                 }
-                _ => { result.push(c); }
+                _ => {
+                    result.push(c);
+                }
             }
             i += 1;
         }
@@ -302,7 +355,7 @@ Ok(result.to_string())
             format!(": {} = {}.0;", type_name, value)
         });
 
-Ok(result.to_string())
+        Ok(result.to_string())
     }
 
     /// V0.4: Transform array slices
@@ -321,7 +374,10 @@ Ok(result.to_string())
             let start = &caps[4];
             let end = &caps[5];
 
-            format!("let {}: &[{}] = &{}[{}..{}];", var_name, type_name, array_name, start, end)
+            format!(
+                "let {}: &[{}] = &{}[{}..{}];",
+                var_name, type_name, array_name, start, end
+            )
         });
 
         Ok(result.to_string())
@@ -349,7 +405,10 @@ Ok(result.to_string())
             } else {
                 // Transform to Rust struct instantiation with default values
                 // For now, use Default::default() - requires #[derive(Default)]
-                format!("let mut {}: {} = {}::default();", var_name, class_name, class_name)
+                format!(
+                    "let mut {}: {} = {}::default();",
+                    var_name, class_name, class_name
+                )
             }
         });
 
@@ -358,10 +417,20 @@ Ok(result.to_string())
 
     /// Check if a type name is a primitive type
     fn is_primitive_type(&self, type_name: &str) -> bool {
-        matches!(type_name,
-            "i8" | "i16" | "i32" | "i64" |
-            "u8" | "u16" | "u32" | "u64" |
-            "f32" | "f64" | "bool" | "char" | "String"
+        matches!(
+            type_name,
+            "i8" | "i16"
+                | "i32"
+                | "i64"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "f32"
+                | "f64"
+                | "bool"
+                | "char"
+                | "String"
         )
     }
 
@@ -383,7 +452,7 @@ Ok(result.to_string())
     fn transform_array_declarations(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-// Match: type[size] name = {elements};
+        // Match: type[size] name = {elements};
         // Include the trailing semicolon in the match so we replace it completely
         let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([^}]+)\};")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
@@ -394,7 +463,10 @@ Ok(result.to_string())
             let var_name = &caps[3];
             let elements = &caps[4];
             // Convert {1, 2, 3} to [1, 2, 3], use single semicolon
-            format!("let mut {}: [{}; {}] = [{}];", var_name, type_name, size, elements)
+            format!(
+                "let mut {}: [{}; {}] = [{}];",
+                var_name, type_name, size, elements
+            )
         });
 
         Ok(result.to_string())
@@ -417,19 +489,19 @@ Ok(result.to_string())
             let is_const = caps.get(1).is_some();
             let type_name = &caps[2];
             let var_name = &caps[3];
-            
+
             // Get the full match and check if this is inside a for loop header
             let full_match = caps.get(0).unwrap();
             let start = full_match.start();
-            
+
             // Look at the 15 characters before this match
             let before_start = if start >= 15 { start - 15 } else { 0 };
             let before = &source[before_start..start];
-            
+
             // If preceded by "for (" (possibly with whitespace), this is a for loop variable
             // Don't transform it - the for loop transformer will handle it
             let is_for_loop_var = before.contains("for (") || before.contains("for(");
-            
+
             if is_const {
                 format!("const {}: {} =", var_name, type_name)
             } else if is_for_loop_var {
@@ -473,7 +545,10 @@ Ok(result.to_string())
             if ret_type == "void" {
                 format!("{}fn {}({}) {{", vis, func_name, transformed_params)
             } else {
-                format!("{}fn {}({}) -> {} {{", vis, func_name, transformed_params, ret_type)
+                format!(
+                    "{}fn {}({}) -> {} {{",
+                    vis, func_name, transformed_params, ret_type
+                )
             }
         });
 
@@ -494,7 +569,7 @@ Ok(result.to_string())
             if param.is_empty() {
                 continue;
             }
-            
+
             // Parse "type name"
             let parts: Vec<&str> = param.split_whitespace().collect();
             if parts.len() == 2 {
@@ -506,7 +581,7 @@ Ok(result.to_string())
                 result.push(param.to_string());
             }
         }
-        
+
         result.join(", ")
     }
 
@@ -538,7 +613,45 @@ Ok(result.to_string())
     /// -> let mut i: i32 = 0; while i < n { body; i = i + 1; }
     /// for (i32 i = 0; i < n; i++) { body } (with ++ shorthand)
     /// -> let mut i: i32 = 0; while i < n { body; i += 1; }
-fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
+
+    /// L1 condition conversion: only handle the exact form "var op xxx.len()"
+    /// (both directions), matched with full-string anchors (^ $).
+    ///
+    /// Design rationale:
+    /// - Anchoring the WHOLE condition naturally excludes compound conditions
+    ///   like "i + 1 < arr.len()" — those are left untouched so rustc reports
+    ///   the type error and the user opts in with an explicit (usize) cast.
+    ///   Fail-safe: we never generate wrong code, we just don't help.
+    /// - Simple form covers the vast majority of real loops.
+    /// Warning for users: prefer "i + 1 < len" over "i < len - 1"; with usize,
+    /// "len - 1" underflows when the array is empty.
+    fn transform_len_comparison(condition: &str) -> String {
+        use regex::Regex;
+
+        let trimmed = condition.trim();
+
+        // Pattern 1: var op xxx.len()   e.g. "i < dynamic.len()"
+        let re_fwd = Regex::new(
+            r"^([a-zA-Z_]\w*)\s*(<=|>=|<|>)\s*([a-zA-Z_]\w*)\.len\(\)$",
+        )
+        .unwrap();
+        if let Some(c) = re_fwd.captures(trimmed) {
+            return format!("({} as usize) {} {}.len()", &c[1], &c[2], &c[3]);
+        }
+
+        // Pattern 2: xxx.len() op var   e.g. "dynamic.len() > i"
+        let re_rev = Regex::new(
+            r"^([a-zA-Z_]\w*)\.len\(\)\s*(<=|>=|<|>)\s*([a-zA-Z_]\w*)$",
+        )
+        .unwrap();
+        if let Some(c) = re_rev.captures(trimmed) {
+            return format!("{}.len() {} ({} as usize)", &c[1], &c[2], &c[3]);
+        }
+
+        trimmed.to_string()
+    }
+
+    fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
         let mut result = source.to_string();
@@ -552,22 +665,30 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
         // Postfix: i++ -> ###HUST_POSTFIX###i++###HUST_END###
         let postfix_increment_re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\+\+")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        result = postfix_increment_re.replace_all(&result, "###HUST_POSTFIX###$1++###HUST_END###").to_string();
+        result = postfix_increment_re
+            .replace_all(&result, "###HUST_POSTFIX###$1++###HUST_END###")
+            .to_string();
 
         // Postfix: i-- -> ###HUST_POSTFIX###i--###HUST_END###
         let postfix_decrement_re = Regex::new(r"(\b[a-zA-Z_][a-zA-Z0-9_]*)\-\-")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        result = postfix_decrement_re.replace_all(&result, "###HUST_POSTFIX###$1--###HUST_END###").to_string();
+        result = postfix_decrement_re
+            .replace_all(&result, "###HUST_POSTFIX###$1--###HUST_END###")
+            .to_string();
 
         // Prefix: ++i -> ###HUST_PREFIX###++i###HUST_END###
         let prefix_increment_re = Regex::new(r"\+\+\s*([a-zA-Z_][a-zA-Z0-9_]*)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        result = prefix_increment_re.replace_all(&result, "###HUST_PREFIX###++$1###HUST_END###").to_string();
+        result = prefix_increment_re
+            .replace_all(&result, "###HUST_PREFIX###++$1###HUST_END###")
+            .to_string();
 
         // Prefix: --i -> ###HUST_PREFIX###--i###HUST_END###
         let prefix_decrement_re = Regex::new(r"\-\-\s*([a-zA-Z_][a-zA-Z0-9_]*)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        result = prefix_decrement_re.replace_all(&result, "###HUST_PREFIX###--$1###HUST_END###").to_string();
+        result = prefix_decrement_re
+            .replace_all(&result, "###HUST_PREFIX###--$1###HUST_END###")
+            .to_string();
 
         // Step 2: Transform for loops using markers
         // Use two-pass approach: regex for header, brace-matching for body
@@ -595,15 +716,15 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                 Some(idx) => idx,
                 None => break, // malformed for loop
             };
-            
+
             let body_start_abs = header_match.end() + open_brace_idx + 1;
-            
+
             // Count brace depth to find matching }
             let mut brace_depth = 1;
             let mut in_string = false;
             let mut body_end_abs = body_start_abs;
             let body_src = &result[body_start_abs..];
-            
+
             for (i, c) in body_src.char_indices() {
                 if c == '"' {
                     in_string = !in_string;
@@ -622,11 +743,11 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                     }
                 }
             }
-            
+
             if brace_depth != 0 {
                 break; // malformed, no matching closing brace
             }
-            
+
             // Extract body content
             let body = result[body_start_abs..body_end_abs].trim();
             let full_for_start = header_match.start();
@@ -646,8 +767,9 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                     .unwrap_or(var_name)
             } else if is_postfix {
                 // Extract from ###HUST_POSTFIX###i++###HUST_END###
-                let re = Regex::new(r"###HUST_POSTFIX###([a-zA-Z_][a-zA-Z0-9_]*)\+\+###HUST_END###")
-                    .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                let re =
+                    Regex::new(r"###HUST_POSTFIX###([a-zA-Z_][a-zA-Z0-9_]*)\+\+###HUST_END###")
+                        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
                 re.captures(update)
                     .and_then(|c| c.get(1).map(|m| m.as_str()))
                     .unwrap_or(var_name)
@@ -663,6 +785,10 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                 format!("{} = {} - 1;", update_var_name, update_var_name)
             };
 
+            // L1 condition conversion: "i < arr.len()" -> "(i as usize) < arr.len()"
+            // Anchored match — compound conditions are left for rustc to report
+            let transformed_condition = Self::transform_len_comparison(condition);
+
             // Build while loop
             // Note: In for loops, both prefix (++i) and postfix (i++) operators
             // are executed AFTER the loop body, not before the condition check.
@@ -671,15 +797,15 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             // But in the for loop update clause, they behave identically.
             let rust_while = if is_prefix || is_postfix {
                 format!(
-"let mut {}: {} = {}; while {} {{{}\n{}}}",
-                    var_name, var_type, init_value, condition, body, update_stmt
+                    "let mut {}: {} = {}; while {} {{{}\n{}}}",
+                    var_name, var_type, init_value, transformed_condition, body, update_stmt
                 )
             } else {
                 // Check if update is a code block { ... }
                 let update_trimmed = update.trim();
                 if update_trimmed.starts_with('{') && update_trimmed.ends_with('}') {
                     // Extract content inside { ... }
-                    let block_content = &update_trimmed[1..update_trimmed.len()-1].trim();
+                    let block_content = &update_trimmed[1..update_trimmed.len() - 1].trim();
                     // Remove markers from block content and convert to assignment statements
                     let processed_block = block_content
                         .replace("###HUST_PREFIX###", "")
@@ -687,45 +813,56 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                         .replace("###HUST_END###", "");
                     // Place processed block content after loop body (as inline)
                     format!(
-"let mut {}: {} = {}; while {} {{{}\n{}}}",
-                        var_name, var_type, init_value, condition, body, processed_block
+                        "let mut {}: {} = {}; while {} {{{}\n{}}}",
+                        var_name,
+                        var_type,
+                        init_value,
+                        transformed_condition,
+                        body,
+                        processed_block
                     )
                 } else {
                     // No ++/-- operator and not a code block, use update as-is
                     format!(
-"let mut {}: {} = {}; while {} {{{}\n{}}}",
-                        var_name, var_type, init_value, condition, body, update
+                        "let mut {}: {} = {}; while {} {{{}\n{}}}",
+                        var_name, var_type, init_value, transformed_condition, body, update
                     )
                 }
             };
 
-            result = format!("{}{}{}", &result[..full_for_start], rust_while, &result[full_for_end..]);
+            result = format!(
+                "{}{}{}",
+                &result[..full_for_start],
+                rust_while,
+                &result[full_for_end..]
+            );
         }
 
         // Step 3: Remove all markers (safety cleanup)
         // This ensures no markers remain in final output
-        result = result.replace("###HUST_PREFIX###", "")
-                       .replace("###HUST_POSTFIX###", "")
-                       .replace("###HUST_END###", "");
+        result = result
+            .replace("###HUST_PREFIX###", "")
+            .replace("###HUST_POSTFIX###", "")
+            .replace("###HUST_END###", "");
 
         // Step 4: Safety check - verify no markers remain
         if result.contains("###HUST_") {
             return Err(TranspileError::TransformError(
-                "Internal error: Hust markers not properly removed".to_string()
+                "Internal error: Hust markers not properly removed".to_string(),
             ));
         }
 
         Ok(result)
     }
 
-/// Add markers around for loop bodies to protect content
+    /// Add markers around for loop bodies to protect content
     fn protect_for_bodies(source: &str) -> String {
         use regex::Regex;
-        
+
         let mut result = source.to_string();
         loop {
             let for_pattern = Regex::new(r"for\s*\([^)]+\)\s*\{").unwrap();
-            
+
             if let Some(m) = for_pattern.find(&result) {
                 let marker = "###FOR_MARKER###";
                 result = format!("{}{}{}", &result[..m.end()], marker, &result[m.end()..]);
@@ -745,7 +882,7 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             let mut depth = 1;
             let mut in_string = false;
             let mut escape = false;
-            
+
             for (i, c) in after_marker.chars().enumerate() {
                 if escape {
                     escape = false;
@@ -759,7 +896,7 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                     in_string = !in_string;
                     continue;
                 }
-                
+
                 if !in_string {
                     match c {
                         '{' => depth += 1,
@@ -767,7 +904,7 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
                         _ => {}
                     }
                 }
-                
+
                 if depth == 0 {
                     let body = &after_marker[..i];
                     let after = &after_marker[i + 1..];
@@ -943,8 +1080,8 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
     fn transform_pass(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        let re = Regex::new(r"\bpass\s*;")
-            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let re =
+            Regex::new(r"\bpass\s*;").map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, "();");
 
@@ -957,8 +1094,10 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
         // Match: type[] name;
-        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;")
-            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let re = Regex::new(
+            r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let type_name = &caps[1];
@@ -987,15 +1126,29 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             let var_name = &caps[4];
             let elements = &caps[5];
             // Convert {{...},{...}} to [[...],[...]]
-            let rust_elements = elements.replace("{", "[").replace("}", "]").replace(";", "");
-            format!("let mut {}: [[{}; {}]; {}] = [{}];", var_name, type_name, size2, size1, rust_elements.trim())
+            let rust_elements = elements
+                .replace("{", "[")
+                .replace("}", "]")
+                .replace(";", "");
+            format!(
+                "let mut {}: [[{}; {}]; {}] = [{}];",
+                var_name,
+                type_name,
+                size2,
+                size1,
+                rust_elements.trim()
+            )
         });
 
         Ok(result.to_string())
     }
 
     /// Transpile and write to file
-    pub fn transpile_to_file(&self, input_path: &PathBuf, output_path: &PathBuf) -> Result<(), TranspileError> {
+    pub fn transpile_to_file(
+        &self,
+        input_path: &PathBuf,
+        output_path: &PathBuf,
+    ) -> Result<(), TranspileError> {
         let result = self.transpile_file(input_path)?;
         std::fs::write(output_path, result)?;
         Ok(())
@@ -1003,7 +1156,8 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
 
     /// V0.5: Transpile multiple modules into a single Rust file
     /// Merges all modules, handling imports and visibility
-    pub fn transpile_modules(&self,
+    pub fn transpile_modules(
+        &self,
         modules: &[Module],
         entry_module: &Module,
     ) -> Result<String, TranspileError> {
@@ -1130,7 +1284,8 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
 
         // Extract all methods first (supports multi-line with (?s))
         use regex::Regex;
-        let method_re = Regex::new(r"(?s)(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*\{[^{}]*\}").unwrap();
+        let method_re =
+            Regex::new(r"(?s)(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*\{[^{}]*\}").unwrap();
 
         for caps in method_re.captures_iter(body) {
             let full_match = caps.get(0).unwrap();
@@ -1194,7 +1349,8 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
 
         // Pattern: [public] ReturnType name(params) [{ body }]
         // (?s) makes . match newlines
-        let re = Regex::new(r"(?s)^\s*(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*(\{[^{}]*\})?").unwrap();
+        let re =
+            Regex::new(r"(?s)^\s*(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*(\{[^{}]*\})?").unwrap();
 
         let caps = re.captures(text)?;
 
@@ -1209,7 +1365,11 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             ret_type,
             params,
             body,
-            visibility: if is_public { Visibility::Public } else { Visibility::Private },
+            visibility: if is_public {
+                Visibility::Public
+            } else {
+                Visibility::Private
+            },
         })
     }
 
@@ -1283,7 +1443,9 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             let rust_name = self.to_snake_case(&method.name);
             let rust_params = self.transform_method_params(&method.params);
 
-            let needs_mut = method.body.as_ref()
+            let needs_mut = method
+                .body
+                .as_ref()
                 .map(|b| b.contains("self.") && b.contains("="))
                 .unwrap_or(false);
             let self_param = if needs_mut { "&mut self" } else { "&self" };
@@ -1291,7 +1453,10 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             let sig = if method.ret_type == "void" {
                 format!("\n    fn {}({}{}) {{", rust_name, self_param, rust_params)
             } else {
-                format!("\n    fn {}({}{}) -> {} {{", rust_name, self_param, rust_params, method.ret_type)
+                format!(
+                    "\n    fn {}({}{}) -> {} {{",
+                    rust_name, self_param, rust_params, method.ret_type
+                )
             };
 
             result.push_str(&sig);
@@ -1310,11 +1475,7 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
     }
 
     /// Generate inherent impl block (class methods)
-    fn generate_inherent_impl(
-        &self,
-        class_name: &str,
-        methods: &[ClassMethod],
-    ) -> String {
+    fn generate_inherent_impl(&self, class_name: &str, methods: &[ClassMethod]) -> String {
         let mut result = format!("impl {} {{", class_name);
 
         for method in methods {
@@ -1326,15 +1487,23 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
             let rust_name = self.to_snake_case(&method.name);
             let rust_params = self.transform_method_params(&method.params);
 
-            let needs_mut = method.body.as_ref()
+            let needs_mut = method
+                .body
+                .as_ref()
                 .map(|b| b.contains("self.") && b.contains("="))
                 .unwrap_or(false);
             let self_param = if needs_mut { "&mut self" } else { "&self" };
 
             let sig = if method.ret_type == "void" {
-                format!("\n    {}fn {}({}{}) {{", vis, rust_name, self_param, rust_params)
+                format!(
+                    "\n    {}fn {}({}{}) {{",
+                    vis, rust_name, self_param, rust_params
+                )
             } else {
-                format!("\n    {}fn {}({}{}) -> {} {{", vis, rust_name, self_param, rust_params, method.ret_type)
+                format!(
+                    "\n    {}fn {}({}{}) -> {} {{",
+                    vis, rust_name, self_param, rust_params, method.ret_type
+                )
             };
 
             result.push_str(&sig);
@@ -1373,11 +1542,13 @@ fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
         // Pattern: .methodName( -> .method_name(
         use regex::Regex;
         let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(").unwrap();
-        result = re.replace_all(&result, |caps: &regex::Captures| {
-            let method_name = &caps[1];
-            let rust_method = self.to_snake_case(method_name);
-            format!(".{}(", rust_method)
-        }).to_string();
+        result = re
+            .replace_all(&result, |caps: &regex::Captures| {
+                let method_name = &caps[1];
+                let rust_method = self.to_snake_case(method_name);
+                format!(".{}(", rust_method)
+            })
+            .to_string();
 
         result
     }
