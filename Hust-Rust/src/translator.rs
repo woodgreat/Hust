@@ -247,12 +247,13 @@ impl Translator {
                 let type_name = &caps[1];
                 let expr = &caps[2];
                 // Distribute cast to each operand in the expression
+                // char_indices() yields BYTE offsets — using chars().enumerate()
+                // here mixed char counts into byte slices and panicked on CJK
                 let mut res = String::new();
                 let mut depth = 0;
                 let mut last_op_pos = 0;
-                let chars: Vec<char> = expr.chars().collect();
 
-                for (i, c) in chars.iter().enumerate() {
+                for (i, c) in expr.char_indices() {
                     match c {
                         '(' => {
                             depth += 1;
@@ -266,8 +267,8 @@ impl Translator {
                                 res.push_str(operand);
                                 res.push_str(&format!(" as {}", type_name));
                             }
-                            res.push(*c);
-                            last_op_pos = i + 1;
+                            res.push(c);
+                            last_op_pos = i + 1; // operators are 1-byte ASCII
                         }
                         _ => {}
                     }
@@ -498,7 +499,12 @@ impl Translator {
             let start = full_match.start();
 
             // Look at the 15 characters before this match
-            let before_start = if start >= 15 { start - 15 } else { 0 };
+            // Byte-offset lookback must land on a char boundary (CJK comments
+            // are 3 bytes/char; a blind `start - 15` can split a codepoint)
+            let mut before_start = if start >= 15 { start - 15 } else { 0 };
+            while before_start > 0 && !source.is_char_boundary(before_start) {
+                before_start -= 1;
+            }
             let before = &source[before_start..start];
 
             // If preceded by "for (" (possibly with whitespace), this is a for loop variable
@@ -939,7 +945,9 @@ impl Translator {
         let mut brace_depth = 0;
         let mut in_for = false;
 
-        for (i, c) in source[start..].chars().enumerate() {
+        // char_indices() yields BYTE offsets, required by the slice math below
+        // (chars().enumerate() counts chars and breaks on multi-byte input)
+        for (i, c) in source[start..].char_indices() {
             match c {
                 '(' => {
                     if in_for {
@@ -955,7 +963,7 @@ impl Translator {
                                 // Find the matching }
                                 let after_brace = &rest[j + 1..];
                                 let mut bd = 1;
-                                for (k, rc) in after_brace.chars().enumerate() {
+                                for (k, rc) in after_brace.char_indices() {
                                     match rc {
                                         '{' => bd += 1,
                                         '}' => {
