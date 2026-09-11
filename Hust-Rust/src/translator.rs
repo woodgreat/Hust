@@ -115,6 +115,10 @@ impl Translator {
         // Rule 7: Transform dynamic array declaration
         output = self.transform_dynamic_array_decl(&output)?;
 
+        // Rule 7.5: `x.push([])` pushes an empty (nested) dynamic array —
+        // how a row is created for Vec<Vec<T>> (2026.09.09)
+        output = self.translate_empty_push(&output)?;
+
         // Rule 8: Transform C-style for loops (MUST run BEFORE variable declarations)
         output = self.transform_for_loop(&output)?;
 
@@ -482,8 +486,18 @@ impl Translator {
 
     /// V0.4: Transform array declarations
     /// i32[5] arr = {1,2,3,4,5}; -> let mut arr: [i32; 5] = [1,2,3,4,5];
+    /// i32[5] arr;               -> let mut arr: [i32; 5] = [0; 5];
+    /// (no-initializer form: rectangular static array, zero-filled, 2026.09.09)
     fn transform_array_declarations(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
+
+        let zero_lit = |t: &str| -> &'static str {
+            match t {
+                "f32" | "f64" => "0.0",
+                "bool" => "false",
+                _ => "0",
+            }
+        };
 
         // Match: type[size] name = {elements};
         // Include the trailing semicolon in the match so we replace it completely
@@ -499,6 +513,24 @@ impl Translator {
             format!(
                 "let mut {}: [{}; {}] = [{}];",
                 var_name, type_name, size, elements
+            )
+        });
+
+        // No-initializer form: type[size] name;  (mutually exclusive with `= {`)
+        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re_no_init.replace_all(&result, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let size = &caps[2];
+            let var_name = &caps[3];
+            format!(
+                "let mut {}: [{}; {}] = [{}; {}];",
+                var_name,
+                type_name,
+                size,
+                zero_lit(type_name),
+                size
             )
         });
 
@@ -1178,19 +1210,40 @@ impl Translator {
     fn transform_dynamic_array_decl(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Match: type[] name;
+        // Match: type[] name; — generalized to N stacked [] groups (2026.09.09),
+        // e.g. i32[] v -> Vec<i32>, i32[][] c -> Vec<Vec<i32>>
         let re = Regex::new(
-            r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;",
+            r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[\])+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;",
         )
         .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
+        let bracket_re = Regex::new(r"\[\]")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let type_name = &caps[1];
-            let var_name = &caps[2];
-            format!("let mut {}: Vec<{}> = Vec::new();", var_name, type_name)
+            let dims_str = &caps[2];
+            let var_name = &caps[3];
+
+            // Build nested Vec type: innermost is T, one Vec<...> per []
+            let mut ty = type_name.to_string();
+            let depth = bracket_re.find_iter(dims_str).count();
+            for _ in 0..depth {
+                ty = format!("Vec<{}>", ty);
+            }
+            format!("let mut {}: {} = Vec::new();", var_name, ty)
         });
 
         Ok(result.to_string())
+    }
+
+    /// `x.push([])` -> `x.push(Vec::new())`: pushing an empty array literal
+    /// creates a new row for nested dynamic arrays (Vec<Vec<T>>).
+    fn translate_empty_push(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        let re = Regex::new(r"\.push\(\[\]\)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        Ok(re.replace_all(source, ".push(Vec::new())").to_string())
     }
 
     /// V0.4: Transform multi-dimensional array declaration
@@ -1239,6 +1292,38 @@ impl Translator {
                 ty,
                 rust_elements.trim()
             )
+        });
+
+        // No-initializer form: type[d1][d2]...[dn] name;
+        // Rectangular static array, zero-filled to the same nesting depth
+        // (mutually exclusive with the `= { ... }` initializer form above)
+        let re_no_init = Regex::new(
+            r"(?m)\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[\d+\]){2,})\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re_no_init.replace_all(&result, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let dims_str = &caps[2];
+            let var_name = &caps[3];
+
+            let zero_lit = match type_name {
+                "f32" | "f64" => "0.0",
+                "bool" => "false",
+                _ => "0",
+            };
+
+            // Build type and zero value in the same right-to-left nesting
+            let mut ty = type_name.to_string();
+            let mut val = zero_lit.to_string();
+            let dims: Vec<_> = dim_re.captures_iter(dims_str).collect();
+            for d in dims.iter().rev() {
+                let n = &d[1];
+                ty = format!("[{}; {}]", ty, n);
+                val = format!("[{}; {}]", val, n);
+            }
+
+            format!("let mut {}: {} = {};", var_name, ty, val)
         });
 
         Ok(result.to_string())
