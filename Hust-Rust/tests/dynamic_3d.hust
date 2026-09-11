@@ -1,0 +1,20 @@
+void main() {
+    i32[][][] t;                 // -> Vec<Vec<Vec<i32>>>
+
+    t.push([]);                  // layer-1: 2 faces
+    t.push([]);
+    t[0].push([]);               // layer-2: 2 rows in each face
+    t[0].push([]);
+    t[1].push([]);
+    t[1].push([]);
+    t[0][0].push(1);             // layer-3: elements
+    t[0][1].push(2);
+    t[1][0].push(3);
+    t[1][1].push(4);
+
+    println!("{} {} {} {}", t[0][0][0], t[0][1][0], t[1][0][0], t[1][1][0]);
+    // -> 1 2 3 4
+
+    println!("{} {} {}", t.len(), t[0].len(), t[0][0].len());
+    // -> 2 2 1  (2 faces, face0 has 2 rows, row0 has 1 element)
+}

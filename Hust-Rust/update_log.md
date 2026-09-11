@@ -13,6 +13,13 @@
    - 完成 N 维双形态设计第一步（设计指引 2026.09.09 第二段）：
      矩形静态 = 带尺寸声明；锯齿动态 = 空维度[] + push/pop
 
+1b. **动态多维数组（锯齿）随本版发布**
+   - `i32[][] c;` → `Vec<Vec<i32>>`（N 层 `[]` 泛化），`c.push([])` 建行
+   - 方法集经跨语言核桥接审定：L1 平滑（push/len/下标读写）、
+     L2 语义平滑（pop，Go 语言核以切片组合实现）、暂缓（insert/remove/clear/sort）
+   - 2 维全生命周期与 3 维逐层建骨架实测通过
+     （tests/dynamic_2d_lifecycle.hust、tests/dynamic_3d.hust）
+
 2. **单语句循环体支持**
    - C 风格无花括号写法：`for(i16 i=0; i<3; i++) println!("i = {}", i);`
    - body 类型判定基于 `)` 后首个非空白字符（println 格式串 `"i = {}"`
