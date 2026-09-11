@@ -100,6 +100,12 @@ impl Translator {
         // public void func() -> pub fn func()
         output = self.transform_function_definitions(&output)?;
 
+        // Rule 4.5: reject `const` on array declarations
+        // Arrays are mutable by default (r6); r2's `const` applies to scalar
+        // variables only. Without this guard the raw `const` survives into
+        // `const let mut ...`, an illegal Rust construct with a cryptic error.
+        Self::reject_const_array(&output)?;
+
         // Rule 5: Transform multi-dimensional array declaration
         output = self.transform_multi_array_decl(&output)?;
 
@@ -449,6 +455,29 @@ impl Translator {
         let result = re.replace_all(source, "");
 
         Ok(result.to_string())
+    }
+
+    /// Reject `const` applied to array declarations (r6/r18, 2026.09.09).
+    /// Arrays are mutable by default; r2's `const` covers scalar variables
+    /// only. Catches both `const i32[2] a = ...` and the C-style
+    /// `const i32 a[2] = ...`, failing fast with guidance instead of
+    /// emitting the illegal `const let mut ...`.
+    fn reject_const_array(source: &str) -> Result<(), TranspileError> {
+        use regex::Regex;
+        let re = Regex::new(
+            r"\bconst\s+(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)(?:\s*\[|\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\[)",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        if re.is_match(source) {
+            return Err(TranspileError::TransformError(
+                "syntax error: arrays are mutable by default and do not support `const` (r6/r18). \
+                 Remove `const` from the array declaration, e.g. `i32[2] a = {1, 2};`. \
+                 For read-only access to the data, use a slice: `i32[] s = arr[0..2];`"
+                    .to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// V0.4: Transform array declarations
