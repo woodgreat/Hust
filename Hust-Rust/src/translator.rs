@@ -106,6 +106,12 @@ impl Translator {
         // `const let mut ...`, an illegal Rust construct with a cryptic error.
         Self::reject_const_array(&output)?;
 
+        // Rule 4.6: reject `.to_vec()` on multi-dimensional static arrays
+        // 1-D `a.to_vec()` is natively fine; multi-dim `m.to_vec()` converts
+        // only the outer level (Vec<[i32; N]>, not Vec<Vec<T>>) — fail fast
+        // with guidance, per owner decision (conversion left to the user).
+        Self::reject_multi_dim_to_vec(&output)?;
+
         // Rule 5: Transform multi-dimensional array declaration
         output = self.transform_multi_array_decl(&output)?;
 
@@ -483,6 +489,76 @@ impl Translator {
                  For read-only access to the data, use a slice: `i32[] s = arr[0..2];`"
                     .to_string(),
             ));
+        }
+        Ok(())
+    }
+
+    /// Reject `.to_vec()` on multi-dimensional static arrays (2026.09.09,
+    /// owner decision: leave conversion to the user, as no core language
+    /// supports recursive array->Vec conversion natively).
+    /// - 1-D `a.to_vec()`: natively supported, passes through.
+    /// - Row-level `m[0].to_vec()`: legal (converts one row), passes through.
+    /// - Bare `m.to_vec()` on a multi-dim static array: converts only the
+    ///   outer level producing `Vec<[i32; N]>` (mismatches `Vec<Vec<T>>`) —
+    ///   fail fast with guidance.
+    fn reject_multi_dim_to_vec(source: &str) -> Result<(), TranspileError> {
+        use regex::Regex;
+
+        // 1. names declared as multi-dim static arrays (2+ [N] groups)
+        let decl_re = Regex::new(
+            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[\d+\]){2,})\s+([a-zA-Z_][a-zA-Z0-9_]*)\b",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let multi: HashSet<String> = decl_re
+            .captures_iter(source)
+            .map(|c| c[2].to_string())
+            .collect();
+
+        if multi.is_empty() {
+            return Ok(());
+        }
+
+        // 2. every `.to_vec()` call: resolve its host identifier
+        let call_re = Regex::new(r"\.to_vec\(\)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        for m in call_re.find_iter(source) {
+            let bytes = source.as_bytes();
+            let mut end = m.start(); // position of the '.'
+            let mut start = end;
+            while start > 0 {
+                let c = bytes[start - 1] as char;
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    start -= 1;
+                } else {
+                    break;
+                }
+            }
+            if start == end {
+                continue; // no host identifier
+            }
+            // chained call? (previous non-space char is ']' or ')') — e.g.
+            // `m[0].to_vec()` is row-level and legal, skip it
+            let mut prev = start;
+            while prev > 0 && (bytes[prev - 1] as char).is_whitespace() {
+                prev -= 1;
+            }
+            if prev > 0 {
+                let pc = bytes[prev - 1] as char;
+                if pc == ']' || pc == ')' {
+                    continue;
+                }
+            }
+            let host = &source[start..end];
+            if multi.contains(host) {
+                return Err(TranspileError::TransformError(
+                    "syntax error: .to_vec() on a multi-dimensional static array is not \
+                     supported — it converts only the outer level (yielding Vec<[i32; N]>, \
+                     not Vec<Vec<T>>). Convert rows manually (e.g. m[0].to_vec()) or build \
+                     the dynamic array directly with push([]) / push(v)."
+                        .to_string(),
+                ));
+            }
         }
         Ok(())
     }
