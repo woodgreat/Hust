@@ -1,0 +1,59 @@
+void main() {
+    i32[2][2][2][2][2][2][2][2][2][2][2][2][2] a13;
+    i32 sum = 0;
+    for (i32 i = 0; i < 2; i++) {
+        for (i32 j = 0; j < 2; j++) {
+            for (i32 k = 0; k < 2; k++) {
+                for (i32 l = 0; l < 2; l++) {
+                    for (i32 m = 0; m < 2; m++) {
+                        for (i32 n = 0; n < 2; n++) {
+                            for (i32 o = 0; o < 2; o++) {
+                                for (i32 p = 0; p < 2; p++) {
+                                    for (i32 q = 0; q < 2; q++) {
+                                        for (i32 r = 0; r < 2; r++) {
+                                            for (i32 s = 0; s < 2; s++) {
+                                                for (i32 t = 0; t < 2; t++) {
+                                                    for (i32 u = 0; u < 2; u++) {
+                                                        a13[i][j][k][l][m][n][o][p][q][r][s][t][u] = 1;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (i32 i = 0; i < 2; i++) {
+        for (i32 j = 0; j < 2; j++) {
+            for (i32 k = 0; k < 2; k++) {
+                for (i32 l = 0; l < 2; l++) {
+                    for (i32 m = 0; m < 2; m++) {
+                        for (i32 n = 0; n < 2; n++) {
+                            for (i32 o = 0; o < 2; o++) {
+                                for (i32 p = 0; p < 2; p++) {
+                                    for (i32 q = 0; q < 2; q++) {
+                                        for (i32 r = 0; r < 2; r++) {
+                                            for (i32 s = 0; s < 2; s++) {
+                                                for (i32 t = 0; t < 2; t++) {
+                                                    for (i32 u = 0; u < 2; u++) {
+                                                        sum = sum + a13[i][j][k][l][m][n][o][p][q][r][s][t][u];
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!("a13: sum = {}", sum);
+}

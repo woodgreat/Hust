@@ -1,0 +1,35 @@
+void main() {
+    i32[2][2][2][2][2][2][2] a7;
+    i32 sum = 0;
+    for (i32 i = 0; i < 2; i++) {
+        for (i32 j = 0; j < 2; j++) {
+            for (i32 k = 0; k < 2; k++) {
+                for (i32 l = 0; l < 2; l++) {
+                    for (i32 m = 0; m < 2; m++) {
+                        for (i32 n = 0; n < 2; n++) {
+                            for (i32 o = 0; o < 2; o++) {
+                                a7[i][j][k][l][m][n][o] = 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (i32 i = 0; i < 2; i++) {
+        for (i32 j = 0; j < 2; j++) {
+            for (i32 k = 0; k < 2; k++) {
+                for (i32 l = 0; l < 2; l++) {
+                    for (i32 m = 0; m < 2; m++) {
+                        for (i32 n = 0; n < 2; n++) {
+                            for (i32 o = 0; o < 2; o++) {
+                                sum = sum + a7[i][j][k][l][m][n][o];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!("a7: sum = {}", sum);
+}

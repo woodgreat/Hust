@@ -209,7 +209,10 @@ impl Translator {
 
         let mut changed = true;
         let mut rounds = 0;
-        while changed && rounds < 10 {
+        // One pass peels at least one nesting level (phase 1 the chain head,
+        // phase 2 the deepest unconverted level), so N dims need N-1 rounds.
+        // Cap sized for 13-D stress tests + headroom.
+        while changed && rounds < 32 {
             changed = false;
             rounds += 1;
 
