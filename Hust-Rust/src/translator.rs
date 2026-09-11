@@ -106,11 +106,12 @@ impl Translator {
         // `const let mut ...`, an illegal Rust construct with a cryptic error.
         Self::reject_const_array(&output)?;
 
-        // Rule 4.6: reject `.to_vec()` on multi-dimensional static arrays
-        // 1-D `a.to_vec()` is natively fine; multi-dim `m.to_vec()` converts
-        // only the outer level (Vec<[i32; N]>, not Vec<Vec<T>>) — fail fast
-        // with guidance, per owner decision (conversion left to the user).
-        Self::reject_multi_dim_to_vec(&output)?;
+        // Rule 4.6: reject `.to_vec()` on static arrays (all dimensions)
+        // Principle (owner, 2026.09.09): a static array stays static — Hust
+        // provides no automatic static->dynamic conversion; build dynamic
+        // arrays with push([])/push(v) instead. Dynamic-on-dynamic calls
+        // (e.g. `c[0].to_vec()` where c is `i32[][]`) are unaffected.
+        Self::reject_static_to_vec(&output)?;
 
         // Rule 5: Transform multi-dimensional array declaration
         output = self.transform_multi_array_decl(&output)?;
@@ -493,32 +494,31 @@ impl Translator {
         Ok(())
     }
 
-    /// Reject `.to_vec()` on multi-dimensional static arrays (2026.09.09,
-    /// owner decision: leave conversion to the user, as no core language
-    /// supports recursive array->Vec conversion natively).
-    /// - 1-D `a.to_vec()`: natively supported, passes through.
-    /// - Row-level `m[0].to_vec()`: legal (converts one row), passes through.
-    /// - Bare `m.to_vec()` on a multi-dim static array: converts only the
-    ///   outer level producing `Vec<[i32; N]>` (mismatches `Vec<Vec<T>>`) —
-    ///   fail fast with guidance.
-    fn reject_multi_dim_to_vec(source: &str) -> Result<(), TranspileError> {
+    /// Reject `.to_vec()` on ANY static array (one- or multi-dimensional).
+    /// Principle (owner, 2026.09.09): static stays static — no automatic
+    /// static->dynamic conversion. Build dynamic arrays with push([]) /
+    /// push(v) instead. Dynamic-on-dynamic calls (`c[0].to_vec()` where c is
+    /// `i32[][]`) are not affected — the host is not a static array.
+    fn reject_static_to_vec(source: &str) -> Result<(), TranspileError> {
         use regex::Regex;
 
-        // 1. names declared as multi-dim static arrays (2+ [N] groups)
+        // 1. names declared as static arrays (1+ [N] groups)
         let decl_re = Regex::new(
-            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[\d+\]){2,})\s+([a-zA-Z_][a-zA-Z0-9_]*)\b",
+            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[\d+\])+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\b",
         )
         .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        let multi: HashSet<String> = decl_re
+        let static_names: HashSet<String> = decl_re
             .captures_iter(source)
             .map(|c| c[2].to_string())
             .collect();
 
-        if multi.is_empty() {
+        if static_names.is_empty() {
             return Ok(());
         }
 
-        // 2. every `.to_vec()` call: resolve its host identifier
+        // 2. every `.to_vec()` call: resolve its host identifier (any chained
+        // form included — row-level `m[0].to_vec()` is also a static->dynamic
+        // conversion and is rejected the same way)
         let call_re = Regex::new(r"\.to_vec\(\)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
@@ -535,27 +535,72 @@ impl Translator {
                 }
             }
             if start == end {
-                continue; // no host identifier
+                // Host may be an indexed chain like `m[0].to_vec()` — the
+                // char before '.' is ']', not an identifier. Fall through to
+                // the chain walk below instead of skipping the call.
             }
-            // chained call? (previous non-space char is ']' or ')') — e.g.
-            // `m[0].to_vec()` is row-level and legal, skip it
-            let mut prev = start;
-            while prev > 0 && (bytes[prev - 1] as char).is_whitespace() {
-                prev -= 1;
-            }
-            if prev > 0 {
-                let pc = bytes[prev - 1] as char;
-                if pc == ']' || pc == ')' {
-                    continue;
+            // Walk left over index chains: m[0][1].to_vec() -> root m.
+            // Row-level m[0].to_vec() is ALSO a static->dynamic conversion
+            // and must be rejected the same way.
+            let mut pos = start;
+            let mut root_start = start;
+            loop {
+                while pos > 0 && (bytes[pos - 1] as char).is_whitespace() {
+                    pos -= 1;
+                }
+                if pos > 0 && bytes[pos - 1] == b']' {
+                    let mut d = 0i32;
+                    while pos > 0 {
+                        let c = bytes[pos - 1] as char;
+                        if c == ']' {
+                            d += 1;
+                        } else if c == '[' {
+                            d -= 1;
+                            if d == 0 {
+                                pos -= 1;
+                                break;
+                            }
+                        }
+                        pos -= 1;
+                    }
+                    if pos == 0 {
+                        break;
+                    }
+                    let mut s2 = pos;
+                    while s2 > 0 {
+                        let c = bytes[s2 - 1] as char;
+                        if c.is_ascii_alphanumeric() || c == '_' {
+                            s2 -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if s2 == pos {
+                        break; // no identifier before the '['
+                    }
+                    root_start = s2;
+                    pos = s2;
+                } else {
+                    break;
                 }
             }
-            let host = &source[start..end];
-            if multi.contains(host) {
+            // root identifier (up to the first '[' / non-word char)
+            let mut root_end = root_start;
+            while root_end < source.len() {
+                let c = source.as_bytes()[root_end] as char;
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    root_end += 1;
+                } else {
+                    break;
+                }
+            }
+            let root = &source[root_start..root_end];
+            if static_names.contains(root) {
                 return Err(TranspileError::TransformError(
-                    "syntax error: .to_vec() on a multi-dimensional static array is not \
-                     supported — it converts only the outer level (yielding Vec<[i32; N]>, \
-                     not Vec<Vec<T>>). Convert rows manually (e.g. m[0].to_vec()) or build \
-                     the dynamic array directly with push([]) / push(v)."
+                    "syntax error: .to_vec() on a static array is not supported — \
+                     a static array stays static (r18), Hust provides no automatic \
+                     static-to-dynamic conversion. Build the dynamic array directly \
+                     with push([]) / push(v)."
                         .to_string(),
                 ));
             }
