@@ -117,6 +117,11 @@ impl Translator {
         let const_names = Self::scan_const_dim_names(&output);
         Self::check_array_dimensions(&output, &const_names)?;
 
+        // Rule 4.8: reject `const` without initializer (a const must have a
+        // value to be a constant — `const i32 a, b;` / `const i32 a;` are
+        // meaningless; use plain variables for delayed initialization)
+        Self::reject_const_no_init(&output)?;
+
         // Rule 5: Transform multi-dimensional array declaration
         output = self.transform_multi_array_decl(&output)?;
 
@@ -659,6 +664,27 @@ impl Translator {
         Ok(())
     }
 
+    /// Reject `const` declarations without initializer (2026.09.09).
+    /// `const i32 a;` / `const i32 a, b;` have no value — meaningless as a
+    /// constant. Delayed initialization belongs to plain variables.
+    fn reject_const_no_init(source: &str) -> Result<(), TranspileError> {
+        use regex::Regex;
+        let re = Regex::new(
+            r"\bconst\s+(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+[a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*\s*;",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        if re.is_match(source) {
+            return Err(TranspileError::TransformError(
+                "syntax error: `const` declarations require an initializer (a constant \
+                 must have a value). For delayed initialization use plain variables: \
+                 `i32 a;` or `i32 a, b, c;`"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// V0.4: Transform array declarations
     /// i32[5] arr = {1,2,3,4,5}; -> let mut arr: [i32; 5] = [1,2,3,4,5];
     /// i32[5] arr;               -> let mut arr: [i32; 5] = [0; 5];
@@ -771,6 +797,29 @@ impl Translator {
                 // regular variable: mutable in Rust ("let mut")
                 format!("let mut {}: {} = {};", var_name, type_name, value)
             }
+        });
+
+        // No-initializer declarations: type name;  /  type a, b, c;
+        // (C-style comma list, 2026.09.09) -> one `let mut name: type;` per
+        // variable. Delayed initialization — rustc flow analysis guards
+        // use-before-assign (E0381). const form rejected at Rule 4.8.
+        // Mutually exclusive with the `= value` form above (name followed by
+        // `;`, not `=`).
+        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re_no_init.replace_all(&result, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let names: Vec<&str> = caps[2]
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            names
+                .iter()
+                .map(|n| format!("let mut {}: {};", n, type_name))
+                .collect::<Vec<_>>()
+                .join("\n")
         });
 
         Ok(result.to_string())
