@@ -113,6 +113,10 @@ impl Translator {
         // (e.g. `c[0].to_vec()` where c is `i32[][]`) are unaffected.
         Self::reject_static_to_vec(&output)?;
 
+        // Rule 4.7: array dimensions must be literals or const names
+        let const_names = Self::scan_const_dim_names(&output);
+        Self::check_array_dimensions(&output, &const_names)?;
+
         // Rule 5: Transform multi-dimensional array declaration
         output = self.transform_multi_array_decl(&output)?;
 
@@ -608,6 +612,53 @@ impl Translator {
         Ok(())
     }
 
+    /// Collect names of `const <int-type> NAME = <digits>;` declarations —
+    /// compile-time constants usable as array dimensions (2026.09.09).
+    /// Float/bool/String consts and expression initializers are NOT included
+    /// (they are runtime immutable bindings per r2).
+    fn scan_const_dim_names(source: &str) -> HashSet<String> {
+        use regex::Regex;
+        let re = Regex::new(
+            r"\bconst\s+(?:i8|i16|i32|i64|u8|u16|u32|u64)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(\d+)\s*;",
+        )
+        .unwrap();
+        re.captures_iter(source)
+            .map(|c| c[1].to_string())
+            .collect()
+    }
+
+    /// Array dimensions must be an integer literal or a const name from
+    /// scan_const_dim_names. A plain variable (`i32 dims = 5; i32[dims][dims] c;`)
+    /// is a syntax error with guidance — fail fast (2026.09.09).
+    fn check_array_dimensions(
+        source: &str,
+        const_names: &HashSet<String>,
+    ) -> Result<(), TranspileError> {
+        use regex::Regex;
+        let re = Regex::new(
+            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[(?:\d+|[a-zA-Z_][a-zA-Z0-9_]*)\])+)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*[;=]",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let dim_re = Regex::new(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        for caps in re.captures_iter(source) {
+            let dims_str = &caps[1];
+            for d in dim_re.captures_iter(dims_str) {
+                let dim = &d[1];
+                if dim.parse::<usize>().is_err() && !const_names.contains(dim) {
+                    return Err(TranspileError::TransformError(format!(
+                        "syntax error: array dimension `{}` must be an integer literal or a \
+                         const (declare with `const i32 {} = <n>;` — runtime sizes belong to \
+                         dynamic arrays `i32[][]`)",
+                        dim, dim
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// V0.4: Transform array declarations
     /// i32[5] arr = {1,2,3,4,5}; -> let mut arr: [i32; 5] = [1,2,3,4,5];
     /// i32[5] arr;               -> let mut arr: [i32; 5] = [0; 5];
@@ -623,9 +674,9 @@ impl Translator {
             }
         };
 
-        // Match: type[size] name = {elements};
+        // Match: type[size] name = {elements};  (size: literal or const name)
         // Include the trailing semicolon in the match so we replace it completely
-        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([^}]+)\};")
+        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[([a-zA-Z0-9_]+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([^}]+)\};")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
@@ -641,7 +692,7 @@ impl Translator {
         });
 
         // No-initializer form: type[size] name;  (mutually exclusive with `= {`)
-        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;")
+        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[([a-zA-Z0-9_]+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re_no_init.replace_all(&result, |caps: &regex::Captures| {
@@ -663,21 +714,26 @@ impl Translator {
 
     /// V0.1: Transform variable declarations
     /// i32 x = 42; -> let mut x: i32 = 42;
-    /// const i32 x = 42; -> let x: i32 = 42; (inside functions)
-    /// const i32 x = 42; -> const x: i32 = 42; (global scope)
+    /// const i32 N = 42; -> const N: usize = 42;   (integer literal:
+    ///     compile-time constant, usable as array dimension, 2026.09.09)
+    /// const i32 x = expr; -> let x: i32 = expr;   (non-literal initializer:
+    ///     immutable binding per r2, NOT usable as array dimension)
+    /// const f32 x = 1.5; / const bool x = true; -> let x: <type> = ...;
     fn transform_variable_declarations(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Match: [const] type var = value;
-        // Type: i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String
-        // Var name: [a-zA-Z_][a-zA-Z0-9_]*
-        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=")
+        // Match: [const] type var = value;  (value captured so the const
+        // branch can tell a literal from a runtime expression)
+        // NOTE: a `;` inside a string literal in the initializer would
+        // truncate the capture — not seen in practice, recorded as a limit.
+        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let is_const = caps.get(1).is_some();
             let type_name = &caps[2];
             let var_name = &caps[3];
+            let value = caps[4].trim();
 
             // Get the full match and check if this is inside a for loop header
             let full_match = caps.get(0).unwrap();
@@ -696,14 +752,24 @@ impl Translator {
             // Don't transform it - the for loop transformer will handle it
             let is_for_loop_var = before.contains("for (") || before.contains("for(");
 
-            if is_const {
-                format!("const {}: {} =", var_name, type_name)
+            if is_const
+                && !value.is_empty()
+                && value.chars().all(|c| c.is_ascii_digit())
+            {
+                // r5 evolution (2026.09.09): const + non-negative integer
+                // literal -> compile-time constant. usize so it works as an
+                // array dimension: i32[N][N] c;
+                format!("const {}: usize = {};", var_name, value)
+            } else if is_const {
+                // r2: immutable binding (expression or non-integer literal) —
+                // runtime value, not usable as array dimension
+                format!("let {}: {} = {};", var_name, type_name, value)
             } else if is_for_loop_var {
                 // Keep original format - for loop transformer will handle this
-                format!("{} {} =", type_name, var_name)
+                format!("{} {} = {};", type_name, var_name, value)
             } else {
                 // regular variable: mutable in Rust ("let mut")
-                format!("let mut {}: {} =", var_name, type_name)
+                format!("let mut {}: {} = {};", var_name, type_name, value)
             }
         });
 
@@ -1382,13 +1448,14 @@ impl Translator {
     fn transform_multi_array_decl(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // 2+ adjacent dimension groups; 1-D is handled by transform_array_declarations
+        // 2+ adjacent dimension groups (size: literal or const name); 1-D is
+        // handled by transform_array_declarations
         let re = Regex::new(
-            r"(?m)\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[\d+\]){2,})\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([\s\S]*?)\}\s*;",
+            r"(?m)\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[(?:\d+|[a-zA-Z_][a-zA-Z0-9_]*)\]){2,})\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([\s\S]*?)\}\s*;",
         )
         .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let dim_re = Regex::new(r"\[(\d+)\]")
+        let dim_re = Regex::new(r"\[([a-zA-Z0-9_]+)\]")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
@@ -1418,11 +1485,12 @@ impl Translator {
             )
         });
 
-        // No-initializer form: type[d1][d2]...[dn] name;
+        // No-initializer form: type[d1][d2]...[dn] name;  (size: literal or
+        // const name)
         // Rectangular static array, zero-filled to the same nesting depth
         // (mutually exclusive with the `= { ... }` initializer form above)
         let re_no_init = Regex::new(
-            r"(?m)\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[\d+\]){2,})\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;",
+            r"(?m)\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[(?:\d+|[a-zA-Z_][a-zA-Z0-9_]*)\]){2,})\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;",
         )
         .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
