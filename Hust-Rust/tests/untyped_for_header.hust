@@ -1,0 +1,11 @@
+void main() {
+    i32 i, j;
+    i32[5][5] yang;
+    for(i=0; i<5; i++) {
+        yang[i][0] = 1;
+        for(j=1; j<=i; j++) {
+            yang[i][j] = yang[i-1][j-1] + yang[i-1][j];
+        }
+    }
+    println!("yang[1][1]={} yang[4][4]={}", yang[1][1], yang[4][4]);
+}

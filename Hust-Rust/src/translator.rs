@@ -960,6 +960,135 @@ impl Translator {
         trimmed.to_string()
     }
 
+    /// Extract the for body starting after the header's `)`. Returns
+    /// (body, end_offset) — body includes its trailing `;` (single-statement
+    /// form) or the statements inside the braces (block form); end_offset is
+    /// exclusive of the terminator. Shared by typed/untyped for passes.
+    fn extract_for_body(
+        &self,
+        source: &str,
+        after_header_start: usize,
+    ) -> Option<(String, usize)> {
+        let after_header = &source[after_header_start..];
+        let trimmed_after = after_header.trim_start();
+        // Body type: braced iff first non-whitespace char is `{`. Never use
+        // find('{') — println format strings like "i = {}" would misroute.
+        if trimmed_after.starts_with('{') {
+            let open_brace_idx = after_header.len() - trimmed_after.len();
+            let body_start_abs = after_header_start + open_brace_idx + 1;
+            let mut brace_depth = 1;
+            let mut in_string = false;
+            let mut body_end_abs = body_start_abs;
+            let body_src = &source[body_start_abs..];
+            for (i, c) in body_src.char_indices() {
+                if c == '"' {
+                    in_string = !in_string;
+                }
+                if !in_string {
+                    match c {
+                        '{' => brace_depth += 1,
+                        '}' => {
+                            brace_depth -= 1;
+                            if brace_depth == 0 {
+                                body_end_abs = body_start_abs + i;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if brace_depth != 0 {
+                return None; // malformed, no matching closing brace
+            }
+            Some((
+                source[body_start_abs..body_end_abs].trim().to_string(),
+                body_end_abs + 1,
+            ))
+        } else {
+            // Single statement: scan to first `;` outside strings; the `;` is
+            // consumed as the boundary and re-appended to the body.
+            let mut stmt_end = None;
+            let mut in_string = false;
+            for (i, c) in after_header.char_indices() {
+                if c == '"' {
+                    in_string = !in_string;
+                } else if !in_string && c == ';' {
+                    stmt_end = Some(i);
+                    break;
+                }
+            }
+            let stmt_end = stmt_end?;
+            Some((
+                format!("{};", after_header[..stmt_end].trim()),
+                after_header_start + stmt_end + 1,
+            ))
+        }
+    }
+
+    /// Resolve the variable updated by a marked ++/-- clause.
+    fn update_var_name_of(&self, update: &str, default_var: &str) -> String {
+        use regex::Regex;
+        if update.contains("###HUST_PREFIX###") {
+            return Regex::new(r"###HUST_PREFIX###\+\+([a-zA-Z_][a-zA-Z0-9_]*)###HUST_END###")
+                .unwrap()
+                .captures(update)
+                .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+                .unwrap_or_else(|| default_var.to_string());
+        }
+        if update.contains("###HUST_POSTFIX###") {
+            return Regex::new(r"###HUST_POSTFIX###([a-zA-Z_][a-zA-Z0-9_]*)\+\+###HUST_END###")
+                .unwrap()
+                .captures(update)
+                .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+                .unwrap_or_else(|| default_var.to_string());
+        }
+        default_var.to_string()
+    }
+
+    /// Build the trailing update statement(s) for a while loop from the for
+    /// update clause. Handles (in priority order): code-block updates (with
+    /// inner ++/-- conversion), single marked ++/--, plain expressions.
+    /// BRANCH ORDER MATTERS — a block almost always contains ++/-- whose
+    /// markers would divert it into the single-operator branch (V0.1.8 bug).
+    fn build_update_stmt(&self, update: &str, default_var: &str) -> String {
+        use regex::Regex;
+        let update_trimmed = update.trim();
+
+        if update_trimmed.starts_with('{') && update_trimmed.ends_with('}') {
+            let block_content = &update_trimmed[1..update_trimmed.len() - 1].trim();
+            let mut processed_block = block_content
+                .replace("###HUST_PREFIX###", "")
+                .replace("###HUST_POSTFIX###", "")
+                .replace("###HUST_END###", "");
+            let inc_re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\+\+").unwrap();
+            processed_block = inc_re
+                .replace_all(&processed_block, "$1 += 1")
+                .to_string();
+            let dec_re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*--").unwrap();
+            processed_block = dec_re
+                .replace_all(&processed_block, "$1 -= 1")
+                .to_string();
+            return format!("{}\n", processed_block);
+        }
+
+        let is_prefix = update.contains("###HUST_PREFIX###");
+        let is_postfix = update.contains("###HUST_POSTFIX###");
+        if is_prefix || is_postfix {
+            let var_name = self.update_var_name_of(update, default_var);
+            let is_increment = update.contains("++");
+            return if is_increment {
+                format!("{} = {} + 1;", var_name, var_name)
+            } else {
+                format!("{} = {} - 1;", var_name, var_name)
+            };
+        }
+
+        // Plain expression — always lands at the end of the while block, so
+        // the missing `;` is legal as a trailing expression; keep as-is.
+        update_trimmed.to_string()
+    }
+
     fn transform_for_loop(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
@@ -1019,170 +1148,76 @@ impl Translator {
             let condition = caps[4].trim();
             let update = caps[5].trim();
 
-            // Body type: braced block iff the first non-whitespace char after
-            // `)` is `{`. Cannot use find('{') to decide — println! format
-            // strings like "i = {}" contain braces and would misroute a
-            // single-statement body into the block path (found 2026.09.08).
-            let after_header = &result[header_match.end()..];
+            let (body, full_for_end) = match self.extract_for_body(&result, header_match.end()) {
+                Some(x) => x,
+                None => break, // malformed body
+            };
             let full_for_start = header_match.start();
-            let trimmed_after = after_header.trim_start();
-            let is_block_body = trimmed_after.starts_with('{');
-
-            let (body, full_for_end) = if is_block_body {
-                let open_brace_idx = after_header.len() - trimmed_after.len();
-                    let body_start_abs = header_match.end() + open_brace_idx + 1;
-
-                    // Count brace depth to find matching }
-                    let mut brace_depth = 1;
-                    let mut in_string = false;
-                    let mut body_end_abs = body_start_abs;
-                    let body_src = &result[body_start_abs..];
-
-                    for (i, c) in body_src.char_indices() {
-                        if c == '"' {
-                            in_string = !in_string;
-                        }
-                        if !in_string {
-                            match c {
-                                '{' => brace_depth += 1,
-                                '}' => {
-                                    brace_depth -= 1;
-                                    if brace_depth == 0 {
-                                        body_end_abs = body_start_abs + i;
-                                        break;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-
-                    if brace_depth != 0 {
-                        break; // malformed, no matching closing brace
-                    }
-
-                    (
-                        result[body_start_abs..body_end_abs].trim().to_string(),
-                        body_end_abs + 1, // include the closing }
-                    )
-                } else {
-                    // Single statement body: scan to the first `;` outside strings.
-                    // The `;` itself is consumed as the statement boundary, so it
-                    // must be re-appended — otherwise the body and the update
-                    // statement concatenate into invalid Rust (no `;` between
-                    // `println!(...)` and `i = i + 1;`).
-                    let mut stmt_end = None;
-                    let mut in_string = false;
-                    for (i, c) in after_header.char_indices() {
-                        if c == '"' {
-                            in_string = !in_string;
-                        } else if !in_string && c == ';' {
-                            stmt_end = Some(i);
-                            break;
-                        }
-                    }
-                    let stmt_end = match stmt_end {
-                        Some(i) => i,
-                        None => break, // malformed: no terminating semicolon
-                    };
-                    (
-                        format!("{};", after_header[..stmt_end].trim()),
-                        header_match.end() + stmt_end + 1, // include the ;
-                    )
-                }
             ;
 
-            // Detect if update uses increment/decrement operators
-            let is_prefix = update.contains("###HUST_PREFIX###");
-            let is_postfix = update.contains("###HUST_POSTFIX###");
-
-            // Extract variable name from the marked update
-            let update_var_name = if is_prefix {
-                // Extract from ###HUST_PREFIX###++i###HUST_END###
-                let re = Regex::new(r"###HUST_PREFIX###\+\+([a-zA-Z_][a-zA-Z0-9_]*)###HUST_END###")
-                    .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-                re.captures(update)
-                    .and_then(|c| c.get(1).map(|m| m.as_str()))
-                    .unwrap_or(var_name)
-            } else if is_postfix {
-                // Extract from ###HUST_POSTFIX###i++###HUST_END###
-                let re =
-                    Regex::new(r"###HUST_POSTFIX###([a-zA-Z_][a-zA-Z0-9_]*)\+\+###HUST_END###")
-                        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-                re.captures(update)
-                    .and_then(|c| c.get(1).map(|m| m.as_str()))
-                    .unwrap_or(var_name)
-            } else {
-                var_name
-            };
-
-            // Build update statement: var = var + 1 or var = var - 1
-            let is_increment = update.contains("++");
-            let update_stmt = if is_increment {
-                format!("{} = {} + 1;", update_var_name, update_var_name)
-            } else {
-                format!("{} = {} - 1;", update_var_name, update_var_name)
-            };
+            // Update statement: block / marked ++/-- / plain (see helper —
+            // branch order matters, block must be checked first)
+            let update_stmt = self.build_update_stmt(update, var_name);
 
             // L1 condition conversion: "i < arr.len()" -> "(i as usize) < arr.len()"
             // Anchored match — compound conditions are left for rustc to report
             let transformed_condition = Self::transform_len_comparison(condition);
 
-            // Build while loop
-            // Note: In for loops, both prefix (++i) and postfix (i++) operators
-            // are executed AFTER the loop body, not before the condition check.
-            // The prefix/postfix difference only matters in expressions like:
-            //   j = i++;  vs  j = ++i;
-            // But in the for loop update clause, they behave identically.
-            //
-            // BRANCH ORDER MATTERS: the code-block check MUST come first.
-            // A block update almost always contains ++/-- (r14 requires the
-            // loop var to be updated inside the block), whose markers would
-            // otherwise divert it into the single-operator branch and silently
-            // drop the whole block content (latent since V0.1.8, exposed
-            // 2026.09.08 by tests/single_op_block.hust).
-            let update_trimmed = update.trim();
-            let rust_while = if update_trimmed.starts_with('{')
-                && update_trimmed.ends_with('}')
-            {
-                // Code-block update: strip markers, then convert `var++` ->
-                // `var += 1` / `var--` -> `var -= 1` (Rust has no ++/--)
-                let block_content = &update_trimmed[1..update_trimmed.len() - 1].trim();
-                let mut processed_block = block_content
-                    .replace("###HUST_PREFIX###", "")
-                    .replace("###HUST_POSTFIX###", "")
-                    .replace("###HUST_END###", "");
-                let inc_re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\+\+")
-                    .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-                processed_block = inc_re
-                    .replace_all(&processed_block, "$1 += 1")
-                    .to_string();
-                let dec_re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*--")
-                    .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-                processed_block = dec_re
-                    .replace_all(&processed_block, "$1 -= 1")
-                    .to_string();
-                format!(
-                    "let mut {}: {} = {}; while {} {{{}\n{}}}",
-                    var_name,
-                    var_type,
-                    init_value,
-                    transformed_condition,
-                    body,
-                    processed_block
-                )
-            } else if is_prefix || is_postfix {
-                format!(
-                    "let mut {}: {} = {}; while {} {{{}\n{}}}",
-                    var_name, var_type, init_value, transformed_condition, body, update_stmt
-                )
-            } else {
-                // No ++/-- operator and not a code block, use update as-is
-                format!(
-                    "let mut {}: {} = {}; while {} {{{}\n{}}}",
-                    var_name, var_type, init_value, transformed_condition, body, update
-                )
+            // Typed header: the loop variable is declared here (`let mut`)
+            let rust_while = format!(
+                "let mut {}: {} = {}; while {} {{{}\n{}}}",
+                var_name, var_type, init_value, transformed_condition, body, update_stmt
+            );
+
+            result = format!(
+                "{}{}{}",
+                &result[..full_for_start],
+                rust_while,
+                &result[full_for_end..]
+            );
+        }
+
+        // --- Step 2b: untyped for headers (2026.09.09) ---
+        // C-style loop variable declared OUTSIDE the loop (paired with the
+        // no-initializer declarations): for(i = 1; i < n; i++) { ... }
+        // Generates an assignment (`i = 1;`) instead of a `let` — the loop
+        // variable must be declared earlier (rustc E0425 otherwise).
+        let untyped_re = Regex::new(
+            r"for\s*\(\s*([a-zA-Z_]\w*)\s*=\s*([^;]+)\s*;\s*([^;]+)\s*;\s*([^\)]+)\)",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        loop {
+            let m = match untyped_re.find(&result) {
+                Some(m) => m,
+                None => break,
             };
+            let caps = untyped_re.captures(&result).ok_or_else(|| {
+                TranspileError::TransformError(
+                    "Failed to capture untyped for loop header".to_string(),
+                )
+            })?;
+
+            let var_name = &caps[1];
+            let init_value = caps[2].trim();
+            let condition = caps[3].trim();
+            let update = caps[4].trim();
+
+            let (body, full_for_end) = match self.extract_for_body(&result, m.end()) {
+                Some(x) => x,
+                None => break, // malformed body
+            };
+            let full_for_start = m.start();
+
+            let update_stmt = self.build_update_stmt(update, var_name);
+            let transformed_condition = Self::transform_len_comparison(condition);
+
+            // Untyped header: NO `let` — assignment into the pre-declared
+            // loop variable (first assignment completes its delayed init)
+            let rust_while = format!(
+                "{} = {}; while {} {{{}\n{}}}",
+                var_name, init_value, transformed_condition, body, update_stmt
+            );
 
             result = format!(
                 "{}{}{}",
