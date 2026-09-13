@@ -934,21 +934,43 @@ impl Translator {
     /// - Simple form covers the vast majority of real loops.
     /// Warning for users: prefer "i + 1 < len" over "i < len - 1"; with usize,
     /// "len - 1" underflows when the array is empty.
-    fn transform_len_comparison(condition: &str) -> String {
+    /// L1/L1.5 condition conversion (2026.09.11): right side may be
+    /// `.len()` (plain or with an index chain) or a compile-time const name
+    /// (usize) — both are usize-typed and force the i32 loop var to
+    /// `as usize`. Full-string anchored; compound conditions pass through.
+    fn transform_len_comparison(
+        condition: &str,
+        const_names: &HashSet<String>,
+    ) -> String {
         use regex::Regex;
 
         let trimmed = condition.trim();
 
-        // Pattern 1: var op xxx.len()   e.g. "i < dynamic.len()"
+        // Pattern 1 (L1.5, 2026.09.11): var op <base>[index-chain]*.len()
+        // e.g. "i < m.len()" AND "j < m[i].len()" — the N-dim row-length
+        // traversal form. The bracket chain is preserved verbatim; the
+        // index inside gets its as-usize peel later (Rule 18, peeling runs
+        // after this pass). Zero brackets degrades to the plain form.
         let re_fwd = Regex::new(
-            r"^([a-zA-Z_]\w*)\s*(<=|>=|<|>)\s*([a-zA-Z_]\w*)\.len\(\)$",
+            r"^([a-zA-Z_]\w*)\s*(<=|>=|<|>)\s*([a-zA-Z_]\w*(?:\[[^\[\]]+\])*)\.len\(\)$",
         )
         .unwrap();
         if let Some(c) = re_fwd.captures(trimmed) {
             return format!("({} as usize) {} {}.len()", &c[1], &c[2], &c[3]);
         }
 
-        // Pattern 2: xxx.len() op var   e.g. "dynamic.len() > i"
+        // Pattern 2 (2026.09.11): var op CONST — a const name (usize) on
+        // the right forces the i32 loop var to as usize, e.g. "i < N"
+        let re_const = Regex::new(r"^([a-zA-Z_]\w*)\s*(<=|>=|<|>)\s*([a-zA-Z_][a-zA-Z0-9_]*)$")
+            .unwrap();
+        if let Some(c) = re_const.captures(trimmed) {
+            let rhs = &c[3];
+            if const_names.contains(rhs) {
+                return format!("({} as usize) {} {}", &c[1], &c[2], rhs);
+            }
+        }
+
+        // Pattern 3: xxx.len() op var   e.g. "dynamic.len() > i"
         let re_rev = Regex::new(
             r"^([a-zA-Z_]\w*)\.len\(\)\s*(<=|>=|<|>)\s*([a-zA-Z_]\w*)$",
         )
@@ -1128,6 +1150,10 @@ impl Translator {
             .replace_all(&result, "###HUST_PREFIX###--$1###HUST_END###")
             .to_string();
 
+        // Compile-time constant names (const + integer literal) usable as
+        // array dimensions and comparison operands (r33 L1/Patterns)
+        let const_names = Self::scan_const_dim_names(source);
+
         // Step 2: Transform for loops using markers
         // Use two-pass approach: regex for header, brace-matching for body
         loop {
@@ -1157,11 +1183,12 @@ impl Translator {
 
             // Update statement: block / marked ++/-- / plain (see helper —
             // branch order matters, block must be checked first)
+            let const_names = Self::scan_const_dim_names(&result);
             let update_stmt = self.build_update_stmt(update, var_name);
 
             // L1 condition conversion: "i < arr.len()" -> "(i as usize) < arr.len()"
             // Anchored match — compound conditions are left for rustc to report
-            let transformed_condition = Self::transform_len_comparison(condition);
+            let transformed_condition = Self::transform_len_comparison(condition, &const_names);
 
             // Typed header: the loop variable is declared here (`let mut`)
             let rust_while = format!(
@@ -1210,7 +1237,7 @@ impl Translator {
             let full_for_start = m.start();
 
             let update_stmt = self.build_update_stmt(update, var_name);
-            let transformed_condition = Self::transform_len_comparison(condition);
+            let transformed_condition = Self::transform_len_comparison(condition, &const_names);
 
             // Untyped header: NO `let` — assignment into the pre-declared
             // loop variable (first assignment completes its delayed init)
