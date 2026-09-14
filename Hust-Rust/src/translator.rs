@@ -316,7 +316,7 @@ impl Translator {
         // Pattern 2: (type)simple_expr - handles simple expressions without parens
         // e.g., (f32)sum -> sum as f32
         let re_simple =
-            Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char)\)\s*([^\s;,\)]+)")
+            Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|usize|isize|f32|f64|bool|char)\)\s*([^\s;,\)]+)")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         result = re_simple
