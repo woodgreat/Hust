@@ -313,19 +313,40 @@ impl Translator {
             })
             .to_string();
 
-        // Pattern 2: (type)simple_expr - handles simple expressions without parens
-        // e.g., (f32)sum -> sum as f32
-        let re_simple =
-            Regex::new(r"\((i8|i16|i32|i64|u8|u16|u32|u64|usize|isize|f32|f64|bool|char)\)\s*([^\s;,\)]+)")
-                .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        // Pattern 2 (enhanced 2026.09.11): (type)operand — operand extracted
+        // with paren-depth-aware scanning, so complex operands like
+        // (i32)m[i].len() and (usize)(j - 1) work. Emitted as
+        // `(operand) as type` (parens guard operator precedence). Replaces
+        // the old tight-unit capture that choked on `m[i].len()`.
+        let re_cast_head = Regex::new(
+            r"\((i8|i16|i32|i64|u8|u16|u32|u64|usize|isize|f32|f64|bool|char)\)\s*",
+        )
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        result = re_simple
-            .replace_all(&result, |caps: &regex::Captures| {
-                let type_name = &caps[1];
-                let expr = &caps[2];
-                format!("{} as {}", expr, type_name)
-            })
-            .to_string();
+        let mut replacements: Vec<(usize, usize, String)> = Vec::new();
+        for m in re_cast_head.find_iter(&result) {
+            let type_name = match re_cast_head
+                .captures(&result[m.start()..])
+                .and_then(|c| c.get(1))
+                .map(|g| g.as_str().to_string())
+            {
+                Some(t) => t,
+                None => continue,
+            };
+            if let Some((operand, op_end)) = self.extract_cast_operand(&result, m.end()) {
+                if !operand.is_empty() {
+                    replacements.push((
+                        m.start(),
+                        op_end,
+                        format!("({}) as {}", operand, type_name),
+                    ));
+                }
+            }
+        }
+        // Replace from the end to keep earlier offsets valid
+        for (start, end, rep) in replacements.into_iter().rev() {
+            result = format!("{}{}{}", &result[..start], rep, &result[end..]);
+        }
 
         Ok(result)
     }
@@ -369,6 +390,100 @@ impl Translator {
         }
 
         result
+    }
+
+    /// Extract the operand of a C-style cast `(type)operand` starting right
+    /// after the `(type)`. The operand is a unary expression: prefix unary
+    /// operators (- ! ~), identifiers/literals, and postfix chains
+    /// (`.method()`, `[index]`, parenthesized groups). Terminates at
+    /// depth-0 binary operators, `,`, `;`, or an unbalanced closing bracket.
+    /// String literals are skipped intact. (2026.09.11, r27 enhancement)
+    fn extract_cast_operand(&self, source: &str, start: usize) -> Option<(String, usize)> {
+        let bytes = source.as_bytes();
+        let mut pos = start;
+        let mut depth_paren = 0i32;
+        let mut depth_brack = 0i32;
+        let mut in_string = false;
+        // Marks where a complete operand unit has ended — used to tell a
+        // depth-0 binary `-` (terminate) from a prefix unary `-` (continue).
+        let mut operand_end = start;
+
+        while pos < bytes.len() {
+            let c = bytes[pos] as char;
+            if in_string {
+                if c == '\\' {
+                    pos += 2;
+                    continue;
+                }
+                if c == '"' {
+                    in_string = false;
+                }
+                pos += 1;
+                continue;
+            }
+            match c {
+                '"' => {
+                    in_string = true;
+                    pos += 1;
+                }
+                '(' => {
+                    depth_paren += 1;
+                    pos += 1;
+                }
+                ')' => {
+                    if depth_paren == 0 && depth_brack == 0 {
+                        break; // unbalanced: belongs to an outer construct
+                    }
+                    depth_paren -= 1;
+                    pos += 1;
+                    if depth_paren == 0 && depth_brack == 0 {
+                        operand_end = pos; // a full parenthesized group done
+                    }
+                }
+                '[' => {
+                    depth_brack += 1;
+                    pos += 1;
+                }
+                ']' => {
+                    if depth_brack == 0 && depth_paren == 0 {
+                        break;
+                    }
+                    depth_brack -= 1;
+                    pos += 1;
+                    if depth_paren == 0 && depth_brack == 0 {
+                        operand_end = pos;
+                    }
+                }
+                ',' | ';' => {
+                    if depth_paren == 0 && depth_brack == 0 {
+                        break;
+                    }
+                    pos += 1;
+                }
+                '+' | '*' | '/' | '%' | '<' | '>' | '=' | '&' | '|' | '^' => {
+                    if depth_paren == 0 && depth_brack == 0 {
+                        break; // depth-0 binary operator: operand ends here
+                    }
+                    pos += 1;
+                }
+                '-' | '!' | '~' => {
+                    if depth_paren == 0 && depth_brack == 0 && operand_end > start {
+                        break; // binary minus/not after an operand: terminate
+                    }
+                    // prefix unary at operand start: part of the operand
+                    pos += 1;
+                }
+                _ => {
+                    pos += 1;
+                    operand_end = pos;
+                }
+            }
+        }
+
+        if pos == start {
+            return None; // nothing captured
+        }
+        Some((source[start..pos].trim_end().to_string(), pos))
     }
 
     /// V0.7: Normalize float literals
