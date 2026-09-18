@@ -747,6 +747,18 @@ impl Translator {
             .collect()
     }
 
+    /// Array dimension expression: an integer literal stays as-is; a const
+    /// name gets `as usize` — the const keeps its declared type (e.g. i32,
+    /// so plain constant usage still matches i32 signatures, q1 regression
+    /// fix 2026.09.12), and the dimension site does the usize conversion.
+    fn dim_expr(&self, dim: &str) -> String {
+        if dim.chars().all(|c| c.is_ascii_digit()) {
+            dim.to_string()
+        } else {
+            format!("{} as usize", dim)
+        }
+    }
+
     /// Array dimensions must be an integer literal or a const name from
     /// scan_const_dim_names. A plain variable (`i32 dims = 5; i32[dims][dims] c;`)
     /// is a syntax error with guidance — fail fast (2026.09.09).
@@ -826,9 +838,13 @@ impl Translator {
             let var_name = &caps[3];
             let elements = &caps[4];
             // Convert {1, 2, 3} to [1, 2, 3], use single semicolon
+            // const-name size gets `as usize` here (const keeps i32 at decl)
             format!(
                 "let mut {}: [{}; {}] = [{}];",
-                var_name, type_name, size, elements
+                var_name,
+                type_name,
+                self.dim_expr(size),
+                elements
             )
         });
 
@@ -840,13 +856,14 @@ impl Translator {
             let type_name = &caps[1];
             let size = &caps[2];
             let var_name = &caps[3];
+            let dim = self.dim_expr(size);
             format!(
                 "let mut {}: [{}; {}] = [{}; {}];",
                 var_name,
                 type_name,
-                size,
+                dim,
                 zero_lit(type_name),
-                size
+                dim
             )
         });
 
@@ -897,10 +914,13 @@ impl Translator {
                 && !value.is_empty()
                 && value.chars().all(|c| c.is_ascii_digit())
             {
-                // r5 evolution (2026.09.09): const + non-negative integer
-                // literal -> compile-time constant. usize so it works as an
-                // array dimension: i32[N][N] c;
-                format!("const {}: usize = {};", var_name, value)
+                // r5 evolution (2026.09.09, revised 2026.09.12): const +
+                // integer literal -> compile-time constant, KEEPING the
+                // declared type (const a: i32 = 10) — plain constant usage
+                // must still match i32 signatures (q1 regression). Array
+                // dimensions get their `as usize` at the dimension site
+                // instead (see multi/single array decl).
+                format!("const {}: {} = {};", var_name, type_name, value)
             } else if is_const {
                 // r2: immutable binding (expression or non-integer literal) —
                 // runtime value, not usable as array dimension
@@ -1050,13 +1070,11 @@ impl Translator {
     /// Warning for users: prefer "i + 1 < len" over "i < len - 1"; with usize,
     /// "len - 1" underflows when the array is empty.
     /// L1/L1.5 condition conversion (2026.09.11): right side may be
-    /// `.len()` (plain or with an index chain) or a compile-time const name
-    /// (usize) — both are usize-typed and force the i32 loop var to
-    /// `as usize`. Full-string anchored; compound conditions pass through.
-    fn transform_len_comparison(
-        condition: &str,
-        const_names: &HashSet<String>,
-    ) -> String {
+    /// `.len()` (plain or with an index chain) — both usize-typed and force
+    /// the i32 loop var to `as usize`. Full-string anchored; compound
+    /// conditions pass through. const-name comparison (`i < N`) needs NO
+    /// conversion — consts keep their declared i32 type (q1 regression fix).
+    fn transform_len_comparison(condition: &str) -> String {
         use regex::Regex;
 
         let trimmed = condition.trim();
@@ -1072,17 +1090,6 @@ impl Translator {
         .unwrap();
         if let Some(c) = re_fwd.captures(trimmed) {
             return format!("({} as usize) {} {}.len()", &c[1], &c[2], &c[3]);
-        }
-
-        // Pattern 2 (2026.09.11): var op CONST — a const name (usize) on
-        // the right forces the i32 loop var to as usize, e.g. "i < N"
-        let re_const = Regex::new(r"^([a-zA-Z_]\w*)\s*(<=|>=|<|>)\s*([a-zA-Z_][a-zA-Z0-9_]*)$")
-            .unwrap();
-        if let Some(c) = re_const.captures(trimmed) {
-            let rhs = &c[3];
-            if const_names.contains(rhs) {
-                return format!("({} as usize) {} {}", &c[1], &c[2], rhs);
-            }
         }
 
         // Pattern 3: xxx.len() op var   e.g. "dynamic.len() > i"
@@ -1303,7 +1310,7 @@ impl Translator {
 
             // L1 condition conversion: "i < arr.len()" -> "(i as usize) < arr.len()"
             // Anchored match — compound conditions are left for rustc to report
-            let transformed_condition = Self::transform_len_comparison(condition, &const_names);
+            let transformed_condition = Self::transform_len_comparison(condition);
 
             // Typed header: the loop variable is declared here (`let mut`)
             let rust_while = format!(
@@ -1352,7 +1359,7 @@ impl Translator {
             let full_for_start = m.start();
 
             let update_stmt = self.build_update_stmt(update, var_name);
-            let transformed_condition = Self::transform_len_comparison(condition, &const_names);
+            let transformed_condition = Self::transform_len_comparison(condition);
 
             // Untyped header: NO `let` — assignment into the pre-declared
             // loop variable (first assignment completes its delayed init)
@@ -1694,7 +1701,7 @@ impl Translator {
             let mut ty = type_name.to_string();
             let dims: Vec<_> = dim_re.captures_iter(dims_str).collect();
             for d in dims.iter().rev() {
-                ty = format!("[{}; {}]", ty, &d[1]);
+                ty = format!("[{}; {}]", ty, self.dim_expr(&d[1]));
             }
 
             // Element braces -> brackets (per-char replace, depth-agnostic)
@@ -1737,8 +1744,8 @@ impl Translator {
             let dims: Vec<_> = dim_re.captures_iter(dims_str).collect();
             for d in dims.iter().rev() {
                 let n = &d[1];
-                ty = format!("[{}; {}]", ty, n);
-                val = format!("[{}; {}]", val, n);
+                ty = format!("[{}; {}]", ty, self.dim_expr(n));
+                val = format!("[{}; {}]", val, self.dim_expr(n));
             }
 
             format!("let mut {}: {} = {};", var_name, ty, val)
