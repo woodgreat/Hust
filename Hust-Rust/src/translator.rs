@@ -141,11 +141,22 @@ impl Translator {
         // how a row is created for Vec<Vec<T>> (2026.09.09)
         output = self.translate_empty_push(&output)?;
 
+        // Rule 7.6: array literal assignment — x.f = {a, b, c}; or x[i] = {a};
+        // -> x.f = [a, b, c];  (Rust: `{a,b,c}` is a block expression, not an
+        // array literal; 2026.09.18, found by owner's q5). One level only —
+        // nested literals ({{..},{..}}) not yet handled here.
+        output = self.transform_array_literal_assign(&output)?;
+
         // Rule 8: Transform C-style for loops (MUST run BEFORE variable declarations)
         output = self.transform_for_loop(&output)?;
 
         // Rule 9: Variable declaration transform
         output = self.transform_variable_declarations(&output)?;
+
+        // Rule 9.5: string literal assignment — x.f = "Alice"; -> .to_string()
+        // (AFTER Rule 9 so declarations (`String name = "x";`) are handled
+        // there first; 2026.09.18, found by owner's q5)
+        output = self.translate_string_assign(&output)?;
 
         // Rule 10: Remove parentheses from if/while conditions
         output = self.remove_condition_parens(&output)?;
@@ -542,28 +553,38 @@ impl Translator {
     fn transform_class_instantiation(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Pattern: ClassName var;
-        // Match capitalized word followed by variable name
-        let re = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*)\s*;")
+        // Pattern: ClassName var;  /  ClassName a, b, c;  (comma list,
+        // 2026.09.09 — same shape as scalar no-init declarations)
+        let re = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*(?:\s*,\s*[a-z_][a-zA-Z0-9_]*)*)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let class_name = &caps[1];
-            let var_name = &caps[2];
+            let var_names: Vec<&str> = caps[2]
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
 
             // Check if it looks like a class name (starts with uppercase)
             // and not a primitive type
             if self.is_primitive_type(class_name) {
-                // Keep as-is for primitive types
-                format!("{} {};", class_name, var_name)
-            } else {
-                // Transform to Rust struct instantiation with default values
-                // For now, use Default::default() - requires #[derive(Default)]
-                format!(
-                    "let mut {}: {} = {}::default();",
-                    var_name, class_name, class_name
-                )
+                // Keep as-is for primitive types (comma list per var)
+                let vars = var_names
+                    .iter()
+                    .map(|v| format!("{} {};", class_name, v))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                return vars;
             }
+
+            // Transform to Rust struct instantiation with default values
+            // For now, use Default::default() - requires #[derive(Default)]
+            var_names
+                .iter()
+                .map(|v| format!("let mut {}: {} = {}::default();", v, class_name, class_name))
+                .collect::<Vec<_>>()
+                .join("\n")
         });
 
         Ok(result.to_string())
@@ -951,11 +972,19 @@ impl Translator {
                 format!("const {}: {} = {};", var_name, type_name, value)
             } else if is_const {
                 // r2: immutable binding (expression or non-integer literal) —
-                // runtime value, not usable as array dimension
-                format!("let {}: {} = {};", var_name, type_name, value)
+                // runtime value, not usable as array dimension.
+                // r3: String literal init needs .to_string() (owned String)
+                if type_name == "String" && value.starts_with('"') {
+                    format!("let {}: String = {}.to_string();", var_name, value)
+                } else {
+                    format!("let {}: {} = {};", var_name, type_name, value)
+                }
             } else if is_for_loop_var {
                 // Keep original format - for loop transformer will handle this
                 format!("{} {} = {};", type_name, var_name, value)
+            } else if type_name == "String" && value.starts_with('"') {
+                // r3: String declaration with literal -> owned String
+                format!("let mut {}: String = {}.to_string();", var_name, value)
             } else {
                 // regular variable: mutable in Rust ("let mut")
                 format!("let mut {}: {} = {};", var_name, type_name, value)
@@ -1697,6 +1726,70 @@ impl Translator {
         Ok(re.replace_all(source, ".push(Vec::new())").to_string())
     }
 
+    /// Array literal assignment: `x.f = {a, b, c};` -> `x.f = [a, b, c];`
+    /// (Rust parses `{a, b, c}` as a block expression — array literals on
+    /// assignment need `[...]`. 2026.09.18, found by owner's q5.)
+    /// One nesting level; nested `{{..},{..}}` literals not yet handled.
+    fn transform_array_literal_assign(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        // target = identifier, optionally with an index/method suffix
+        let re = Regex::new(
+            r"((?:\b[a-zA-Z_]\w*)+(?:\[[^\[\]]+\]|\.\w+\([^()]*\))*)\s*=\s*\{([^{}]+)\}\s*;",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let target = &caps[1];
+            let elements = caps[2].trim();
+            format!("{} = [{}];", target, elements)
+        });
+
+        Ok(result.to_string())
+    }
+
+    /// String literal assignment: `x.f = "Alice";` -> `x.f = "Alice".to_string();`
+    /// (a bare "..." is &str; String targets need .to_string() — r3 covered
+    /// declarations, this covers assignments. 2026.09.18, owner's q5.)
+    /// The string literal is captured as a WHOLE group (group 2, with
+    /// escape-sequence support) — no boundary assumptions from substring
+    /// slicing, so trailing `;` or any following text never leaks in.
+    /// `!=` comparisons are skipped (char before target is `!`).
+    fn translate_string_assign(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        let re = Regex::new(r#"([a-zA-Z_][\w.\[\]]*)\s*=\s*("(?:[^"\\]|\\.)*")\s*;"#)
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let mut replacements: Vec<(usize, usize, String)> = Vec::new();
+        for caps in re.captures_iter(source) {
+            let m = caps.get(0).unwrap();
+            // skip `!=` comparisons (char before the match, skipping spaces,
+            // is `!` — matches `x != "y"`; `==` cannot match this pattern's
+            // single `=` so no false positives there)
+            let bytes = source.as_bytes();
+            let mut p = m.start();
+            while p > 0 && (bytes[p - 1] as char).is_whitespace() {
+                p -= 1;
+            }
+            if p > 0 && bytes[p - 1] == b'!' {
+                continue;
+            }
+            let target = caps[1].trim();
+            let strlit = &caps[2]; // exact literal, quotes included
+            replacements.push((
+                m.start(),
+                m.end(),
+                format!("{} = {}.to_string();", target, strlit),
+            ));
+        }
+
+        let mut result = source.to_string();
+        for (start, end, rep) in replacements.into_iter().rev() {
+            result = format!("{}{}{}", &result[..start], rep, &result[end..]);
+        }
+
+        Ok(result)
+    }
+
     /// V0.4: Transform multi-dimensional array declaration
     /// 2026.09.08 dimension generalization (拆离法 sibling):
     /// i32[3][4] matrix = {{1,2,3,4},{5,6,7,8},{9,10,11,12}};
@@ -1951,41 +2044,79 @@ impl Translator {
         Ok(result.to_string())
     }
 
-    /// Parse class body into fields and methods
-    /// First extracts all methods, then treats remaining lines as fields
+    /// Parse class body into fields and methods (rewritten 2026.09.18)
+    /// Method bodies are extracted with brace-depth matching — the old
+    /// `[^{}]*` pattern broke on nested blocks (if/for inside methods),
+    /// leaking method fragments into field parsing (`avg: return`).
     fn parse_class_body(&self, body: &str) -> (Vec<ClassField>, Vec<ClassMethod>) {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
-        let mut remaining = body.to_string();
 
-        // Extract all methods first (supports multi-line with (?s))
         use regex::Regex;
-        let method_re =
-            Regex::new(r"(?s)(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*\{[^{}]*\}").unwrap();
 
-        for caps in method_re.captures_iter(body) {
-            let full_match = caps.get(0).unwrap();
-            let method_text = full_match.as_str();
+        // Method signature start: [public] Type name ( ... ) {
+        // (brace-depth-aware body extraction — methods may contain nested
+        //  if/for blocks, which the old [^{}]* pattern could not handle)
+        let sig_re = Regex::new(
+            r"(?s)(public\s+)?([a-zA-Z_]\w*)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{",
+        )
+        .unwrap();
 
-            if let Some(method) = self.parse_method(method_text) {
+        // 1. locate method spans (signature start + brace-matched body end)
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        let mut pos = 0usize;
+        while let Some(m) = sig_re.find_at(body, pos) {
+            let mut depth = 1usize;
+            let mut p = m.end();
+            let mut in_string = false;
+            while p < body.len() {
+                let c = body.as_bytes()[p] as char;
+                if in_string {
+                    if c == '\\' {
+                        p += 1;
+                        continue;
+                    }
+                    if c == '"' {
+                        in_string = false;
+                    }
+                } else {
+                    match c {
+                        '"' => in_string = true,
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                p += 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                p += 1;
+            }
+            spans.push((m.start(), p));
+            pos = p;
+        }
+
+        // 2. methods: parse each span
+        for (s, e) in &spans {
+            if let Some(method) = self.parse_method(&body[*s..*e]) {
                 methods.push(method);
-                // Remove this method from remaining text
-                remaining = remaining.replace(method_text, "");
             }
         }
 
-        // Parse remaining lines as fields
-        for line in remaining.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with("//") {
-                continue;
-            }
-
-            // Field declaration: Type name;
-            if line.contains(";") && !line.contains("(") {
-                if let Some(field) = self.parse_field(line) {
-                    fields.push(field);
-                }
+        // 3. fields: non-method text, line by line
+        let mut last = 0usize;
+        let mut gaps = String::new();
+        for (s, e) in &spans {
+            gaps.push_str(&body[last..*s]);
+            last = *e;
+        }
+        gaps.push_str(&body[last..]);
+        for line in gaps.lines() {
+            if let Some(field) = self.parse_field(line) {
+                fields.push(field);
             }
         }
 
@@ -2012,6 +2143,16 @@ impl Translator {
         let type_name = parts[idx];
         let field_name = parts[idx + 1].trim_end_matches(";");
 
+        // Guard: a Rust/Hust keyword misparsed as a type (method-extraction
+        // fallback safety — e.g. `return avg;` -> type `return` name `avg`)
+        const NOT_TYPES: &[&str] = &[
+            "return", "if", "else", "for", "while", "let", "fn", "match", "true", "false",
+            "println", "print", "self", "break", "continue", "pub", "public",
+        ];
+        if NOT_TYPES.contains(&type_name) {
+            return None;
+        }
+
         Some(ClassField {
             name: field_name.to_string(),
             // C-style array field type (i32[5]) -> Rust form ([i32; 5])
@@ -2021,13 +2162,13 @@ impl Translator {
     }
 
     /// Parse a method declaration (supports multi-line with (?s))
+    /// Body capture is greedy to the span's final `}` — the span from
+    /// parse_class_body is brace-matched, so its last `}` closes the method.
     fn parse_method(&self, text: &str) -> Option<ClassMethod> {
         use regex::Regex;
 
-        // Pattern: [public] ReturnType name(params) [{ body }]
-        // (?s) makes . match newlines
         let re =
-            Regex::new(r"(?s)^\s*(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*(\{[^{}]*\})?").unwrap();
+            Regex::new(r"(?s)^\s*(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*(\{.*\})?").unwrap();
 
         let caps = re.captures(text)?;
 
@@ -2198,12 +2339,11 @@ impl Translator {
             // visibility), because this function returns String (no Err path).
             let rust_params = self.transform_method_params(&method.params);
 
-            let needs_mut = method
-                .body
-                .as_ref()
-                .map(|b| b.contains("self.") && b.contains("="))
-                .unwrap_or(false);
-            let self_param = if needs_mut { "&mut self" } else { "&self" };
+            // self param FIXED to &self — must match the trait declaration
+            // exactly (interface methods declare &self; a &mut here would be
+            // E0053). The heuristic needs_mut misfired on `sum += self.scores[i]`
+            // (contains both "self." and "=" without touching self fields).
+            let self_param = "&self";
 
             let sig = if method.ret_type == "void" {
                 format!("\n    fn {}({}{}) {{", rust_name, self_param, rust_params)
@@ -2242,10 +2382,18 @@ impl Translator {
             let rust_name = self.to_snake_case(&method.name);
             let rust_params = self.transform_method_params(&method.params);
 
+            // needs_mut: field-WRITE detection only — `self.x =` / `self.x +=` etc.
+            // (the old "contains self. && contains =" misfired on
+            //  `sum += self.scores[i]`, which only READS a field)
             let needs_mut = method
                 .body
                 .as_ref()
-                .map(|b| b.contains("self.") && b.contains("="))
+                .map(|b| {
+                    // NOTE: regex 1.12 has no look-around, so `self.x == y`
+                    // (comparison) is a false positive here — harmless (the
+                    // method just gets &mut self without needing it).
+                    regex::Regex::new(r"self\.\w+\s*(?:[-+*/])?=").unwrap().is_match(b)
+                })
                 .unwrap_or(false);
             let self_param = if needs_mut { "&mut self" } else { "&self" };
 
