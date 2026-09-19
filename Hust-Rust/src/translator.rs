@@ -88,6 +88,12 @@ impl Translator {
         // interface Shape { public f64 area(); } -> trait Shape { fn area(&self) -> f64; }
         output = self.transform_interface_definitions(&output)?;
 
+        // Rule 1.5: interface implementation methods must be public
+        // (owner decision 2026.09.12: private method implementing a public
+        // interface leaks via the trait path — fail-fast with guidance,
+        // enforced here because generate_trait_impl returns String)
+        self.check_interface_impl_visibility(&output)?;
+
         // Rule 2: Transform class definitions
         // class Point { i32 x; public i32 getX() { return self.x; } }
         // -> struct Point { x: i32 } impl Point { fn get_x(&self) -> i32 { self.x } }
@@ -2098,6 +2104,75 @@ impl Translator {
         result
     }
 
+    /// Interface implementation methods must be public (owner decision
+    /// 2026.09.12): a private method implementing a public interface leaks
+    /// via the trait path (reachable once the trait is imported) — Java/Go
+    /// enforce the same (weaker access = compile error). Fail-fast with
+    /// guidance, replacing the cryptic E0308 at the call site.
+    /// Enforced at pipeline level because generate_trait_impl returns String.
+    /// Method names are snake_case-normalized on both sides before matching
+    /// (trait methods are already snake_case; class methods may be camelCase).
+    fn check_interface_impl_visibility(&self, source: &str) -> Result<(), TranspileError> {
+        use regex::Regex;
+
+        // per class: implements list + class body
+        let class_re = Regex::new(
+            r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+\w+)?\s*implements\s+([a-zA-Z_][a-zA-Z0-9_,\s]+)\s*\{([\s\S]*?)^\}",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        // class method: [public] RetType name(params) { body }
+        let method_re = Regex::new(
+            r"(?s)(public\s+)?(\w+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)\s*\{[^{}]*\}",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        for ccaps in class_re.captures_iter(source) {
+            let class_name = &ccaps[1];
+            let if_names: Vec<&str> = ccaps[2].split(',').map(|s| s.trim()).collect();
+            let body = &ccaps[3];
+
+            // interface member names -> owning interface (from generated
+            // trait definitions) — HashMap so the error can name the interface
+            let mut if_methods: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+            for if_name in if_names {
+                let t_re = Regex::new(&format!(
+                    r"(?s)trait\s+{}\s*\{{([^}}]*)\}}",
+                    if_name
+                ))
+                .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                if let Some(tc) = t_re.captures(source) {
+                    let f_re = Regex::new(r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
+                        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                    for f in f_re.captures_iter(&tc[1]) {
+                        if_methods.insert(f[1].to_string(), if_name.to_string());
+                    }
+                }
+            }
+
+            // class methods: non-public ones implementing an interface -> error
+            // (names snake_case-normalized: trait members are snake_case,
+            // class methods may be camelCase — compare in one canonical form)
+            for mcaps in method_re.captures_iter(body) {
+                let is_public = mcaps.get(1).is_some();
+                let ret_type = &mcaps[2];
+                let m_rust = self.to_snake_case(&mcaps[3]);
+                if !is_public {
+                    if let Some(if_name) = if_methods.get(&m_rust) {
+                        return Err(TranspileError::TransformError(format!(
+                            "syntax error: interface method `{}` must be declared `public` — \
+                             private methods cannot implement the public interface `{}` (r26/r23). \
+                             Fix: `public {} {}(...);`",
+                            &mcaps[3], if_name, ret_type, &mcaps[3]
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Generate trait implementation for an interface.
     /// Only methods that are members of this interface go into the trait
     /// impl (routing via trait_methods, 2026.09.11) — other class methods
@@ -2118,6 +2193,9 @@ impl Translator {
             if !trait_methods.contains(&rust_name) {
                 continue; // not an interface member: inherent-only
             }
+            // NOTE: interface implementation methods must be public — this is
+            // enforced at pipeline level (Rule 1.5 check_interface_impl_
+            // visibility), because this function returns String (no Err path).
             let rust_params = self.transform_method_params(&method.params);
 
             let needs_mut = method
