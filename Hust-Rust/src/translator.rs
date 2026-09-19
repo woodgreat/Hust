@@ -1865,17 +1865,14 @@ impl Translator {
             // impl would be an E0046 error, and a silent zero-value default
             // would hide "forgot to implement". panic body: compiles, and
             // any un-overridden call fails loudly; the class's own method
-            // (inherent impl) shadows this default when implemented.
+            // Pure signature (no default body) — the trait impl in the
+            // class's own `impl Student for` block provides real methods
+            // (all methods, visibility per two-layer model), satisfying
+            // the trait without placeholders.
             let sig = if ret_type == "void" {
-                format!(
-                    "\n    fn {}(&self{}) {{ panic!(\"interface method not implemented: {}\"); }}",
-                    rust_method, rust_params, rust_method
-                )
+                format!("\n    fn {}(&self{});", rust_method, rust_params)
             } else {
-                format!(
-                    "\n    fn {}(&self{}) -> {} {{ panic!(\"interface method not implemented: {}\"); }}",
-                    rust_method, rust_params, ret_type, rust_method
-                )
+                format!("\n    fn {}(&self{}) -> {};", rust_method, rust_params, ret_type)
             };
 
             result.push(sig);
@@ -1906,11 +1903,41 @@ impl Translator {
             // Parse class body into fields and methods
             let (fields, methods) = self.parse_class_body(body);
 
+            // Interface method names (for trait-impl routing, 2026.09.11):
+            // the implemented interfaces' traits are already generated in
+            // source (Rule 1 ran before this) — scan their method names so
+            // only interface members go into the trait impl, while other
+            // class methods stay inherent-only (E0407 otherwise).
+            let mut trait_methods: HashSet<String> = HashSet::new();
+            if let Some(ifs) = interfaces {
+                for if_name in ifs.split(',').map(|s| s.trim()) {
+                    let t_re = Regex::new(&format!(
+                        r"(?s)trait\s+{}\s*\{{([^}}]*)\}}",
+                        if_name
+                    ))
+                    .expect("static regex");
+                    if let Some(tc) = t_re.captures(source) {
+                        let f_re =
+                            Regex::new(r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
+                                .expect("static regex");
+                        for f in f_re.captures_iter(&tc[1]) {
+                            trait_methods.insert(f[1].to_string());
+                        }
+                    }
+                }
+            }
+
             // Generate struct
             let struct_def = self.generate_struct(class_name, &fields, parent_class);
 
             // Generate impl block
-            let impl_def = self.generate_impl(class_name, &methods, parent_class, interfaces);
+            let impl_def = self.generate_impl(
+                class_name,
+                &methods,
+                parent_class,
+                interfaces,
+                &trait_methods,
+            );
 
             format!("{}\n{}", struct_def, impl_def)
         });
@@ -2050,6 +2077,7 @@ impl Translator {
         methods: &[ClassMethod],
         _parent_class: Option<&str>,
         interfaces: Option<&str>,
+        trait_methods: &HashSet<String>,
     ) -> String {
         let mut result = String::new();
 
@@ -2057,7 +2085,8 @@ impl Translator {
         if let Some(ifs) = interfaces {
             let if_names: Vec<&str> = ifs.split(',').map(|s| s.trim()).collect();
             for if_name in if_names {
-                let trait_impl = self.generate_trait_impl(class_name, if_name, methods);
+                let trait_impl =
+                    self.generate_trait_impl(class_name, if_name, methods, trait_methods);
                 result.push_str(&trait_impl);
             }
         }
@@ -2069,22 +2098,26 @@ impl Translator {
         result
     }
 
-    /// Generate trait implementation for an interface
+    /// Generate trait implementation for an interface.
+    /// Only methods that are members of this interface go into the trait
+    /// impl (routing via trait_methods, 2026.09.11) — other class methods
+    /// stay inherent-only (E0407 otherwise). Two-layer visibility: trait
+    /// impl methods take visibility from the interface; inherent methods
+    /// follow r26 (private default) and are called first by name resolution.
     fn generate_trait_impl(
         &self,
         class_name: &str,
         interface_name: &str,
         methods: &[ClassMethod],
+        trait_methods: &HashSet<String>,
     ) -> String {
         let mut result = format!("impl {} for {} {{", interface_name, class_name);
 
-        // Only include public methods in trait impl
         for method in methods {
-            if !matches!(method.visibility, Visibility::Public) {
-                continue;
-            }
-
             let rust_name = self.to_snake_case(&method.name);
+            if !trait_methods.contains(&rust_name) {
+                continue; // not an interface member: inherent-only
+            }
             let rust_params = self.transform_method_params(&method.params);
 
             let needs_mut = method
