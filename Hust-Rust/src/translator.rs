@@ -2106,7 +2106,7 @@ impl Translator {
             }
         }
 
-        // 3. fields: non-method text, line by line
+        // 3. fields: non-method text, line by line (skip blanks/comments)
         let mut last = 0usize;
         let mut gaps = String::new();
         for (s, e) in &spans {
@@ -2115,6 +2115,10 @@ impl Translator {
         }
         gaps.push_str(&body[last..]);
         for line in gaps.lines() {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with("//") || t.starts_with("/*") {
+                continue;
+            }
             if let Some(field) = self.parse_field(line) {
                 fields.push(field);
             }
