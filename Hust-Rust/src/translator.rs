@@ -791,6 +791,28 @@ impl Translator {
         Ok(())
     }
 
+    /// C-style array type -> Rust form: i32[5] -> [i32; 5],
+    /// i32[2][3] -> [[i32; 3]; 2]. Non-array types pass through.
+    fn c_array_type_to_rust(&self, t: &str) -> String {
+        use regex::Regex;
+        let re = Regex::new(r"^([a-zA-Z_]\w*)((?:\[\d+\])+)$").unwrap();
+        if let Some(c) = re.captures(t) {
+            let base = &c[1];
+            let dims: Vec<String> = Regex::new(r"\[(\d+)\]")
+                .unwrap()
+                .captures_iter(&c[2])
+                .map(|d| d[1].to_string())
+                .collect();
+            let mut ty = base.to_string();
+            for d in dims.iter().rev() {
+                ty = format!("[{}; {}]", ty, d);
+            }
+            ty
+        } else {
+            t.to_string()
+        }
+    }
+
     /// Reject `const` declarations without initializer (2026.09.09).
     /// `const i32 a;` / `const i32 a, b;` have no value — meaningless as a
     /// constant. Delayed initialization belongs to plain variables.
@@ -1839,11 +1861,21 @@ impl Translator {
             // Transform parameters
             let rust_params = self.transform_method_params(params);
 
-            // Build signature
+            // Build signature WITH a fail-fast default body — an empty trait
+            // impl would be an E0046 error, and a silent zero-value default
+            // would hide "forgot to implement". panic body: compiles, and
+            // any un-overridden call fails loudly; the class's own method
+            // (inherent impl) shadows this default when implemented.
             let sig = if ret_type == "void" {
-                format!("fn {}(&self{});", rust_method, rust_params)
+                format!(
+                    "\n    fn {}(&self{}) {{ panic!(\"interface method not implemented: {}\"); }}",
+                    rust_method, rust_params, rust_method
+                )
             } else {
-                format!("fn {}(&self{}) -> {};", rust_method, rust_params, ret_type)
+                format!(
+                    "\n    fn {}(&self{}) -> {} {{ panic!(\"interface method not implemented: {}\"); }}",
+                    rust_method, rust_params, ret_type, rust_method
+                )
             };
 
             result.push(sig);
@@ -1949,7 +1981,8 @@ impl Translator {
 
         Some(ClassField {
             name: field_name.to_string(),
-            type_name: type_name.to_string(),
+            // C-style array field type (i32[5]) -> Rust form ([i32; 5])
+            type_name: self.c_array_type_to_rust(type_name),
             visibility,
         })
     }
