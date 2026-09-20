@@ -996,23 +996,51 @@ impl Translator {
 
         // Match: type[size] name = {elements};  (size: literal or const name)
         // Include the trailing semicolon in the match so we replace it completely
-        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[([a-zA-Z0-9_]+)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([^}]+)\};")
+        // Support multidimensional: type[size1][size2]... name = {elements};
+        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)((?:\[[a-zA-Z0-9_]+\])+)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{([^}]+)\};")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let type_name = &caps[1];
-            let size = &caps[2];
+            let dims_str = &caps[2]; // e.g., "[5][5]" or "[dims][dims]"
             let var_name = &caps[3];
             let elements = &caps[4];
-            // Convert {1, 2, 3} to [1, 2, 3], use single semicolon
-            // const-name size gets `as usize` here (const keeps i32 at decl)
-            format!(
-                "let mut {}: [{}; {}] = [{}];",
-                var_name,
-                type_name,
-                self.dim_expr(size),
-                elements
-            )
+            
+            // Parse dimensions
+            let dim_re = Regex::new(r"\[([a-zA-Z0-9_]+)\]").unwrap();
+            let dims: Vec<String> = dim_re.captures_iter(dims_str)
+                .map(|c| self.dim_expr(&c[1]))
+                .collect();
+            
+            eprintln!("[DEBUG] dims_str='{}', dims={:?}, elements='{}'", dims_str, dims, elements);
+            
+            // Check if elements is just "0" (zero initialization)
+            let is_zero_init = elements.trim() == "0";
+            
+            if is_zero_init {
+                // Build nested zero initialization: [[0; N]; M] or [0; N]
+                let zero_val = zero_lit(type_name);
+                let mut init = format!("[{}; {}]", zero_val, dims[0]);
+                for dim in &dims[1..] {
+                    init = format!("[{}; {}]", init, dim);
+                }
+                // Build type annotation: [i32; 5] or [[i32; 5]; 5]
+                let mut type_ann = type_name.to_string();
+                for dim in &dims {
+                    type_ann = format!("[{}; {}]", type_ann, dim);
+                }
+                format!("let mut {}: {} = {};", var_name, type_ann, init)
+            } else {
+                // Regular array initialization {1, 2, 3} -> [1, 2, 3]
+                // For multidimensional, this needs nested braces, but we don't support that yet
+                if dims.len() > 1 {
+                    // Multidimensional with non-zero init - not supported yet
+                    eprintln!("[Hust 提醒] 多维数组暂只支持 {{0}} 全零初始化");
+                    format!("let mut {}: {};", var_name, dims_str)
+                } else {
+                    format!("let mut {}: [{}; {}] = [{}];", var_name, type_name, dims[0], elements)
+                }
+            }
         });
 
         // No-initializer form: type[size] name;  (mutually exclusive with `= {`)
@@ -1943,18 +1971,35 @@ impl Translator {
                 ty = format!("[{}; {}]", ty, self.dim_expr(&d[1]));
             }
 
-            // Element braces -> brackets (per-char replace, depth-agnostic)
-            let rust_elements = elements
-                .replace("{", "[")
-                .replace("}", "]")
-                .replace(";", "");
+            // Check if elements is just "0" (zero initialization)
+            let is_zero_init = elements.trim() == "0";
+            
+            if is_zero_init {
+                // Build nested zero initialization: [[0; N]; M] or [0; N]
+                let zero_val = match type_name {
+                    "f32" | "f64" => "0.0",
+                    "bool" => "false",
+                    _ => "0",
+                };
+                let mut init = format!("[{}; {}]", zero_val, self.dim_expr(&dim_re.captures_iter(dims_str).next().unwrap()[1]));
+                for d in dim_re.captures_iter(dims_str).skip(1) {
+                    init = format!("[{}; {}]", init, self.dim_expr(&d[1]));
+                }
+                format!("let mut {}: {} = {};", var_name, ty, init)
+            } else {
+                // Element braces -> brackets (per-char replace, depth-agnostic)
+                let rust_elements = elements
+                    .replace("{", "[")
+                    .replace("}", "]")
+                    .replace(";", "");
 
-            format!(
-                "let mut {}: {} = [{}];",
-                var_name,
-                ty,
-                rust_elements.trim()
-            )
+                format!(
+                    "let mut {}: {} = [{}];",
+                    var_name,
+                    ty,
+                    rust_elements.trim()
+                )
+            }
         });
 
         // No-initializer form: type[d1][d2]...[dn] name;  (size: literal or
