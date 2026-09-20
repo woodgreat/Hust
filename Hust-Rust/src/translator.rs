@@ -257,7 +257,7 @@ impl Translator {
         )
         .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let array_re = Regex::new(
-            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[[a-zA-Z0-9_]+\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;",
+            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)(?:\[[a-zA-Z0-9_]+\])+\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;",
         )
         .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let class_re = Regex::new(
