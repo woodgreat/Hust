@@ -32,12 +32,18 @@ enum Commands {
     Run {
         /// Source file path
         file: PathBuf,
+        /// Force project mode (use settings.config for modules)
+        #[arg(short, long)]
+        project: bool,
     },
     /// Build project
     Build {
         /// Project directory (default: current directory)
         #[arg(short, long, default_value = ".")]
         project_dir: PathBuf,
+        /// Force project mode (use settings.config for modules)
+        #[arg(short, long)]
+        project: bool,
     },
     /// Check syntax
     Check {
@@ -55,18 +61,21 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { file } => {
+        Commands::Run { file, project } => {
             println!("[Hust] Running: {:?}", file);
 
-            // Check if project has settings.config (module system support)
+            // Check if project mode is forced or auto-detected
             let project_dir = file.parent()
                 .context("Failed to get project directory")?
                 .to_path_buf();
             let config_path = project_dir.join("settings.config");
             
-            if config_path.exists() {
+            // Use project mode only if --project flag is set
+            let use_project_mode = project;
+            
+            if use_project_mode {
                 // Project with modules - use build logic then run
-                println!("[Hust] Detected settings.config, using project build mode");
+                println!("[Hust] Project mode enabled");
                 build_project(&project_dir)?;
                 // Run the compiled binary
                 let config = ProjectConfig::load(&project_dir)
@@ -171,8 +180,14 @@ opt-level = 3
             println!("[Hust] Done");
             Ok(())
         }
-        Commands::Build { project_dir } => {
+        Commands::Build { project_dir, project } => {
             println!("[Hust] Building project: {:?}", project_dir);
+            
+            // Check if project mode is forced
+            if project {
+                println!("[Hust] Project mode forced by --project");
+            }
+            
             build_project(&project_dir)
         }
         Commands::Check { file } => {
