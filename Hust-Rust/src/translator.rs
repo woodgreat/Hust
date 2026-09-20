@@ -77,6 +77,11 @@ impl Translator {
     pub fn transpile(&self, source: &str) -> Result<String, TranspileError> {
         let mut output = source.to_string();
 
+        // Rule 0: Initialization reminder (owner design, 2026.09.20) —
+        // 非阻断浅扫描：声明后无任何写入 → 提醒"使用前要先初始化，否则
+        // 语言核可能报错"。先于一切变换执行，行号对应原始文件。
+        self.remind_init_before_use(&output)?;
+
         // V0.6 transform rules (order matters!):
         // 1. Interface definitions (before class to handle implements)
         // 2. Class definitions (before functions to handle methods)
@@ -191,6 +196,113 @@ impl Translator {
         output = self.transform_array_indices(&output)?;
 
         Ok(output)
+    }
+
+    /// Rule 0: Initialization reminder (owner design, 2026.09.20).
+    /// 语言核原则：不合成默认值，要不要默认值由程序员负责。转译器只在
+    /// 转译时提醒（非阻断，不改变 exit code）：声明后未见任何写入的变量，
+    /// 使用前要先初始化，否则将来语言核可能报错。
+    ///
+    /// 刻意只做浅扫描，不做定值初始化流分析：
+    /// - 允许漏报（有赋值但顺序不对等情形，过渡期由 rustc E0381/E0382
+    ///   拦截，将来由语言核拦截）
+    /// - 绝不误拦编译
+    /// - 跨函数同名变量的写入也会使提醒静默（漏报方向，可接受）
+    /// class/interface 体内被掩蔽，字段声明（如 class 里的 `i32 id;`）不
+    /// 触发提醒；动态数组声明自带 Vec::new() 初始化，不参与提醒。
+    fn remind_init_before_use(&self, source: &str) -> Result<(), TranspileError> {
+        use regex::Regex;
+
+        // ---- 掩蔽 class/interface 体（保留换行，行号对应原始文件）----
+        let head_re = Regex::new(r"\b(?:class|interface)\s+\w+[^{;]*\{")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let bytes = source.as_bytes();
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        for m in head_re.find_iter(source) {
+            let mut depth = 0i32;
+            let mut i = m.end() - 1; // position of '{'
+            let mut end = bytes.len();
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            spans.push((m.start(), end));
+        }
+        let mut masked = source.to_string();
+        // 从后往前替换：前面的偏移不受影响
+        for (start, end) in spans.iter().rev() {
+            let blank: String = source[*start..*end]
+                .chars()
+                .map(|c| if c == '\n' { '\n' } else { ' ' })
+                .collect();
+            masked.replace_range(*start..*end, &blank);
+        }
+
+        let line_of = |pos: usize| masked[..pos].matches('\n').count() + 1;
+
+        // ---- 收集无初始化器声明（与 Rule 6/9/13 的声明形式同形）----
+        let mut candidates: Vec<(usize, String)> = Vec::new();
+        let scalar_re = Regex::new(
+            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let array_re = Regex::new(
+            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[[a-zA-Z0-9_]+\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let class_re = Regex::new(
+            r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*(?:\s*,\s*[a-z_][a-zA-Z0-9_]*)*)\s*;",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        for cap in scalar_re.captures_iter(&masked) {
+            let line = line_of(cap.get(0).unwrap().start());
+            for raw in cap[1].split(',') {
+                candidates.push((line, raw.trim().to_string()));
+            }
+        }
+        for cap in array_re.captures_iter(&masked) {
+            candidates.push((line_of(cap.get(0).unwrap().start()), cap[1].to_string()));
+        }
+        for cap in class_re.captures_iter(&masked) {
+            if self.is_primitive_type(&cap[1]) {
+                continue; // String 等原始类型已由 scalar_re 覆盖
+            }
+            let line = line_of(cap.get(0).unwrap().start());
+            for raw in cap[2].split(',') {
+                candidates.push((line, raw.trim().to_string()));
+            }
+        }
+
+        // ---- 对每个名字做"有无写入"浅查 ----
+        let mut reminded: HashSet<String> = HashSet::new();
+        for (line, name) in candidates {
+            if !reminded.insert(name.clone()) {
+                continue;
+            }
+            let write_re = Regex::new(&format!(
+                r"\b{}\s*(?:=[^=]|[+\-*/]=|\+\+|--|\[[^\]]*\]\s*=[^=]|\.\s*\w+\s*=[^=])",
+                regex::escape(&name)
+            ))
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+            if !write_re.is_match(&masked) {
+                eprintln!(
+                    "[Hust 提醒] 第 {} 行: 变量 `{}` 声明后未赋值——使用前要先初始化，否则语言核可能报错。",
+                    line, name
+                );
+            }
+        }
+        Ok(())
     }
 
     /// V0.6: Transform method calls from camelCase to snake_case
@@ -549,7 +661,13 @@ impl Translator {
     }
 
     /// V0.6: Transform class instantiation
-    /// ClassName var; -> let mut var: ClassName = ClassName { field: default };
+    /// ClassName var; -> let mut var: ClassName = ClassName::default();
+    ///
+    /// (owner design, 2026.09.20: 语言核不合成默认值，要不要默认值由程序员
+    /// 负责。此处 ::default() 仅为转译器过渡期的后端兼容措施 —— Rust 不允许
+    /// 对未初始化绑定逐字段赋值(E0381)，无默认值则逐字段写法无法编译。将来
+    /// 语言核不承诺默认值：声明后无任何写入时转译器会提醒（见
+    /// remind_init_before_use），提醒先行，报错留给语言核。)
     fn transform_class_instantiation(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
@@ -906,12 +1024,12 @@ impl Translator {
             let size = &caps[2];
             let var_name = &caps[3];
             let dim = self.dim_expr(size);
+            // No zero-fill (owner principle: initialization is the user's
+            // responsibility — uninit binding, rustc guards E0381)
             format!(
-                "let mut {}: [{}; {}] = [{}; {}];",
+                "let mut {}: [{}; {}];",
                 var_name,
                 type_name,
-                dim,
-                zero_lit(type_name),
                 dim
             )
         });
@@ -1866,10 +1984,12 @@ impl Translator {
             for d in dims.iter().rev() {
                 let n = &d[1];
                 ty = format!("[{}; {}]", ty, self.dim_expr(n));
-                val = format!("[{}; {}]", val, self.dim_expr(n));
             }
 
-            format!("let mut {}: {} = {};", var_name, ty, val)
+            // No zero-fill (owner principle 2026.09.12: initialization is the
+            // user's responsibility — uninit binding, rustc flow analysis
+            // guards use-before-assign E0381)
+            format!("let mut {}: {};", var_name, ty)
         });
 
         Ok(result.to_string())
