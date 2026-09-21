@@ -1,6 +1,6 @@
 [package]
 name = "hust-rust"
-version = "0.1.23+20260920203809"
+version = "0.1.23+20260921233745"
 edition = "2021"
 description = "Hust language transpiler for Rust"
 authors = ["wood"]

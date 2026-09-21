@@ -2167,40 +2167,87 @@ impl Translator {
             // Parse class body into fields and methods
             let (fields, methods) = self.parse_class_body(body);
 
+            // Collect all interfaces from parent chain (for auto-delegation)
+            let mut all_interfaces: Vec<String> = Vec::new();
+            let mut parent_chain: Vec<String> = Vec::new();
+            
+            // Add own interfaces
+            if let Some(ifs) = interfaces {
+                for if_name in ifs.split(',').map(|s| s.trim()) {
+                    if !if_name.is_empty() {
+                        all_interfaces.push(if_name.to_string());
+                    }
+                }
+            }
+            
+            // Walk up parent chain to collect inherited interfaces
+            let mut current_parent = parent_class.map(|s| s.to_string());
+            while let Some(ref parent) = current_parent {
+                parent_chain.push(parent.clone());
+                // Find parent class definition and its interfaces
+                let parent_re = Regex::new(&format!(
+                    r"(?m)^\s*class\s+{}\s*(?:extends\s+(\w+))?\s*(?:implements\s+([\w,\s]+))?\s*\{{",
+                    parent
+                ))
+                .expect("static regex");
+                
+                if let Some(pcaps) = parent_re.captures(source) {
+                    // Add parent's interfaces
+                    if let Some(parent_ifs) = pcaps.get(2) {
+                        for if_name in parent_ifs.as_str().split(',').map(|s| s.trim()) {
+                            if !if_name.is_empty() && !all_interfaces.contains(&if_name.to_string()) {
+                                all_interfaces.push(if_name.to_string());
+                            }
+                        }
+                    }
+                    // Continue up the chain
+                    current_parent = pcaps.get(1).map(|m| m.as_str().to_string());
+                } else {
+                    current_parent = None;
+                }
+            }
+
             // Interface method names (for trait-impl routing, 2026.09.11):
             // the implemented interfaces' traits are already generated in
             // source (Rule 1 ran before this) — scan their method names so
             // only interface members go into the trait impl, while other
             // class methods stay inherent-only (E0407 otherwise).
+            // Now includes interfaces from parent chain (2026.09.21).
             let mut trait_methods: HashSet<String> = HashSet::new();
-            if let Some(ifs) = interfaces {
-                for if_name in ifs.split(',').map(|s| s.trim()) {
-                    let t_re = Regex::new(&format!(
-                        r"(?s)trait\s+{}\s*\{{([^}}]*)\}}",
-                        if_name
-                    ))
-                    .expect("static regex");
-                    if let Some(tc) = t_re.captures(source) {
-                        let f_re =
-                            Regex::new(r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
-                                .expect("static regex");
-                        for f in f_re.captures_iter(&tc[1]) {
-                            trait_methods.insert(f[1].to_string());
-                        }
+            let mut interface_methods_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+            
+            for if_name in &all_interfaces {
+                let t_re = Regex::new(&format!(
+                    r"(?s)trait\s+{}\s*\{{([^}}]*)\}}",
+                    if_name
+                ))
+                .expect("static regex");
+                if let Some(tc) = t_re.captures(source) {
+                    let f_re =
+                        Regex::new(r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
+                            .expect("static regex");
+                    let mut methods_in_iface: Vec<String> = Vec::new();
+                    for f in f_re.captures_iter(&tc[1]) {
+                        trait_methods.insert(f[1].to_string());
+                        methods_in_iface.push(f[1].to_string());
                     }
+                    interface_methods_map.insert(if_name.clone(), methods_in_iface);
                 }
             }
 
             // Generate struct
             let struct_def = self.generate_struct(class_name, &fields, parent_class);
 
-            // Generate impl block
-            let impl_def = self.generate_impl(
+            // Generate impl block with auto-delegation for inherited interfaces
+            let impl_def = self.generate_impl_with_delegation(
                 class_name,
                 &methods,
                 parent_class,
                 interfaces,
                 &trait_methods,
+                &parent_chain,
+                &interface_methods_map,
+                source,
             );
 
             format!("{}\n{}", struct_def, impl_def)
@@ -2383,6 +2430,137 @@ impl Translator {
 
         result.push_str("\n}\n");
         result
+    }
+
+    /// Generate impl block with auto-delegation for inherited interfaces.
+    /// When class C extends B extends A, and A implements IA, B implements IB,
+    /// C must automatically implement IA and IB via delegation to parent.
+    fn generate_impl_with_delegation(
+        &self,
+        class_name: &str,
+        methods: &[ClassMethod],
+        parent_class: Option<&str>,
+        interfaces: Option<&str>,
+        trait_methods: &HashSet<String>,
+        parent_chain: &[String],
+        interface_methods_map: &std::collections::HashMap<String, Vec<String>>,
+        source: &str,
+    ) -> String {
+        let mut result = String::new();
+
+        // Separate interfaces: own vs inherited from parent chain
+        let own_interfaces: Vec<String> = interfaces
+            .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+            .unwrap_or_default();
+        
+        let inherited_interfaces: Vec<String> = interface_methods_map
+            .keys()
+            .filter(|k| !own_interfaces.contains(k))
+            .cloned()
+            .collect();
+
+        // Generate trait implementations for own interfaces (normal)
+        for if_name in &own_interfaces {
+            let trait_impl =
+                self.generate_trait_impl(class_name, if_name, methods, trait_methods);
+            result.push_str(&trait_impl);
+        }
+
+        // Generate trait implementations for inherited interfaces (auto-delegation)
+        for if_name in &inherited_interfaces {
+            let delegate_impl = self.generate_delegate_trait_impl(
+                class_name,
+                if_name,
+                parent_class,
+                parent_chain,
+                &interface_methods_map[if_name],
+                source,
+            );
+            result.push_str(&delegate_impl);
+        }
+
+        // Generate inherent impl block for class methods
+        let inherent_impl = self.generate_inherent_impl(class_name, methods);
+        result.push_str(&inherent_impl);
+
+        result
+    }
+
+    /// Generate a trait impl that delegates all methods to the parent class.
+    /// For class C extends B extends A:
+    /// - If B implements the interface: self.b.method()
+    /// - If only A implements it: self.b.a.method()
+    fn generate_delegate_trait_impl(
+        &self,
+        class_name: &str,
+        interface_name: &str,
+        parent_class: Option<&str>,
+        parent_chain: &[String],
+        method_names: &[String],
+        source: &str,
+    ) -> String {
+        let mut result = format!("impl {} for {} {{\n", interface_name, class_name);
+
+        // Find which parent in the chain implements this interface
+        let mut delegation_path = String::new();
+        let mut found = false;
+        
+        if let Some(parent) = parent_class {
+            // Check immediate parent first
+            let parent_implements = self.class_implements_interface(parent, interface_name, source);
+            if parent_implements {
+                delegation_path = format!("self.{}", self.to_snake_case(parent));
+                found = true;
+            } else {
+                // Check grandparents
+                let mut path = format!("self.{}", self.to_snake_case(parent));
+                for ancestor in parent_chain.iter().skip(1) {
+                    path.push_str(format!(".{}", self.to_snake_case(ancestor)).as_str());
+                    if self.class_implements_interface(ancestor, interface_name, source) {
+                        delegation_path = path;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if !found {
+            // Fallback: use immediate parent
+            if let Some(parent) = parent_class {
+                delegation_path = format!("self.{}", self.to_snake_case(parent));
+            } else {
+                delegation_path = "self".to_string();
+            }
+        }
+
+        for method_name in method_names {
+            result.push_str(&format!(
+                "    fn {}(&self) {{\n        {}.{}()\n    }}\n",
+                method_name,
+                delegation_path,
+                method_name
+            ));
+        }
+
+        result.push_str("}\n");
+        result
+    }
+    
+    /// Check if a class implements a specific interface
+    fn class_implements_interface(&self, class_name: &str, interface_name: &str, source: &str) -> bool {
+        use regex::Regex;
+        let class_re = Regex::new(&format!(
+            r"(?m)^\s*class\s+{}\s*(?:extends\s+\w+)?\s*implements\s+([\w,\s]+)\s*\{{",
+            class_name
+        ));
+        if let Ok(re) = class_re {
+            if let Some(caps) = re.captures(source) {
+                let interfaces: Vec<&str> = caps[1].split(',').map(|s| s.trim()).collect();
+                return interfaces.contains(&interface_name);
+            }
+        }
+        false
     }
 
     /// Generate Rust impl block from class methods
