@@ -2187,8 +2187,13 @@ impl Translator {
             }
             
             // Walk up parent chain using pre-parsed table (O(1) per step)
+            // Cycle-safe: track visited classes to prevent infinite loops
+            let mut visited: HashSet<String> = HashSet::new();
             let mut current_parent = parent_class.map(|s| s.to_string());
             while let Some(ref parent) = current_parent {
+                if !visited.insert(parent.clone()) {
+                    break; // Cycle detected
+                }
                 parent_chain.push(parent.clone());
                 if let Some(class_info) = class_table.get(parent) {
                     // Add parent's interfaces
@@ -2537,9 +2542,14 @@ impl Translator {
                 delegation_path = format!("self.{}", self.to_snake_case(parent));
                 found = true;
             } else {
-                // Check grandparents
+                // Check grandparents (cycle-safe)
+                let mut visited: HashSet<String> = HashSet::new();
+                visited.insert(parent.to_string());
                 let mut path = format!("self.{}", self.to_snake_case(parent));
                 for ancestor in parent_chain.iter().skip(1) {
+                    if !visited.insert(ancestor.clone()) {
+                        break; // Cycle detected
+                    }
                     path.push_str(format!(".{}", self.to_snake_case(ancestor)).as_str());
                     if self.class_implements_interface(ancestor, interface_name, class_table) {
                         delegation_path = path;
