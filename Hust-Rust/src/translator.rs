@@ -75,21 +75,12 @@ impl Translator {
 
     /// Transpile source code (V0.6 with class support)
     pub fn transpile(&self, source: &str) -> Result<String, TranspileError> {
-        // Early scan: compute max inheritance depth to set #![recursion_limit]
-        // if needed. Rust default is 128; we add headroom (depth * 2 + 64).
+        // Early scan: check if any inheritance chain exceeds Rust's default
+        // recursion limit (128). If so, emit #![recursion_limit = "32767"]
+        // (i16::MAX — a fixed generous ceiling; the limit is only an upper
+        // bound and does not affect compile-time performance).
         let max_depth = self.compute_max_inheritance_depth(source);
-        let recursion_limit = if max_depth > 100 {
-            // Headroom: depth * 2 accounts for trait resolution overhead,
-            // plus 64 base margin. Round up to next power of two.
-            let needed = max_depth * 2 + 64;
-            let mut limit = 128;
-            while limit < needed {
-                limit *= 2;
-            }
-            limit
-        } else {
-            128 // Rust default, no attribute needed
-        };
+        let needs_limit = max_depth > 100; // headroom below 128
 
         let mut output = source.to_string();
 
@@ -212,8 +203,8 @@ impl Translator {
         output = self.transform_array_indices(&output)?;
 
         // Prepend #![recursion_limit] if deep inheritance detected
-        if recursion_limit > 128 {
-            output = format!("#![recursion_limit = \"{}\"]\n\n{}", recursion_limit, output);
+        if needs_limit {
+            output = format!("#![recursion_limit = \"32767\"]\n\n{}", output);
         }
 
         Ok(output)
