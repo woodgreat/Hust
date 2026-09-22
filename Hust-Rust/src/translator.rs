@@ -75,6 +75,22 @@ impl Translator {
 
     /// Transpile source code (V0.6 with class support)
     pub fn transpile(&self, source: &str) -> Result<String, TranspileError> {
+        // Early scan: compute max inheritance depth to set #![recursion_limit]
+        // if needed. Rust default is 128; we add headroom (depth * 2 + 64).
+        let max_depth = self.compute_max_inheritance_depth(source);
+        let recursion_limit = if max_depth > 100 {
+            // Headroom: depth * 2 accounts for trait resolution overhead,
+            // plus 64 base margin. Round up to next power of two.
+            let needed = max_depth * 2 + 64;
+            let mut limit = 128;
+            while limit < needed {
+                limit *= 2;
+            }
+            limit
+        } else {
+            128 // Rust default, no attribute needed
+        };
+
         let mut output = source.to_string();
 
         // Rule 0: Initialization reminder (owner design, 2026.09.20) —
@@ -195,7 +211,44 @@ impl Translator {
         // Rust requires usize for array indexing: scores[i] -> scores[(i) as usize]
         output = self.transform_array_indices(&output)?;
 
+        // Prepend #![recursion_limit] if deep inheritance detected
+        if recursion_limit > 128 {
+            output = format!("#![recursion_limit = \"{}\"]\n\n{}", recursion_limit, output);
+        }
+
         Ok(output)
+    }
+
+    /// Compute maximum inheritance depth in source.
+    /// Returns the deepest class chain length (e.g., A extends B extends C => 3).
+    fn compute_max_inheritance_depth(&self, source: &str) -> usize {
+        let class_table = self.extract_class_table(source);
+        let mut max_depth = 0;
+        
+        for class_name in class_table.keys() {
+            let mut depth = 1;
+            let mut current = class_table.get(class_name);
+            let mut visited: HashSet<String> = HashSet::new();
+            visited.insert(class_name.clone());
+            
+            while let Some(info) = current {
+                if let Some(parent) = &info.parent {
+                    if !visited.insert(parent.clone()) {
+                        break; // Cycle
+                    }
+                    depth += 1;
+                    current = class_table.get(parent);
+                } else {
+                    break;
+                }
+            }
+            
+            if depth > max_depth {
+                max_depth = depth;
+            }
+        }
+        
+        max_depth
     }
 
     /// Rule 0: Initialization reminder (owner design, 2026.09.20).
