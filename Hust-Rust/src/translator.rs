@@ -2492,8 +2492,11 @@ impl Translator {
         let mut result = format!("#[derive(Default)]\nstruct {} {{", class_name);
 
         // If has parent, include parent as field
+        // Field name preserves the class name as written (case-sensitive,
+        // owner decision 2026.09.22: respect author's naming, no forced
+        // snake_case conversion)
         if let Some(parent) = parent_class {
-            result.push_str(format!("\n    {}: {},", self.to_snake_case(parent), parent).as_str());
+            result.push_str(format!("\n    {}: {},", parent, parent).as_str());
         }
 
         // Add own fields
@@ -2583,18 +2586,18 @@ impl Translator {
             // Check immediate parent first
             let parent_implements = self.class_implements_interface(parent, interface_name, class_table);
             if parent_implements {
-                delegation_path = format!("self.{}", self.to_snake_case(parent));
+                delegation_path = format!("self.{}", parent);
                 found = true;
             } else {
                 // Check grandparents (cycle-safe)
                 let mut visited: HashSet<String> = HashSet::new();
                 visited.insert(parent.to_string());
-                let mut path = format!("self.{}", self.to_snake_case(parent));
+                let mut path = format!("self.{}", parent);
                 for ancestor in parent_chain.iter().skip(1) {
                     if !visited.insert(ancestor.clone()) {
                         break; // Cycle detected
                     }
-                    path.push_str(format!(".{}", self.to_snake_case(ancestor)).as_str());
+                    path.push_str(format!(".{}", ancestor).as_str());
                     if self.class_implements_interface(ancestor, interface_name, class_table) {
                         delegation_path = path;
                         found = true;
@@ -2607,7 +2610,7 @@ impl Translator {
         if !found {
             // Fallback: use immediate parent
             if let Some(parent) = parent_class {
-                delegation_path = format!("self.{}", self.to_snake_case(parent));
+                delegation_path = format!("self.{}", parent);
             } else {
                 delegation_path = "self".to_string();
             }
