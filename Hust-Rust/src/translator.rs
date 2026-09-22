@@ -2152,6 +2152,11 @@ impl Translator {
     /// V0.6: Transform class definitions to Rust struct + impl
     fn transform_class_definitions(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
+        use std::collections::HashMap;
+
+        // Pre-pass: extract all class definitions with brace-depth matching.
+        // This avoids O(n²) parent-chain walking — each class lookup is O(1).
+        let class_table = self.extract_class_table(source);
 
         // Match class definition with optional extends and implements
         // The body is matched up to a line containing only }
@@ -2168,6 +2173,7 @@ impl Translator {
             let (fields, methods) = self.parse_class_body(body);
 
             // Collect all interfaces from parent chain (for auto-delegation)
+            // Using pre-parsed class_table for O(1) lookup per ancestor.
             let mut all_interfaces: Vec<String> = Vec::new();
             let mut parent_chain: Vec<String> = Vec::new();
             
@@ -2180,28 +2186,19 @@ impl Translator {
                 }
             }
             
-            // Walk up parent chain to collect inherited interfaces
+            // Walk up parent chain using pre-parsed table (O(1) per step)
             let mut current_parent = parent_class.map(|s| s.to_string());
             while let Some(ref parent) = current_parent {
                 parent_chain.push(parent.clone());
-                // Find parent class definition and its interfaces
-                let parent_re = Regex::new(&format!(
-                    r"(?m)^\s*class\s+{}\s*(?:extends\s+(\w+))?\s*(?:implements\s+([\w,\s]+))?\s*\{{",
-                    parent
-                ))
-                .expect("static regex");
-                
-                if let Some(pcaps) = parent_re.captures(source) {
+                if let Some(class_info) = class_table.get(parent) {
                     // Add parent's interfaces
-                    if let Some(parent_ifs) = pcaps.get(2) {
-                        for if_name in parent_ifs.as_str().split(',').map(|s| s.trim()) {
-                            if !if_name.is_empty() && !all_interfaces.contains(&if_name.to_string()) {
-                                all_interfaces.push(if_name.to_string());
-                            }
+                    for if_name in &class_info.interfaces {
+                        if !all_interfaces.contains(if_name) {
+                            all_interfaces.push(if_name.clone());
                         }
                     }
                     // Continue up the chain
-                    current_parent = pcaps.get(1).map(|m| m.as_str().to_string());
+                    current_parent = class_info.parent.clone();
                 } else {
                     current_parent = None;
                 }
@@ -2247,13 +2244,41 @@ impl Translator {
                 &trait_methods,
                 &parent_chain,
                 &interface_methods_map,
-                source,
+                &class_table,
             );
 
             format!("{}\n{}", struct_def, impl_def)
         });
 
         Ok(result.to_string())
+    }
+
+    /// Pre-parse all class definitions in source.
+    /// Returns a HashMap: class_name -> ClassInfo { parent, interfaces }
+    /// Uses brace-depth matching to correctly handle nested braces in class bodies.
+    fn extract_class_table(&self, source: &str) -> std::collections::HashMap<String, ClassInfo> {
+        use regex::Regex;
+        let mut table = std::collections::HashMap::new();
+        
+        // Match class header: class Name [extends Parent] [implements I1, I2...] {
+        let header_re = Regex::new(
+            r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+(\w+))?\s*(?:implements\s+([\w,\s]+))?\s*\{"
+        ).expect("static regex");
+        
+        for caps in header_re.captures_iter(source) {
+            let class_name = caps[1].to_string();
+            let parent = caps.get(2).map(|m| m.as_str().to_string());
+            let interfaces: Vec<String> = caps.get(3)
+                .map(|m| m.as_str().split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect())
+                .unwrap_or_default();
+            
+            table.insert(class_name, ClassInfo { parent, interfaces });
+        }
+        
+        table
     }
 
     /// Parse class body into fields and methods (rewritten 2026.09.18)
@@ -2444,7 +2469,7 @@ impl Translator {
         trait_methods: &HashSet<String>,
         parent_chain: &[String],
         interface_methods_map: &std::collections::HashMap<String, Vec<String>>,
-        source: &str,
+        class_table: &std::collections::HashMap<String, ClassInfo>,
     ) -> String {
         let mut result = String::new();
 
@@ -2474,7 +2499,7 @@ impl Translator {
                 parent_class,
                 parent_chain,
                 &interface_methods_map[if_name],
-                source,
+                class_table,
             );
             result.push_str(&delegate_impl);
         }
@@ -2497,7 +2522,7 @@ impl Translator {
         parent_class: Option<&str>,
         parent_chain: &[String],
         method_names: &[String],
-        source: &str,
+        class_table: &std::collections::HashMap<String, ClassInfo>,
     ) -> String {
         let mut result = format!("impl {} for {} {{\n", interface_name, class_name);
 
@@ -2507,7 +2532,7 @@ impl Translator {
         
         if let Some(parent) = parent_class {
             // Check immediate parent first
-            let parent_implements = self.class_implements_interface(parent, interface_name, source);
+            let parent_implements = self.class_implements_interface(parent, interface_name, class_table);
             if parent_implements {
                 delegation_path = format!("self.{}", self.to_snake_case(parent));
                 found = true;
@@ -2516,7 +2541,7 @@ impl Translator {
                 let mut path = format!("self.{}", self.to_snake_case(parent));
                 for ancestor in parent_chain.iter().skip(1) {
                     path.push_str(format!(".{}", self.to_snake_case(ancestor)).as_str());
-                    if self.class_implements_interface(ancestor, interface_name, source) {
+                    if self.class_implements_interface(ancestor, interface_name, class_table) {
                         delegation_path = path;
                         found = true;
                         break;
@@ -2547,18 +2572,15 @@ impl Translator {
         result
     }
     
-    /// Check if a class implements a specific interface
-    fn class_implements_interface(&self, class_name: &str, interface_name: &str, source: &str) -> bool {
-        use regex::Regex;
-        let class_re = Regex::new(&format!(
-            r"(?m)^\s*class\s+{}\s*(?:extends\s+\w+)?\s*implements\s+([\w,\s]+)\s*\{{",
-            class_name
-        ));
-        if let Ok(re) = class_re {
-            if let Some(caps) = re.captures(source) {
-                let interfaces: Vec<&str> = caps[1].split(',').map(|s| s.trim()).collect();
-                return interfaces.contains(&interface_name);
-            }
+    /// Check if a class implements a specific interface (using pre-parsed table)
+    fn class_implements_interface(
+        &self,
+        class_name: &str,
+        interface_name: &str,
+        class_table: &std::collections::HashMap<String, ClassInfo>,
+    ) -> bool {
+        if let Some(info) = class_table.get(class_name) {
+            return info.interfaces.iter().any(|i| i == interface_name);
         }
         false
     }
@@ -2819,6 +2841,13 @@ impl Translator {
 
         result
     }
+}
+
+/// Class info for pre-parsed inheritance table
+#[derive(Debug)]
+struct ClassInfo {
+    parent: Option<String>,
+    interfaces: Vec<String>,
 }
 
 /// Class field representation
