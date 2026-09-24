@@ -38,6 +38,7 @@ pub struct PackageConfig {
     pub name: String,
     pub version: String, // Wood format: 0.1.0.20260523 (4 digits)
     pub author: Option<String>,
+    pub description: Option<String>, // User-defined project description
     pub entry: String, // Entry file, default: main.hust
 }
 
@@ -109,6 +110,7 @@ impl ProjectConfig {
                             "name" => config.package.name = value.to_string(),
                             "version" => config.package.version = value.to_string(),
                             "author" => config.package.author = Some(value.to_string()),
+                            "description" => config.package.description = Some(value.to_string()),
                             "entry" => config.package.entry = value.to_string(),
                             _ => {}
                         }
@@ -146,6 +148,7 @@ impl ProjectConfig {
                 name: "unnamed".to_string(),
                 version: "0.1.0".to_string(),
                 author: None,
+                description: None,
                 entry: entry.to_string(),
             },
             module_paths: vec![PathBuf::from("src"), PathBuf::from("lib")],
