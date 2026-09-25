@@ -8,6 +8,12 @@
 //! - One file = one namespace only, declared at file top: `namespace Name;`
 //! - Call resolution: `namespace.class.method()` → simplified forms
 //! - main is in default namespace + default class, so bare calls work
+//!
+//! 2026.09.25 Update:
+//! - UPPERCASE namespaces reserved for Hust system (RUST, HUST, etc.)
+//! - User namespaces must not be all uppercase
+//! - RUST.* = Rust bridge, HUST.* = Hust standard library
+//! - Namespace is flat, dots are part of the name (not hierarchy)
 
 use std::collections::HashMap;
 use thiserror::Error;
@@ -26,6 +32,9 @@ pub enum NamespaceError {
 
     #[error("Ambiguous call: {0} found in multiple namespaces")]
     AmbiguousCall(String),
+
+    #[error("Reserved namespace: {0} is reserved for Hust system (UPPERCASE not allowed for users)")]
+    ReservedNamespace(String),
 }
 
 /// Namespace declaration info
@@ -96,14 +105,18 @@ pub struct NamespaceRegistry {
 
 impl NamespaceRegistry {
     pub fn new() -> Self {
-        Self {
+        let mut registry = Self {
             default_space: "default".to_string(),
             ..Default::default()
-        }
+        };
+        // Register system namespaces
+        registry.register_system_namespaces();
+        registry
     }
 
     /// Parse namespace declaration from source
     /// Returns (namespace_name, remaining_source)
+    /// 2026.09.25: Reject UPPERCASE namespaces (reserved for Hust system)
     pub fn parse_declaration(&mut self, source: &str, file_path: &str) -> Result<(Option<String>, String), NamespaceError> {
         let mut namespace = None;
         let mut remaining = source.to_string();
@@ -126,6 +139,11 @@ impl NamespaceRegistry {
                 let ns_name = trimmed[10..trimmed.len() - 1].trim().to_string();
                 if ns_name.is_empty() {
                     return Err(NamespaceError::InvalidPosition(file_path.to_string()));
+                }
+
+                // Check for reserved UPPERCASE namespace
+                if ns_name.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+                    return Err(NamespaceError::ReservedNamespace(ns_name));
                 }
 
                 namespace = Some(ns_name.clone());
@@ -305,8 +323,23 @@ impl NamespaceRegistry {
         Ok(None)
     }
 
+    /// Check if namespace is reserved (UPPERCASE)
+    pub fn is_reserved_namespace(name: &str) -> bool {
+        name.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+    }
+
+    /// Register system namespaces (RUST, HUST)
+    pub fn register_system_namespaces(&mut self) {
+        // RUST - Rust bridge
+        self.spaces.insert("RUST".to_string(), vec!["[system]".to_string()]);
+        
+        // HUST - Hust standard library
+        self.spaces.insert("HUST".to_string(), vec!["[system]".to_string()]);
+    }
+
     /// Parse use statements from source
     /// Returns list of use statements and remaining source
+    /// 2026.09.25: Support system namespaces (RUST.*, HUST.*)
     pub fn parse_use_statements(&mut self, source: &str, file_path: &str) -> (Vec<UseStmt>, String) {
         let mut uses = Vec::new();
         let mut remaining = source.to_string();
@@ -324,12 +357,18 @@ impl NamespaceRegistry {
                     (stmt, None)
                 };
                 
-                // Check for item: use ns.item; or use ns.*;
-                let (namespace, item) = if let Some(pos) = ns_part.rfind('.') {
+                // Check for wildcard: use ns.*;
+                let (namespace, item) = if ns_part.ends_with(".*") {
+                    let ns = ns_part[..ns_part.len() - 2].trim();
+                    (ns.to_string(), None)  // None = wildcard
+                } else if let Some(pos) = ns_part.rfind('.') {
+                    // Check if it's a system namespace (RUST.xxx or HUST.xxx)
                     let ns = ns_part[..pos].trim();
                     let item = ns_part[pos + 1..].trim();
-                    if item == "*" {
-                        (ns.to_string(), None)  // Wildcard
+                    
+                    // System namespaces are flat, treat entire thing as namespace
+                    if ns == "RUST" || ns == "HUST" || Self::is_reserved_namespace(ns) {
+                        (ns_part.trim().to_string(), Some(item.to_string()))
                     } else {
                         (ns.to_string(), Some(item.to_string()))
                     }
@@ -492,14 +531,35 @@ void main() { }
     }
 
     #[test]
-    fn test_multiple_namespaces_error() {
+    fn test_reserved_namespace() {
         let mut registry = NamespaceRegistry::new();
         let source = r#"
-namespace a;
-namespace b;
+namespace MATH;
 "#;
 
         let result = registry.parse_declaration(source, "test.hust");
         assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), NamespaceError::ReservedNamespace(_)));
+    }
+
+    #[test]
+    fn test_system_namespaces_registered() {
+        let registry = NamespaceRegistry::new();
+        assert!(registry.spaces.contains_key("RUST"));
+        assert!(registry.spaces.contains_key("HUST"));
+    }
+
+    #[test]
+    fn test_use_system_namespace() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.std.io.*;
+use HUST.math;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 2);
+        assert_eq!(uses[0].namespace, "RUST.std.io");
+        assert_eq!(uses[1].namespace, "HUST.math");
     }
 }
