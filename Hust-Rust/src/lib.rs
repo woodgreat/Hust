@@ -2,6 +2,7 @@
 //! Provides transpiler functionality and plugin system
 
 pub mod project;
+pub mod namespace;
 pub mod translator;
 pub mod plugins;
 
