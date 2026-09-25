@@ -2137,16 +2137,31 @@ impl Translator {
                 });
             }
 
-            // Extract class declarations for registry
+            // Extract class declarations for registry (with nested class support)
             let class_re = Regex::new(r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
             for caps in class_re.captures_iter(&remaining) {
+                let class_name = caps[1].to_string();
+                
+                // Check for nested classes (Class.Inner patterns in source)
+                let nested_re = Regex::new(&format!(r"{}\.([a-zA-Z_][a-zA-Z0-9_]*)", class_name))
+                    .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                
+                let mut nested = std::collections::HashMap::new();
+                for ncaps in nested_re.captures_iter(&remaining) {
+                    let inner_name = ncaps[1].to_string();
+                    let full_path = format!("{}.{}", class_name, inner_name);
+                    nested.insert(inner_name, full_path);
+                }
+                
                 registry.register_class(ClassInfo {
-                    name: caps[1].to_string(),
+                    name: class_name,
                     namespace: ns_name.clone(),
                     is_public: true, // TODO: parse public keyword
                     parent: None, // TODO: parse extends
+                    nested,
+                    methods: std::collections::HashMap::new(),
                 });
             }
 
@@ -2215,6 +2230,9 @@ impl Translator {
                 }
             }
         }
+
+        // Phase 4: Print distribution report
+        registry.print_report();
 
         Ok(result)
     }

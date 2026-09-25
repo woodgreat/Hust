@@ -53,6 +53,20 @@ pub struct ClassInfo {
     pub namespace: String,
     pub is_public: bool,
     pub parent: Option<String>,
+    /// Nested classes: Inner class name -> full path
+    pub nested: HashMap<String, String>,
+    /// Methods with access control
+    pub methods: HashMap<String, MethodInfo>,
+}
+
+/// Method info with access control
+#[derive(Debug, Clone)]
+pub struct MethodInfo {
+    pub name: String,
+    pub is_public: bool,
+    pub is_static: bool,
+    pub ret_type: String,
+    pub params: String,
 }
 
 /// Namespace registry - maps namespaces to their contents
@@ -66,6 +80,8 @@ pub struct NamespaceRegistry {
     pub classes: HashMap<String, Vec<ClassInfo>>,
     /// default namespace name (usually "default" or from entry file)
     pub default_space: String,
+    /// Warnings collected during parsing
+    pub warnings: Vec<String>,
 }
 
 impl NamespaceRegistry {
@@ -134,10 +150,111 @@ impl NamespaceRegistry {
 
     /// Register a class in namespace
     pub fn register_class(&mut self, cls: ClassInfo) {
+        // Check for duplicate class in same namespace
+        if let Some(existing) = self.classes.get(&cls.name) {
+            let same_ns: Vec<_> = existing.iter()
+                .filter(|c| c.namespace == cls.namespace)
+                .collect();
+            if !same_ns.is_empty() {
+                self.warnings.push(format!(
+                    "Class '{}' already exists in namespace '{}' - distributed implementation",
+                    cls.name, cls.namespace
+                ));
+            }
+        }
+        
         self.classes
             .entry(cls.name.clone())
             .or_insert_with(Vec::new)
             .push(cls);
+    }
+
+    /// Register a nested class
+    pub fn register_nested_class(&mut self, outer: &str, inner: &str, full_path: &str, namespace: &str) {
+        if let Some(classes) = self.classes.get_mut(outer) {
+            for cls in classes.iter_mut() {
+                if cls.namespace == namespace {
+                    cls.nested.insert(inner.to_string(), full_path.to_string());
+                    return;
+                }
+            }
+        }
+        // Outer class not found, create placeholder
+        let mut nested = HashMap::new();
+        nested.insert(inner.to_string(), full_path.to_string());
+        self.register_class(ClassInfo {
+            name: outer.to_string(),
+            namespace: namespace.to_string(),
+            is_public: true,
+            parent: None,
+            nested,
+            methods: HashMap::new(),
+        });
+    }
+
+    /// Register a method in a class
+    pub fn register_method(&mut self, class_name: &str, method: MethodInfo, namespace: &str) {
+        if let Some(classes) = self.classes.get_mut(class_name) {
+            for cls in classes.iter_mut() {
+                if cls.namespace == namespace {
+                    cls.methods.insert(method.name.clone(), method);
+                    return;
+                }
+            }
+        }
+        // Class not found, create placeholder
+        let mut methods = HashMap::new();
+        methods.insert(method.name.clone(), method);
+        self.register_class(ClassInfo {
+            name: class_name.to_string(),
+            namespace: namespace.to_string(),
+            is_public: true,
+            parent: None,
+            nested: HashMap::new(),
+            methods,
+        });
+    }
+
+    /// Check if a method is accessible (public or same class)
+    pub fn is_method_accessible(&self, class_name: &str, method_name: &str, namespace: &str, current_class: Option<&str>) -> bool {
+        if let Some(classes) = self.classes.get(class_name) {
+            for cls in classes.iter() {
+                if cls.namespace == namespace {
+                    // Same class = always accessible
+                    if current_class == Some(class_name) {
+                        return true;
+                    }
+                    // Check method visibility
+                    if let Some(method) = cls.methods.get(method_name) {
+                        return method.is_public;
+                    }
+                    // Method not found, assume accessible (fallback)
+                    return true;
+                }
+            }
+        }
+        // Class not found, assume accessible (fallback)
+        true
+    }
+
+    /// Resolve nested class path: Outer.Inner -> full path
+    pub fn resolve_nested_class(&self, path: &str, namespace: &str) -> Option<String> {
+        let parts: Vec<&str> = path.split('.').collect();
+        if parts.len() < 2 {
+            return None;
+        }
+        
+        let outer = parts[0];
+        let inner = parts[1..].join(".");
+        
+        if let Some(classes) = self.classes.get(outer) {
+            for cls in classes.iter() {
+                if cls.namespace == namespace {
+                    return cls.nested.get(&inner).cloned();
+                }
+            }
+        }
+        None
     }
 
     /// Resolve function call - find which namespace it belongs to
@@ -180,16 +297,54 @@ impl NamespaceRegistry {
 
     /// Generate report of namespace distribution
     pub fn distribution_report(&self) -> String {
-        let mut report = String::from("Namespace Distribution Report:\n");
+        let mut report = String::from("=== Namespace Distribution Report ===\n\n");
 
-        for (ns, files) in &self.spaces {
-            report.push_str(&format!("  namespace {}:\n", ns));
+        // Group by namespace
+        let mut ns_files: Vec<(&String, &Vec<String>)> = self.spaces.iter().collect();
+        ns_files.sort_by_key(|(k, _)| k.clone());
+
+        for (ns, files) in ns_files {
+            report.push_str(&format!("namespace \"{}\":\n", ns));
+            
+            // Count functions and classes
+            let func_count = self.functions.values()
+                .flatten()
+                .filter(|f| f.namespace == *ns)
+                .count();
+            let class_count = self.classes.values()
+                .flatten()
+                .filter(|c| c.namespace == *ns)
+                .count();
+            
+            report.push_str(&format!("  functions: {}\n", func_count));
+            report.push_str(&format!("  classes: {}\n", class_count));
+            report.push_str(&format!("  files ({}):\n", files.len()));
+            
             for file in files {
-                report.push_str(&format!("    - {}\n", file));
+                // Extract just filename for readability
+                let fname = std::path::Path::new(file)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(file);
+                report.push_str(&format!("    - {}\n", fname));
+            }
+            report.push('\n');
+        }
+
+        // Warnings
+        if !self.warnings.is_empty() {
+            report.push_str("Warnings:\n");
+            for warning in &self.warnings {
+                report.push_str(&format!("  ⚠ {}\n", warning));
             }
         }
 
         report
+    }
+
+    /// Print distribution report to stderr
+    pub fn print_report(&self) {
+        eprintln!("{}", self.distribution_report());
     }
 }
 

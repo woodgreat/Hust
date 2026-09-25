@@ -27,18 +27,19 @@ void main() {
     Puppy p;
 
     // Explicit chains: every layer written out (r24 design philosophy)
-    p.dog.animal.age = 3;        // 3-layer field write
-    p.dog.weight = 2;            // 2-layer field write
+    // Field names preserve class names as written (case-sensitive, owner 2026.09.22)
+    p.Dog.Animal.age = 3;        // 3-layer field write
+    p.Dog.weight = 2;            // 2-layer field write
     p.name = "Rex";              // own field
 
     println!("name={}", p.name);
-    println!("weight={}", p.dog.weight);
-    println!("age={}", p.dog.animal.age);
+    println!("weight={}", p.Dog.weight);
+    println!("age={}", p.Dog.Animal.age);
 
     // Explicit chain method calls
-    p.dog.animal.setAge(4);
-    p.dog.setWeight(5);
+    p.Dog.Animal.setAge(4);
+    p.Dog.setWeight(5);
 
-    println!("after set: age={} weight={}", p.dog.animal.age, p.dog.weight);
+    println!("after set: age={} weight={}", p.Dog.Animal.age, p.Dog.weight);
     println!("Multi-level inheritance test passed!");
 }
