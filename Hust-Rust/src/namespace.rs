@@ -69,6 +69,14 @@ pub struct MethodInfo {
     pub params: String,
 }
 
+/// Use statement info
+#[derive(Debug, Clone)]
+pub struct UseStmt {
+    pub namespace: String,
+    pub item: Option<String>,  // None = *, Some(name) = specific item
+    pub alias: Option<String>,
+}
+
 /// Namespace registry - maps namespaces to their contents
 #[derive(Debug, Default)]
 pub struct NamespaceRegistry {
@@ -82,6 +90,8 @@ pub struct NamespaceRegistry {
     pub default_space: String,
     /// Warnings collected during parsing
     pub warnings: Vec<String>,
+    /// Use statements per file
+    pub use_statements: HashMap<String, Vec<UseStmt>>,
 }
 
 impl NamespaceRegistry {
@@ -292,6 +302,111 @@ impl NamespaceRegistry {
             }
         }
 
+        Ok(None)
+    }
+
+    /// Parse use statements from source
+    /// Returns list of use statements and remaining source
+    pub fn parse_use_statements(&mut self, source: &str, file_path: &str) -> (Vec<UseStmt>, String) {
+        let mut uses = Vec::new();
+        let mut remaining = source.to_string();
+        
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("use ") && trimmed.ends_with(';') {
+                // Parse: use ns; / use ns.item; / use ns.*; / use ns as alias;
+                let stmt = &trimmed[4..trimmed.len() - 1];
+                
+                // Check for alias: use ns as alias;
+                let (ns_part, alias) = if let Some(pos) = stmt.find(" as ") {
+                    (&stmt[..pos], Some(stmt[pos + 4..].trim().to_string()))
+                } else {
+                    (stmt, None)
+                };
+                
+                // Check for item: use ns.item; or use ns.*;
+                let (namespace, item) = if let Some(pos) = ns_part.rfind('.') {
+                    let ns = ns_part[..pos].trim();
+                    let item = ns_part[pos + 1..].trim();
+                    if item == "*" {
+                        (ns.to_string(), None)  // Wildcard
+                    } else {
+                        (ns.to_string(), Some(item.to_string()))
+                    }
+                } else {
+                    (ns_part.trim().to_string(), None)  // Whole namespace
+                };
+                
+                if !namespace.is_empty() {
+                    uses.push(UseStmt {
+                        namespace,
+                        item,
+                        alias,
+                    });
+                    // Remove use line from source
+                    remaining = remaining.replacen(line, "", 1);
+                }
+            }
+        }
+        
+        self.use_statements.insert(file_path.to_string(), uses.clone());
+        (uses, remaining)
+    }
+    
+    /// Apply inheritance (过继) - move parent class to child's namespace
+    pub fn apply_inheritance(&mut self, child_class: &str, parent_class: &str, child_ns: &str) {
+        // Find parent class
+        if let Some(parent_classes) = self.classes.get(parent_class) {
+            // Clone parent info
+            let parent_info = parent_classes[0].clone();
+            
+            // Remove from old namespace
+            if let Some(old_classes) = self.classes.get_mut(parent_class) {
+                old_classes.retain(|c| c.namespace != parent_info.namespace);
+            }
+            
+            // Add to new namespace (过继)
+            let mut new_parent = parent_info.clone();
+            new_parent.namespace = child_ns.to_string();
+            self.register_class(new_parent);
+            
+            self.warnings.push(format!(
+                "Class '{}' inherited by '{}' - moved to namespace '{}' (过继)",
+                parent_class, child_class, child_ns
+            ));
+        }
+    }
+    
+    /// Resolve with use statements - check if name is imported
+    pub fn resolve_with_imports(&self, name: &str, current_file: &str, current_ns: &str) -> Result<Option<String>, NamespaceError> {
+        // Check current namespace first
+        if let Some(ns) = self.resolve_function(name, current_ns)? {
+            return Ok(Some(ns));
+        }
+        
+        // Check use statements
+        if let Some(uses) = self.use_statements.get(current_file) {
+            for use_stmt in uses {
+                // Check if this use imports the function
+                let matches = match &use_stmt.item {
+                    None => true,  // use ns; - imports all
+                    Some(item) => item == name,  // use ns.item;
+                };
+                
+                if matches {
+                    // Verify function exists in that namespace
+                    if let Some(funcs) = self.functions.get(name) {
+                        let in_ns: Vec<_> = funcs.iter()
+                            .filter(|f| f.namespace == use_stmt.namespace)
+                            .collect();
+                        if !in_ns.is_empty() {
+                            return Ok(Some(use_stmt.namespace.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        
         Ok(None)
     }
 

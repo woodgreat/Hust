@@ -2108,15 +2108,21 @@ impl Translator {
         use regex::Regex;
 
         let mut registry = NamespaceRegistry::new();
-        let mut module_sources: Vec<(String, String)> = Vec::new(); // (name, source)
+        let mut module_sources: Vec<(String, String, String)> = Vec::new(); // (name, source, file_path)
 
         // Phase 1: Parse all namespace declarations and build registry
         for module in modules {
-            let (ns, remaining) = registry
-                .parse_declaration(&module.source, &module.path.to_string_lossy())
+            let file_path = module.path.to_string_lossy().to_string();
+            
+            // Parse namespace declaration
+            let (ns, after_ns) = registry
+                .parse_declaration(&module.source, &file_path)
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
             let ns_name = ns.unwrap_or_else(|| registry.default_space.clone());
+
+            // Parse use statements
+            let (_uses, remaining) = registry.parse_use_statements(&after_ns, &file_path);
 
             // Extract function declarations for registry
             let func_re = Regex::new(r"(?m)^\s*(public\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
@@ -2137,12 +2143,13 @@ impl Translator {
                 });
             }
 
-            // Extract class declarations for registry (with nested class support)
-            let class_re = Regex::new(r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)")
+            // Extract class declarations for registry (with inheritance detection)
+            let class_re = Regex::new(r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+extends\s+([a-zA-Z_][a-zA-Z0-9_]*))?")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
             for caps in class_re.captures_iter(&remaining) {
                 let class_name = caps[1].to_string();
+                let parent_class = caps.get(2).map(|m| m.as_str().to_string());
                 
                 // Check for nested classes (Class.Inner patterns in source)
                 let nested_re = Regex::new(&format!(r"{}\.([a-zA-Z_][a-zA-Z0-9_]*)", class_name))
@@ -2156,16 +2163,21 @@ impl Translator {
                 }
                 
                 registry.register_class(ClassInfo {
-                    name: class_name,
+                    name: class_name.clone(),
                     namespace: ns_name.clone(),
                     is_public: true, // TODO: parse public keyword
-                    parent: None, // TODO: parse extends
+                    parent: parent_class.clone(),
                     nested,
                     methods: std::collections::HashMap::new(),
                 });
+                
+                // Apply inheritance (过继) - move parent to child's namespace
+                if let Some(parent) = parent_class {
+                    registry.apply_inheritance(&class_name, &parent, &ns_name);
+                }
             }
 
-            module_sources.push((module.name.clone(), remaining));
+            module_sources.push((module.name.clone(), remaining, file_path));
         }
 
         // Phase 2: Transpile with namespace resolution
@@ -2176,7 +2188,7 @@ impl Translator {
         all_code.push_str("// Multi-module compilation with namespace support\n\n");
 
         // Transpile each module (except entry) as a separate section
-        for (name, source) in &module_sources {
+        for (name, source, _file_path) in &module_sources {
             if name != &entry_module.name {
                 all_code.push_str(&format!("// Module: {}\n", name));
                 let transpiled = self.transpile(source)?;
@@ -2189,18 +2201,14 @@ impl Translator {
         all_code.push_str(&format!("// Entry module: {}\n", entry_module.name));
         let entry_source = module_sources
             .iter()
-            .find(|(n, _)| n == &entry_module.name)
-            .map(|(_, s)| s.clone())
+            .find(|(n, _, _)| n == &entry_module.name)
+            .map(|(_, s, _)| s.clone())
             .unwrap_or_else(|| entry_module.source.clone());
 
         let entry_transpiled = self.transpile(&entry_source)?;
         all_code.push_str(&entry_transpiled);
 
-        // Phase 3: Post-process - resolve namespace calls
-        // Find function calls that need namespace prefix
-        let call_re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
-            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-
+        // Phase 3: Post-process - resolve namespace calls with `.` separator
         // Build set of known function names that need prefix
         let known_funcs: std::collections::HashSet<String> = registry
             .functions
@@ -2216,15 +2224,21 @@ impl Translator {
                 continue;
             }
 
-            // Find the namespace for this function
-            if let Ok(Some(ns)) = registry.resolve_function(func_name, &registry.default_space) {
+            // Find the namespace for this function (using entry file context)
+            let entry_file = module_sources
+                .iter()
+                .find(|(n, _, _)| n == &entry_module.name)
+                .map(|(_, _, f)| f.clone())
+                .unwrap_or_default();
+            
+            if let Ok(Some(ns)) = registry.resolve_with_imports(func_name, &entry_file, &registry.default_space) {
                 if ns != registry.default_space {
-                    // Replace bare calls with namespaced calls
-                    // Match: funcName( but not: ns::funcName( or .funcName(
-                    let pattern = format!(r"(?<![:\w]){}\s*\(", regex::escape(func_name));
+                    // Replace bare calls with namespaced calls using `.` separator
+                    // Match: funcName( but not: ns.funcName( or .funcName(
+                    let pattern = format!(r"(?<![.\w]){}\s*\(", regex::escape(func_name));
                     if let Ok(re) = Regex::new(&pattern) {
                         result = re
-                            .replace_all(&result, format!("{}::{}(", ns, func_name))
+                            .replace_all(&result, format!("{}::{}(", ns, func_name))  // Rust uses ::
                             .to_string();
                     }
                 }
