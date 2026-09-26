@@ -109,6 +109,8 @@ impl Translator {
         // Rule 2: Transform class definitions
         // class Point { i32 x; public i32 getX() { return self.x; } }
         // -> struct Point { x: i32 } impl Point { fn get_x(&self) -> i32 { self.x } }
+        // First, transform inherited field access in global code (before class definitions are transformed)
+        output = self.transform_inherited_field_access(&output)?;
         output = self.transform_class_definitions(&output)?;
 
         // Rule 3: Remove use statements (they're handled at module level)
@@ -435,7 +437,71 @@ impl Translator {
     /// (f32)sum -> sum as f32
     /// (i32)(a + b) -> (a + b) as i32
     /// (f32)(sum / 10) -> sum as f32 / 10 as f32 [distribute to operands for float]
+    /// 
+    /// 2026.09.26: 函数签名和函数体分离处理
+    /// - 函数签名（fn name(...) -> type）不转换，程序员明确声明的类型
+    /// - 函数体（{ ... }）转换类型，程序员可能需要类型转换
     fn transform_type_cast(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // 1. 识别函数签名边界（fn name(...) -> type {）
+        // 匹配函数签名：fn name(params) -> return_type {
+        let sig_re = Regex::new(r"fn\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\([^)]*\)\s*(?:->\s*[^{]+)?\s*\{")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let mut result = String::new();
+        let mut last_end = 0;
+
+        // 2. 遍历所有函数签名，分离签名和函数体
+        for m in sig_re.find_iter(source) {
+            // 添加函数签名之前的代码（不转换）
+            result.push_str(&source[last_end..m.start()]);
+            
+            // 添加函数签名（不转换，但不包含 {）
+            let sig = m.as_str();
+            let sig_without_brace = sig.trim_end_matches('{').trim_end();
+            result.push_str(sig_without_brace);
+            result.push_str(" {"); // 添加 { 作为函数体开始
+            
+            // 提取函数体（从 { 之后到匹配的 }）
+            let body_start = m.end(); // { 之后的位置
+            let mut depth = 1;
+            let mut pos = m.end();
+            let bytes = source.as_bytes();
+            
+            while pos < bytes.len() && depth > 0 {
+                match bytes[pos] {
+                    b'{' => depth += 1,
+                    b'}' => depth -= 1,
+                    _ => {}
+                }
+                pos += 1;
+            }
+            
+            if depth == 0 {
+                // 找到匹配的 }，提取函数体（不包含 { 和 }）
+                let body = &source[body_start..pos - 1]; // 排除最后的 }
+                // 对函数体进行类型转换
+                let transformed_body = self.transform_type_cast_in_body(body)?;
+                result.push_str(&transformed_body);
+                result.push_str("}"); // 添加 } 作为函数体结束
+                last_end = pos;
+            } else {
+                // 未找到匹配的 }，添加剩余部分
+                result.push_str(&source[body_start..]);
+                last_end = source.len();
+                break;
+            }
+        }
+        
+        // 添加剩余部分（不转换）
+        result.push_str(&source[last_end..]);
+
+        Ok(result)
+    }
+    
+    /// 对函数体进行类型转换（辅助函数）
+    fn transform_type_cast_in_body(&self, body: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
         // Pattern 1: (f32) or (f64) wrapping an expression with operators
@@ -445,7 +511,7 @@ impl Translator {
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let mut result = re_float
-            .replace_all(source, |caps: &regex::Captures| {
+            .replace_all(body, |caps: &regex::Captures| {
                 let type_name = &caps[1];
                 let expr = &caps[2];
                 // Distribute cast to each operand in the expression
@@ -706,6 +772,7 @@ impl Translator {
 
     /// V0.6: Transform class instantiation
     /// ClassName var; -> let mut var: ClassName = ClassName::default();
+    /// ClassName var = new ClassName(args); -> let mut var: ClassName = ClassName::new(args);
     ///
     /// (owner design, 2026.09.20: 语言核不合成默认值，要不要默认值由程序员
     /// 负责。此处 ::default() 仅为转译器过渡期的后端兼容措施 —— Rust 不允许
@@ -715,43 +782,139 @@ impl Translator {
     fn transform_class_instantiation(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        // Pattern: ClassName var;  /  ClassName a, b, c;  (comma list,
+        // Pattern 1: ClassName var = new ClassName(args);
+        // Transform to: let mut var: ClassName = ClassName::new(args);
+        let re_new = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*new\s+([A-Z][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let mut result = re_new
+            .replace_all(source, |caps: &regex::Captures| {
+                let var_type = &caps[1];
+                let var_name = &caps[2];
+                let class_name = &caps[3];
+                let args = &caps[4];
+                
+                // Check if types match
+                if var_type != class_name {
+                    // Type mismatch - keep as-is for now
+                    return caps[0].to_string();
+                }
+                
+                format!("let mut {}: {} = {}::new({});", var_name, class_name, class_name, args)
+            })
+            .to_string();
+
+        // Pattern 2: ClassName var;  /  ClassName a, b, c;  (comma list,
         // 2026.09.09 — same shape as scalar no-init declarations)
         let re = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*(?:\s*,\s*[a-z_][a-zA-Z0-9_]*)*)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let result = re.replace_all(source, |caps: &regex::Captures| {
-            let class_name = &caps[1];
-            let var_names: Vec<&str> = caps[2]
-                .split(',')
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .collect();
+        result = re
+            .replace_all(&result, |caps: &regex::Captures| {
+                let class_name = &caps[1];
+                let var_names: Vec<&str> = caps[2]
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
 
-            // Check if it looks like a class name (starts with uppercase)
-            // and not a primitive type
-            if self.is_primitive_type(class_name) {
-                // Keep as-is for primitive types (comma list per var)
-                let vars = var_names
+                // Check if it looks like a class name (starts with uppercase)
+                // and not a primitive type
+                if self.is_primitive_type(class_name) {
+                    // Keep as-is for primitive types (comma list per var)
+                    let vars = var_names
+                        .iter()
+                        .map(|v| format!("{} {};", class_name, v))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    return vars;
+                }
+
+                // Transform to Rust struct instantiation with default values
+                // For now, use Default::default() - requires #[derive(Default)]
+                var_names
                     .iter()
-                    .map(|v| format!("{} {};", class_name, v))
+                    .map(|v| format!("let mut {}: {} = {}::default();", v, class_name, class_name))
                     .collect::<Vec<_>>()
-                    .join("\n");
-                return vars;
-            }
+                    .join("\n")
+            })
+            .to_string();
 
-            // Transform to Rust struct instantiation with default values
-            // For now, use Default::default() - requires #[derive(Default)]
-            var_names
-                .iter()
-                .map(|v| format!("let mut {}: {} = {}::default();", v, class_name, class_name))
-                .collect::<Vec<_>>()
-                .join("\n")
-        });
-
-        Ok(result.to_string())
+        Ok(result)
     }
 
+    /// Transform inherited field access in global code
+    /// obj.field -> obj.ParentChain.field (for fields inherited from parent classes)
+    fn transform_inherited_field_access(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        
+        // Build class table from source
+        let class_table = self.extract_class_table(source);
+        eprintln!("DEBUG: found {} classes in source", class_table.len());
+        for (name, info) in &class_table {
+            eprintln!("DEBUG: class {} extends {:?}", name, info.parent);
+        }
+        
+        // For each class, build field path map
+        let mut all_field_maps: std::collections::HashMap<String, std::collections::HashMap<String, String>> = std::collections::HashMap::new();
+        for class_name in class_table.keys() {
+            let field_map = self.build_field_path_map(class_name, &class_table, source);
+            if !field_map.is_empty() {
+                all_field_maps.insert(class_name.clone(), field_map);
+            }
+        }
+        
+        // If no inheritance, return early
+        if all_field_maps.is_empty() {
+            eprintln!("DEBUG: no inheritance field maps found");
+            return Ok(source.to_string());
+        }
+        
+        eprintln!("DEBUG: found {} classes with inherited fields", all_field_maps.len());
+        for (class_name, field_map) in &all_field_maps {
+            eprintln!("DEBUG: class {} has inherited fields: {:?}", class_name, field_map.keys().collect::<Vec<_>>());
+        }
+        
+        let mut result = source.to_string();
+        eprintln!("DEBUG: source length: {}, first 200 chars: {:?}", result.len(), &result[..result.len().min(200)]);
+        
+        // For each class with inherited fields, transform obj.field -> obj.ParentChain.field
+        // We need to find variable declarations of these types and transform their field accesses
+        for (class_name, field_map) in &all_field_maps {
+            // Find variable declarations in Hust source: ClassName var = new ClassName(...)
+            // or ClassName var;
+            let var_decl_re = Regex::new(&format!(
+                r"{}\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*new\s+{}",
+                regex::escape(class_name),
+                regex::escape(class_name)
+            ));
+            
+            if let Ok(re) = var_decl_re {
+                let result_clone = result.clone();
+                let captures: Vec<_> = re.captures_iter(&result_clone).collect();
+                eprintln!("DEBUG: pattern: {:?}", re.as_str());
+                eprintln!("DEBUG: found {} variable declarations for class {}", captures.len(), class_name);
+                for caps in captures {
+                    let var_name = caps[1].to_string();
+                    eprintln!("DEBUG: transforming field access for variable: {} (type: {})", var_name, class_name);
+                    
+                    // Transform var.field -> var.ParentChain.field for each inherited field
+                    for (field, path) in field_map {
+                        let pattern = format!(r"\b{}\.{}", regex::escape(&var_name), regex::escape(field));
+                        if let Ok(field_re) = Regex::new(&pattern) {
+                            let replacement = format!("{}.{}", var_name, path);
+                            // Add .field at the end
+                            let replacement = format!("{}.{}", replacement, field);
+                            result = field_re.replace_all(&result, replacement.as_str()).to_string();
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(result)
+    }
+    
     /// Check if a type name is a primitive type
     fn is_primitive_type(&self, type_name: &str) -> bool {
         matches!(
@@ -2440,10 +2603,12 @@ impl Translator {
             // class's own `impl Student for` block provides real methods
             // (all methods, visibility per two-layer model), satisfying
             // the trait without placeholders.
+            // Use &mut self for all interface methods (conservative approach:
+            // allows both read-only and mutable implementations)
             let sig = if ret_type == "void" {
-                format!("\n    fn {}(&self{});", rust_method, rust_params)
+                format!("\n    fn {}(&mut self{});", rust_method, rust_params)
             } else {
-                format!("\n    fn {}(&self{}) -> {};", rust_method, rust_params, ret_type)
+                format!("\n    fn {}(&mut self{}) -> {};", rust_method, rust_params, ret_type)
             };
 
             result.push(sig);
@@ -2557,6 +2722,7 @@ impl Translator {
                 &parent_chain,
                 &interface_methods_map,
                 &class_table,
+                source,  // Pass source for method signature extraction
             );
 
             format!("{}\n{}", struct_def, impl_def)
@@ -2603,11 +2769,14 @@ impl Translator {
 
         use regex::Regex;
 
-        // Method signature start: [public] Type name ( ... ) {
+        // Method signature start: [public] [Type] name ( ... ) {
         // (brace-depth-aware body extraction — methods may contain nested
         //  if/for blocks, which the old [^{}]* pattern could not handle)
+        // Supports constructors: public ClassName(...) with no return type
+        // Constructor: public ClassName(...) - no return type
+        // Regular method: [public] ReturnType name(...)
         let sig_re = Regex::new(
-            r"(?s)(public\s+)?([a-zA-Z_]\w*)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{",
+            r"(?s)(public\s+)?(?:(\w+)\s+)?([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{",
         )
         .unwrap();
 
@@ -2717,11 +2886,32 @@ impl Translator {
     /// Parse a method declaration (supports multi-line with (?s))
     /// Body capture is greedy to the span's final `}` — the span from
     /// parse_class_body is brace-matched, so its last `}` closes the method.
+    /// Supports constructors: public ClassName(...) with no return type
     fn parse_method(&self, text: &str) -> Option<ClassMethod> {
         use regex::Regex;
 
+        // First, try to match constructor: public ClassName(params) { body }
+        // Constructor has no return type, just ClassName(params)
+        let ctor_re = Regex::new(r"(?s)^\s*public\s+([A-Z]\w*)\s*\(([^)]*)\)\s*(\{.*\})?").unwrap();
+        
+        if let Some(caps) = ctor_re.captures(text) {
+            // This is a constructor
+            let name = caps[1].to_string();
+            let params = caps[2].to_string();
+            let body = caps.get(3).map(|m| m.as_str().to_string());
+            
+            return Some(ClassMethod {
+                name,
+                ret_type: "Self".to_string(),
+                params,
+                body,
+                visibility: Visibility::Public,
+            });
+        }
+
+        // Regular method: [public] ReturnType name(params) { body }
         let re =
-            Regex::new(r"(?s)^\s*(public\s+)?(\w+)\s+(\w+)\s*\(([^)]*)\)\s*(\{.*\})?").unwrap();
+            Regex::new(r"(?s)^\s*(public\s+)?(\w+)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*(\{.*\})?").unwrap();
 
         let caps = re.captures(text)?;
 
@@ -2785,6 +2975,7 @@ impl Translator {
         parent_chain: &[String],
         interface_methods_map: &std::collections::HashMap<String, Vec<String>>,
         class_table: &std::collections::HashMap<String, ClassInfo>,
+        source: &str,  // Add source for method signature extraction
     ) -> String {
         let mut result = String::new();
 
@@ -2815,12 +3006,13 @@ impl Translator {
                 parent_chain,
                 &interface_methods_map[if_name],
                 class_table,
+                source,  // Pass source for method signature extraction
             );
             result.push_str(&delegate_impl);
         }
 
         // Generate inherent impl block for class methods
-        let inherent_impl = self.generate_inherent_impl(class_name, methods);
+        let inherent_impl = self.generate_inherent_impl(class_name, methods, class_table, source);
         result.push_str(&inherent_impl);
 
         result
@@ -2838,6 +3030,7 @@ impl Translator {
         parent_chain: &[String],
         method_names: &[String],
         class_table: &std::collections::HashMap<String, ClassInfo>,
+        source: &str,  // Add source to extract method signatures
     ) -> String {
         let mut result = format!("impl {} for {} {{\n", interface_name, class_name);
 
@@ -2880,11 +3073,72 @@ impl Translator {
         }
 
         for method_name in method_names {
+            // Extract method signature from interface definition
+            let sig_re = regex::Regex::new(&format!(
+                r"fn\s+{}\s*\(([^)]*)\)",
+                regex::escape(method_name)
+            )).unwrap();
+            
+            let params = if let Some(caps) = sig_re.captures(source) {
+                caps[1].to_string()
+            } else {
+                String::new()
+            };
+            
+            // Remove &mut self / &self from params (it's already in the signature)
+            let params_clean = params
+                .replace("&mut self", "")
+                .replace("&self", "")
+                .trim()
+                .trim_start_matches(',')
+                .trim()
+                .to_string();
+            
+            // Build parameter list for delegation (pass through all params)
+            let param_names: Vec<String> = params_clean
+                .split(',')
+                .filter_map(|p| {
+                    let p = p.trim();
+                    if p.is_empty() { return None; }
+                    // Extract parameter name (format: "type name" or "name")
+                    // Handle both "factor: i32" (Rust style) and "i32 factor" (C style)
+                    let parts: Vec<&str> = p.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        // Check if first part ends with ':' (Rust style: "factor: i32")
+                        if parts[0].ends_with(':') {
+                            // Rust style: "factor: i32" -> extract "factor"
+                            Some(parts[0].trim_end_matches(':').to_string())
+                        } else {
+                            // C style: "i32 factor" -> extract "factor" (last part)
+                            Some(parts[parts.len() - 1].to_string())
+                        }
+                    } else {
+                        // Single word, might be just name
+                        Some(parts[0].to_string())
+                    }
+                })
+                .collect();
+            let param_list = param_names.join(", ");
+            
+            // Delegate with &mut self and pass through all parameters
+            let sig_params = if params_clean.is_empty() {
+                "&mut self".to_string()
+            } else {
+                format!("&mut self, {}", params_clean)
+            };
+            
+            // Build delegation call - handle empty param list
+            let delegation_call = if param_list.is_empty() {
+                format!("{}.{}()", delegation_path, method_name)
+            } else {
+                format!("{}.{}({})", delegation_path, method_name, param_list)
+            };
+            
             result.push_str(&format!(
-                "    fn {}(&self) {{\n        {}.{}()\n    }}\n",
+                "    fn {}({}) {{\n        {}\n    }}\n",
                 method_name,
-                delegation_path,
-                method_name
+                sig_params,
+                delegation_call
             ));
         }
 
@@ -2914,6 +3168,8 @@ impl Translator {
         _parent_class: Option<&str>,
         interfaces: Option<&str>,
         trait_methods: &HashSet<String>,
+        class_table: &std::collections::HashMap<String, ClassInfo>,
+        source: &str,
     ) -> String {
         let mut result = String::new();
 
@@ -2928,7 +3184,7 @@ impl Translator {
         }
 
         // Generate inherent impl block for class methods
-        let inherent_impl = self.generate_inherent_impl(class_name, methods);
+        let inherent_impl = self.generate_inherent_impl(class_name, methods, class_table, source);
         result.push_str(&inherent_impl);
 
         result
@@ -3028,11 +3284,9 @@ impl Translator {
             // visibility), because this function returns String (no Err path).
             let rust_params = self.transform_method_params(&method.params);
 
-            // self param FIXED to &self — must match the trait declaration
-            // exactly (interface methods declare &self; a &mut here would be
-            // E0053). The heuristic needs_mut misfired on `sum += self.scores[i]`
-            // (contains both "self." and "=" without touching self fields).
-            let self_param = "&self";
+            // self param: always &mut self to match trait declaration
+            // (trait methods are declared with &mut self for flexibility)
+            let self_param = "&mut self";
 
             let sig = if method.ret_type == "void" {
                 format!("\n    fn {}({}{}) {{", rust_name, self_param, rust_params)
@@ -3059,8 +3313,17 @@ impl Translator {
     }
 
     /// Generate inherent impl block (class methods)
-    fn generate_inherent_impl(&self, class_name: &str, methods: &[ClassMethod]) -> String {
+    fn generate_inherent_impl(
+        &self, 
+        class_name: &str, 
+        methods: &[ClassMethod],
+        class_table: &std::collections::HashMap<String, ClassInfo>,
+        source: &str,
+    ) -> String {
         let mut result = format!("impl {} {{", class_name);
+        
+        // Build field path map for inheritance
+        let field_path_map = self.build_field_path_map(class_name, class_table, source);
 
         for method in methods {
             let vis = match method.visibility {
@@ -3074,41 +3337,114 @@ impl Translator {
             // needs_mut: field-WRITE detection only — `self.x =` / `self.x +=` etc.
             // (the old "contains self. && contains =" misfired on
             //  `sum += self.scores[i]`, which only READS a field)
-            let needs_mut = method
-                .body
-                .as_ref()
-                .map(|b| {
-                    // NOTE: regex 1.12 has no look-around, so `self.x == y`
-                    // (comparison) is a false positive here — harmless (the
-                    // method just gets &mut self without needing it).
-                    regex::Regex::new(r"self\.\w+\s*(?:[-+*/])?=").unwrap().is_match(b)
-                })
-                .unwrap_or(false);
+            // Constructors always need &mut self (they initialize fields)
+            let needs_mut = if method.ret_type == "Self" {
+                true
+            } else {
+                method
+                    .body
+                    .as_ref()
+                    .map(|b| {
+                        // Detect field writes: self.field = value or self.field += value
+                        // Pattern: self.field or this.field followed by = or +=, -=, *=, /=
+                        // Also support array element assignment: self.field[index] = value
+                        regex::Regex::new(r"(?:self|this)\.\w+(?:\[\d+\])?\s*(?:[-+*/])?=").unwrap().is_match(b)
+                    })
+                    .unwrap_or(false)
+            };
             let self_param = if needs_mut { "&mut self" } else { "&self" };
 
-            let sig = if method.ret_type == "void" {
-                format!(
-                    "\n    {}fn {}({}{}) {{",
-                    vis, rust_name, self_param, rust_params
-                )
+            // Constructor: generate new() method instead of method with &mut self
+            if method.ret_type == "Self" {
+                // Generate: pub fn new(params) -> Self { ... }
+                let new_params = self.transform_params(&method.params);
+                let sig = if new_params.is_empty() {
+                    format!("\n    {}fn new() -> Self {{", vis)
+                } else {
+                    format!("\n    {}fn new({}) -> Self {{", vis, new_params)
+                };
+                result.push_str(&sig);
+                
+                // For constructor, we need to collect field assignments and generate Self { ... }
+                let mut field_assignments = Vec::new();
+                if let Some(ref body) = method.body {
+                    let body_content = body.trim_start_matches('{').trim_end_matches('}');
+                    // Extract field assignments: self.field = value; or this.field = value;
+                    let assign_re = regex::Regex::new(r"(?:self|this)\.(\w+)\s*=\s*([^;]+);").unwrap();
+                    for cap in assign_re.captures_iter(body_content) {
+                        let field_name = &cap[1];
+                        let mut value = cap[2].trim().to_string();
+                        // Convert Hust array literal {a, b, c} to Rust [a, b, c]
+                        if value.starts_with('{') && value.ends_with('}') {
+                            value = format!("[{}]", &value[1..value.len()-1]);
+                        }
+                        field_assignments.push(format!("{}: {}", field_name, value));
+                    }
+                }
+                
+                if field_assignments.is_empty() {
+                    result.push_str("\n        Self::default()");
+                } else {
+                    // Use inheritance table to build proper nested initialization
+                    // For class C extends B extends A:
+                    // Self { B: B::new(args), own_field: val, ..Default::default() }
+                    let parent_from_table = class_table.get(class_name).and_then(|info| info.parent.clone());
+                    if let Some(parent) = parent_from_table {
+                        // Extract super() args from body to pass to parent constructor
+                        let super_args = if let Some(ref body) = method.body {
+                            let super_re = regex::Regex::new(r"super\s*\(([^)]*)\)").unwrap();
+                            super_re.captures(body)
+                                .map(|cap| cap[1].trim().to_string())
+                                .unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
+                        
+                        if super_args.is_empty() {
+                            // No super() call, use parent Default
+                            result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                        } else {
+                            // Call parent constructor with super() args
+                            result.push_str(&format!("\n        Self {{\n            {}: {}::new({}),\n            {},\n            ..Default::default()\n        }}", 
+                                parent, parent, super_args,
+                                field_assignments.join(",\n            ")
+                            ));
+                        }
+                    } else {
+                        result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                    }
+                }
+                
+                result.push_str("\n    }");
             } else {
-                format!(
-                    "\n    {}fn {}({}{}) -> {} {{",
-                    vis, rust_name, self_param, rust_params, method.ret_type
-                )
-            };
+                // Regular method
+                let sig = if method.ret_type == "void" {
+                    format!(
+                        "\n    {}fn {}({}{}) {{",
+                        vis, rust_name, self_param, rust_params
+                    )
+                } else {
+                    format!(
+                        "\n    {}fn {}({}{}) -> {} {{",
+                        vis, rust_name, self_param, rust_params, method.ret_type
+                    )
+                };
 
-            result.push_str(&sig);
+                result.push_str(&sig);
 
-            if let Some(ref body) = method.body {
-                let body_content = body.trim_start_matches('{').trim_end_matches('}');
-                let transformed_body = self.transform_self_references(body_content);
-                result.push_str(&transformed_body);
-            } else {
-                result.push_str("()");
+                if let Some(ref body) = method.body {
+                    let body_content = body.trim_start_matches('{').trim_end_matches('}');
+                    let transformed_body = self.transform_self_references_with_fields(
+                        body_content, 
+                        Some(&field_path_map)
+                    );
+                    result.push_str(&transformed_body);
+                } else {
+                    result.push_str("()");
+                }
+
+                result.push_str("\n    }");
             }
-
-            result.push_str("\n    }");
         }
 
         result.push_str("\n}\n");
@@ -3125,14 +3461,53 @@ impl Translator {
     }
 
     /// Transform method body content
-    /// - self.x -> self.x
+    /// - this.x -> self.x
+    /// - super(...) -> self.Parent::new(...)
     /// - method calls: obj.methodName() -> obj.method_name()
+    /// - inherited field access: obj.field -> obj.ParentChain.field
     fn transform_self_references(&self, body: &str) -> String {
+        self.transform_self_references_with_fields(body, None)
+    }
+    
+    /// Transform method body with optional field path mapping for inheritance
+    fn transform_self_references_with_fields(
+        &self, 
+        body: &str,
+        field_path_map: Option<&std::collections::HashMap<String, String>>,
+    ) -> String {
         let mut result = body.to_string();
+
+        // Transform this.x -> self.x (Hust uses 'this', Rust uses 'self')
+        // Pattern: this.field or this.method() -> self.field or self.method()
+        use regex::Regex;
+        let this_re = Regex::new(r"\bthis\b").unwrap();
+        result = this_re.replace_all(&result, "self").to_string();
+        
+        // Transform inherited field access: obj.field -> obj.ParentChain.field
+        // Only for fields that are inherited (not defined in current class)
+        if let Some(ref map) = field_path_map {
+            for (field, path) in map.iter() {
+                // Pattern: obj.field (not preceded by . or followed by ()
+                // Use word boundary to avoid matching method calls
+                let pattern = format!(r"(?<!\.)\b(\w+)\.{}{}", regex::escape(field), r"(?![\w(])");
+                if let Ok(re) = Regex::new(&pattern) {
+                    result = re.replace_all(&result, |caps: &regex::Captures| {
+                        let obj = &caps[1];
+                        format!("{}.{}", obj, path)
+                    }).to_string();
+                }
+            }
+        }
+
+        // Transform super(...) -> self.Parent::new(...)
+        // Note: This is a simplified version. In a real implementation,
+        // we would need to know the parent class name.
+        // For now, we'll just remove the super() call and let the user handle it
+        let super_re = Regex::new(r"\bsuper\s*\([^)]*\)\s*;").unwrap();
+        result = super_re.replace_all(&result, "// super() call removed").to_string();
 
         // Transform method calls from camelCase to snake_case
         // Pattern: .methodName( -> .method_name(
-        use regex::Regex;
         let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(").unwrap();
         result = re
             .replace_all(&result, |caps: &regex::Captures| {
@@ -3145,6 +3520,88 @@ impl Translator {
         result
     }
 
+    /// Build field path map for inheritance: field_name -> "Parent.GrandParent"
+    /// For class C extends B extends A:
+    /// - If A has field x, B has field y, C has field z:
+    ///   - x -> "B.A" (accessed via self.B.A.x)
+    ///   - y -> "B" (accessed via self.B.y)
+    ///   - z -> None (defined in C, no path needed)
+    fn build_field_path_map(
+        &self,
+        class_name: &str,
+        class_table: &std::collections::HashMap<String, ClassInfo>,
+        source: &str,
+    ) -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
+        
+        // Get own fields (defined in this class)
+        let own_fields: HashSet<String> = self.extract_class_fields(source, class_name);
+        
+        // Walk up parent chain
+        let mut visited: HashSet<String> = HashSet::new();
+        let mut current_parent = class_table.get(class_name).and_then(|info| info.parent.clone());
+        let mut path_prefix = String::new();
+        
+        while let Some(ref parent) = current_parent {
+            if !visited.insert(parent.clone()) {
+                break; // Cycle detected
+            }
+            
+            // Build path prefix: e.g., "Rect.Shape" for ColorRect -> Rect -> Shape
+            if path_prefix.is_empty() {
+                path_prefix = parent.clone();
+            } else {
+                path_prefix = format!("{}.{}", path_prefix, parent);
+            }
+            
+            // Get parent's fields
+            let parent_fields = self.extract_class_fields(source, parent);
+            for field in parent_fields {
+                // Only add if not defined in current class and not already in map
+                if !own_fields.contains(&field) && !map.contains_key(&field) {
+                    map.insert(field, path_prefix.clone());
+                }
+            }
+            
+            // Continue up the chain
+            current_parent = class_table.get(parent).and_then(|info| info.parent.clone());
+        }
+        
+        map
+    }
+    
+    /// Extract field names from a class definition in source
+    fn extract_class_fields(&self, source: &str, class_name: &str) -> HashSet<String> {
+        use regex::Regex;
+        let mut fields = HashSet::new();
+        
+        // Find class definition
+        let class_re = Regex::new(&format!(
+            r"(?m)^\s*class\s+{}\s*(?:extends\s+\w+)?\s*(?:implements\s+[\w,\s]+)?\s*\{{([\s\S]*?)^\}}",
+            regex::escape(class_name)
+        ));
+        
+        if let Ok(re) = class_re {
+            if let Some(caps) = re.captures(source) {
+                let body = &caps[1];
+                // Match field declarations: Type name; or Type name = value;
+                // Also match array types: Type[dim] name;
+                // Exclude method definitions (which have parentheses)
+                let field_re = Regex::new(r"(?m)^\s*(?:public\s+|private\s+)?(\w+(?:\[\d+\])?)\s+([a-zA-Z_]\w*)\s*(?:=[^;]*)?;\s*$").unwrap();
+                for fcaps in field_re.captures_iter(body) {
+                    let field_name = fcaps[2].to_string();
+                    // Skip if it looks like a method call (has parentheses after)
+                    let after = &body[fcaps.get(0).unwrap().end()..];
+                    if !after.trim_start().starts_with('(') {
+                        fields.insert(field_name);
+                    }
+                }
+            }
+        }
+        
+        fields
+    }
+    
     /// Convert camelCase to snake_case
     fn to_snake_case(&self, name: &str) -> String {
         let mut result = String::new();
