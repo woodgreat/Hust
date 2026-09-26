@@ -2828,15 +2828,16 @@ impl Translator {
             cleaned_source = cleaned_source.replace(def.as_str(), "");
         }
 
-        // Match class definition with optional extends and implements
-        let re = Regex::new(r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+(\w+))?\s*(?:implements\s+([\w,\s]+))?\s*\{([\s\S]*?)^\}")
+        // Match class definition with optional public, extends and implements
+        let re = Regex::new(r"(?m)^\s*(public\s+)?class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+(\w+))?\s*(?:implements\s+([\w,\s]+))?\s*\{([\s\S]*?)^\}")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let mut result = re.replace_all(&cleaned_source, |caps: &regex::Captures| {
-            let class_name = &caps[1];
-            let parent_class = caps.get(2).map(|m| m.as_str());
-            let interfaces = caps.get(3).map(|m| m.as_str());
-            let body = &caps[4];
+            let is_public = caps.get(1).is_some();
+            let class_name = &caps[2];
+            let parent_class = caps.get(3).map(|m| m.as_str());
+            let interfaces = caps.get(4).map(|m| m.as_str());
+            let body = &caps[5];
 
             // Parse class body into fields and methods
             let (fields, methods) = self.parse_class_body(body);
@@ -2888,8 +2889,8 @@ impl Translator {
                 }
             }
 
-            // Generate struct
-            let struct_def = self.generate_struct(class_name, &fields, parent_class);
+            // Generate struct with visibility
+            let struct_def = self.generate_struct(class_name, &fields, parent_class, is_public);
 
             // Generate impl block
             let impl_def = self.generate_impl_with_delegation(
@@ -3197,9 +3198,11 @@ impl Translator {
         class_name: &str,
         fields: &[ClassField],
         parent_class: Option<&str>,
+        is_public: bool,
     ) -> String {
         // Add derive macros for Default
-        let mut result = format!("#[derive(Default)]\nstruct {} {{", class_name);
+        let visibility = if is_public { "pub " } else { "" };
+        let mut result = format!("#[derive(Default)]\n{}struct {} {{", visibility, class_name);
 
         // If has parent, include parent as field
         // Field name preserves the class name as written (case-sensitive,
@@ -3209,10 +3212,14 @@ impl Translator {
             result.push_str(format!("\n    {}: {},", parent, parent).as_str());
         }
 
-        // Add own fields
+        // Add own fields with visibility
         for field in fields {
             let rust_field = self.to_snake_case(&field.name);
-            result.push_str(format!("\n    {}: {},", rust_field, field.type_name).as_str());
+            let field_vis = match field.visibility {
+                Visibility::Public => "pub ",
+                Visibility::Private => "",
+            };
+            result.push_str(format!("\n    {}{}: {},", field_vis, rust_field, field.type_name).as_str());
         }
 
         result.push_str("\n}\n");

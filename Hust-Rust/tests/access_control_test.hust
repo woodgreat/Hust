@@ -1,0 +1,40 @@
+// Access Control Test
+// Test class, field, and method visibility
+
+public class PublicClass {
+    public i32 public_field;
+    i32 private_field;
+    
+    public void public_method() {
+        self.public_field = 10;
+        self.private_field = 20;  // OK: same class can access private
+    }
+    
+    void private_method() {
+        self.public_field = 30;
+        self.private_field = 40;  // OK: same class can access private
+    }
+}
+
+class PrivateClass {
+    public i32 public_field;
+    i32 private_field;
+    
+    public void public_method() {
+        self.private_field = 50;  // OK: same class
+    }
+}
+
+void main() {
+    PublicClass pc;
+    pc.public_field = 100;      // OK: public field
+    // pc.private_field = 200;  // ERROR: private field (commented out)
+    pc.public_method();          // OK: public method
+    // pc.private_method();     // ERROR: private method (commented out)
+    
+    PrivateClass prv;
+    prv.public_field = 300;     // OK: public field
+    prv.public_method();         // OK: public method
+    
+    println!("Access control test passed!");
+}
