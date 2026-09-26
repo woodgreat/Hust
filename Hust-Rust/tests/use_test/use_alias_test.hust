@@ -1,0 +1,10 @@
+// Use Statement Test 4: Alias import
+use math_utils as mu;
+
+void main() {
+    i32 f = mu.factorial(5);   // Should resolve via alias
+    i32 s = mu.add(3, 4);      // Should resolve via alias
+    
+    println!("mu.factorial(5) = {}", f);
+    println!("mu.add(3, 4) = {}", s);
+}

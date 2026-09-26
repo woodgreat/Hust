@@ -206,33 +206,52 @@ impl Module {
     }
 
     /// Extract import statements from source
-    /// Format: use module_name;
+    /// Format: use module_name; / use module_name.function; / use module_name.*; / use module_name as alias;
+    /// 2026.09.27: System namespaces use '-' separator (e.g., RUST-std-io.*)
+    /// User modules use '.' for refined imports (e.g., math_utils.factorial)
     fn extract_imports(source: &str) -> Vec<String> {
         let mut imports = Vec::new();
 
         for line in source.lines() {
             let line = line.trim();
             if line.starts_with("use ") && line.ends_with(';') {
-                // Extract module name: "use math;" -> "math"
-                let module_name = line[4..line.len() - 1].trim();
-                if !module_name.is_empty() {
-                    // Check if it's a namespace import (contains . or ends with .*)
-                    // Namespace imports are handled by namespace.rs, not module resolver
-                    if module_name.contains('.') || module_name.ends_with(".*") {
-                        // This is a namespace import, skip module resolution
-                        // Examples: use math_ops.max3; use math_ops.*; use RUST.std.io.*;
+                let stmt = line[4..line.len() - 1].trim();
+                if !stmt.is_empty() {
+                    // Check for system namespace: RUST-std-io.* or HUST-math
+                    // System namespaces use '-' separator, skip module loading
+                    if stmt.contains('-') {
                         continue;
                     }
+                    
                     // Check for alias: "use math_ops as mo;" -> extract "math_ops"
-                    if let Some(pos) = module_name.find(" as ") {
-                        let ns_name = module_name[..pos].trim();
+                    if let Some(pos) = stmt.find(" as ") {
+                        let ns_name = stmt[..pos].trim();
                         if !ns_name.is_empty() {
                             imports.push(ns_name.to_string());
                         }
                         continue;
                     }
+                    
+                    // Check for wildcard: "use math_ops.*;" -> extract "math_ops"
+                    if stmt.ends_with(".*") {
+                        let ns_name = stmt[..stmt.len() - 2].trim();
+                        if !ns_name.is_empty() {
+                            imports.push(ns_name.to_string());
+                        }
+                        continue;
+                    }
+                    
+                    // Check for refined import: "use math_utils.factorial;" -> extract "math_utils"
+                    if let Some(pos) = stmt.rfind('.') {
+                        let ns = stmt[..pos].trim();
+                        if !ns.is_empty() {
+                            imports.push(ns.to_string());
+                        }
+                        continue;
+                    }
+                    
                     // Regular module import: use math_ops;
-                    imports.push(module_name.to_string());
+                    imports.push(stmt.to_string());
                 }
             }
         }

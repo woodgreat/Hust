@@ -1,0 +1,21 @@
+// Use Statement Combination Test
+// Test all 4 forms of use statements
+
+namespace math_utils;
+
+public i32 factorial(i32 n) {
+    if (n <= 1) { return 1; }
+    return n * factorial(n - 1);
+}
+
+public i32 add(i32 a, i32 b) {
+    return a + b;
+}
+
+public i32 multiply(i32 a, i32 b) {
+    return a * b;
+}
+
+i32 internal_helper(i32 x) {  // Private by default
+    return x * 2;
+}

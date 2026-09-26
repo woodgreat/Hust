@@ -2407,12 +2407,16 @@ impl Translator {
             let func_re = Regex::new(r"(?m)^\s*(public\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
+            eprintln!("DEBUG: extracting functions from module '{}' with remaining length {}", module.name, remaining.len());
+            
             for caps in func_re.captures_iter(&remaining) {
                 let is_pub = caps.get(1).is_some();
                 let ret_type = caps[2].to_string();
                 let func_name = caps[3].to_string();
                 let params = caps[4].to_string();
 
+                eprintln!("DEBUG: registering function '{}' in namespace '{}'", func_name, ns_name);
+                
                 registry.register_function(FunctionInfo {
                     name: func_name,
                     namespace: ns_name.clone(),
@@ -2533,6 +2537,7 @@ impl Translator {
 
         // For each known function, replace bare calls with namespaced calls
         let mut result = all_code;
+        eprintln!("DEBUG: known_funcs = {:?}", known_funcs);
         for func_name in &known_funcs {
             // Skip main - it's the entry point
             if func_name == "main" {
@@ -2546,7 +2551,10 @@ impl Translator {
                 .map(|(_, _, f)| f.clone())
                 .unwrap_or_default();
             
+            eprintln!("DEBUG: resolving function '{}' in file '{}'", func_name, entry_file);
+            
             if let Ok(Some(ns)) = registry.resolve_with_imports(func_name, &entry_file, &registry.default_space) {
+                eprintln!("DEBUG: resolved '{}' to namespace '{}'", func_name, ns);
                 if ns != registry.default_space {
                     // Replace bare calls with namespaced calls using `.` separator
                     // Match: funcName( but not: ns.funcName( or .funcName(
@@ -2557,6 +2565,8 @@ impl Translator {
                             .to_string();
                     }
                 }
+            } else {
+                eprintln!("DEBUG: failed to resolve '{}'", func_name);
             }
         }
 

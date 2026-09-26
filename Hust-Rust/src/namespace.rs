@@ -365,21 +365,37 @@ impl NamespaceRegistry {
                     (stmt, None)
                 };
                 
+                // Check for system namespace: RUST-std-io.* or HUST-math
+                // System namespaces use '-' separator
+                if ns_part.contains('-') {
+                    // System namespace, store as-is
+                    let namespace = ns_part.trim().to_string();
+                    let item = None;  // System namespaces don't have items
+                    if !namespace.is_empty() {
+                        uses.push(UseStmt {
+                            namespace,
+                            item,
+                            alias,
+                        });
+                        // Remove use line from source
+                        let line_to_remove = format!("{}\n", trimmed);
+                        remaining = remaining.replacen(&line_to_remove, "", 1);
+                        if remaining.contains(trimmed) {
+                            remaining = remaining.replacen(trimmed, "", 1);
+                        }
+                    }
+                    continue;
+                }
+                
                 // Check for wildcard: use ns.*;
                 let (namespace, item) = if ns_part.ends_with(".*") {
                     let ns = ns_part[..ns_part.len() - 2].trim();
                     (ns.to_string(), None)  // None = wildcard
                 } else if let Some(pos) = ns_part.rfind('.') {
-                    // Check if it's a system namespace (RUST.xxx or HUST.xxx)
+                    // Refined import: use ns.item;
                     let ns = ns_part[..pos].trim();
                     let item = ns_part[pos + 1..].trim();
-                    
-                    // System namespaces are flat, treat entire thing as namespace
-                    if ns == "RUST" || ns == "HUST" || Self::is_reserved_namespace(ns) {
-                        (ns_part.trim().to_string(), Some(item.to_string()))
-                    } else {
-                        (ns.to_string(), Some(item.to_string()))
-                    }
+                    (ns.to_string(), Some(item.to_string()))
                 } else {
                     (ns_part.trim().to_string(), None)  // Whole namespace
                 };
@@ -436,6 +452,17 @@ impl NamespaceRegistry {
             return Ok(Some(ns));
         }
         
+        // Debug: print use statements for current file
+        eprintln!("DEBUG: resolve_with_imports for '{}' in file '{}'", name, current_file);
+        if let Some(uses) = self.use_statements.get(current_file) {
+            eprintln!("DEBUG: found {} use statements", uses.len());
+            for use_stmt in uses {
+                eprintln!("DEBUG: use stmt: namespace='{}', item={:?}, alias={:?}", use_stmt.namespace, use_stmt.item, use_stmt.alias);
+            }
+        } else {
+            eprintln!("DEBUG: no use statements found for file '{}'", current_file);
+        }
+        
         // Check use statements
         if let Some(uses) = self.use_statements.get(current_file) {
             for use_stmt in uses {
@@ -445,15 +472,20 @@ impl NamespaceRegistry {
                     Some(item) => item == name,  // use ns.item;
                 };
                 
+                eprintln!("DEBUG: checking use stmt: namespace='{}', item={:?}, matches={}", use_stmt.namespace, use_stmt.item, matches);
+                
                 if matches {
                     // Verify function exists in that namespace
                     if let Some(funcs) = self.functions.get(name) {
                         let in_ns: Vec<_> = funcs.iter()
                             .filter(|f| f.namespace == use_stmt.namespace)
                             .collect();
+                        eprintln!("DEBUG: function '{}' found in {} namespaces", name, in_ns.len());
                         if !in_ns.is_empty() {
                             return Ok(Some(use_stmt.namespace.clone()));
                         }
+                    } else {
+                        eprintln!("DEBUG: function '{}' not found in registry", name);
                     }
                 }
             }
