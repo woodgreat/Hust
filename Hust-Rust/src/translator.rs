@@ -2208,6 +2208,42 @@ impl Translator {
         let entry_transpiled = self.transpile(&entry_source)?;
         all_code.push_str(&entry_transpiled);
 
+        // Phase 2.5: Detect function name conflicts across namespaces
+        // Build a map of function name -> list of namespaces
+        let mut func_namespaces: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        for funcs in registry.functions.values() {
+            for func in funcs {
+                func_namespaces
+                    .entry(func.name.clone())
+                    .or_insert_with(Vec::new)
+                    .push(func.namespace.clone());
+            }
+        }
+        
+        // Check for conflicts (same function name in multiple namespaces)
+        for (func_name, namespaces) in &func_namespaces {
+            if namespaces.len() > 1 {
+                // Check if this function is called in the original source (before transpilation)
+                for (_, source, _) in &module_sources {
+                    // Simple pattern: funcName( (not preceded by . or word char)
+                    let pattern = format!(r"(^|[^.\w]){}\s*\(", regex::escape(func_name));
+                    if let Ok(re) = Regex::new(&pattern) {
+                        if re.is_match(source) {
+                            // Function is called but exists in multiple namespaces - conflict!
+                            return Err(TranspileError::TransformError(format!(
+                                "Error: ambiguous function call '{}'\n\
+                                 Found in multiple namespaces: {}\n\
+                                 Help: use explicit namespace prefix, e.g., {}.{}(...)",
+                                func_name,
+                                namespaces.join(", "),
+                                namespaces[0], func_name
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
         // Phase 3: Post-process - resolve namespace calls with `.` separator
         // Build set of known function names that need prefix
         let known_funcs: std::collections::HashSet<String> = registry
@@ -2265,6 +2301,83 @@ impl Translator {
                         result = re
                             .replace_all(&result, "${1}(")
                             .to_string();
+                    }
+                }
+            }
+        }
+
+        // Phase 3.6: Handle namespace direct calls (ns.funcName) and detect non-public calls
+        // Get all namespaces from registry
+        let all_namespaces: Vec<String> = registry.spaces.keys().cloned().collect();
+        
+        for ns in &all_namespaces {
+            // Skip system namespaces
+            if ns == "RUST" || ns == "HUST" || NamespaceRegistry::is_reserved_namespace(ns) {
+                continue;
+            }
+            
+            // Find all functions in this namespace
+            let ns_functions: Vec<_> = registry.functions.values()
+                .flatten()
+                .filter(|f| f.namespace == *ns)
+                .collect();
+            
+            for func in ns_functions {
+                // Check if function is called as ns.funcName(
+                let pattern = format!(r"{}\.{}", regex::escape(ns), regex::escape(&func.name));
+                if let Ok(re) = Regex::new(&pattern) {
+                    if re.is_match(&result) {
+                        // Function is called with namespace prefix
+                        if !func.is_public {
+                            // Non-public function called from outside - error!
+                            return Err(TranspileError::TransformError(format!(
+                                "Error: function '{}' is private in namespace '{}'\n\
+                                 Help: remove 'public' keyword from function definition to make it private,\n\
+                                 or call it from within the same namespace.",
+                                func.name, ns
+                            )));
+                        } else {
+                            // Public function - replace ns.funcName( with funcName(
+                            let call_pattern = format!(r"{}\.{}", regex::escape(ns), regex::escape(&func.name));
+                            if let Ok(call_re) = Regex::new(&call_pattern) {
+                                result = call_re
+                                    .replace_all(&result, &func.name)
+                                    .to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Phase 3.7: Detect function name conflicts across namespaces
+        // Build a map of function name -> list of namespaces
+        let mut func_namespaces: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        for funcs in registry.functions.values() {
+            for func in funcs {
+                func_namespaces
+                    .entry(func.name.clone())
+                    .or_insert_with(Vec::new)
+                    .push(func.namespace.clone());
+            }
+        }
+        
+        // Check for conflicts (same function name in multiple namespaces)
+        for (func_name, namespaces) in &func_namespaces {
+            if namespaces.len() > 1 {
+                // Check if this function is called in the code
+                let pattern = format!(r"(?<![.\w]){}\s*\(", regex::escape(func_name));
+                if let Ok(re) = Regex::new(&pattern) {
+                    if re.is_match(&result) {
+                        // Function is called but exists in multiple namespaces - conflict!
+                        return Err(TranspileError::TransformError(format!(
+                            "Error: ambiguous function call '{}'\n\
+                             Found in multiple namespaces: {}\n\
+                             Help: use explicit namespace prefix, e.g., {}.{}(...)",
+                            func_name,
+                            namespaces.join(", "),
+                            namespaces[0], func_name
+                        )));
                     }
                 }
             }
