@@ -177,6 +177,11 @@ impl Translator {
 
         // Rule 11: Transform String initialization
         output = self.transform_string_init(&output)?;
+        
+        // Rule 11.5: Transform string literals in function calls and returns
+        // greet("World") -> greet("World".to_string())
+        // return "Hi"; -> return "Hi".to_string();
+        output = self.transform_string_literals_in_functions(&output)?;
 
         // Rule 12: Transform pass to ()
         output = self.transform_pass(&output)?;
@@ -2024,6 +2029,109 @@ impl Translator {
         });
 
         Ok(result.to_string())
+    }
+
+    /// Transform string literals in function calls and returns to String
+    /// greet("World") -> greet("World".to_string())
+    /// return "Hi"; -> return "Hi".to_string();
+    fn transform_string_literals_in_functions(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        let mut result = source.to_string();
+        
+        // Pattern 1: Function calls with string literal arguments
+        // Match: fn_name("literal") or fn_name(arg1, "literal", ...)
+        // We need to find function calls that expect String parameters
+        
+        // First, find all function definitions with String parameters
+        let fn_def_re = Regex::new(r"fn\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*(?:->\s*String\s*)?\{")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        
+        let mut string_fn_names: Vec<String> = Vec::new();
+        let mut string_return_fns: Vec<String> = Vec::new();
+        
+        for caps in fn_def_re.captures_iter(&result) {
+            let fn_name = caps[1].to_string();
+            let params = caps[2].to_string();
+            
+            // Check if any parameter is String type
+            if params.contains("String") {
+                string_fn_names.push(fn_name.clone());
+            }
+            
+            // Check if return type is String (captured in the regex)
+            let full_match = caps.get(0).unwrap().as_str();
+            if full_match.contains("-> String") {
+                string_return_fns.push(fn_name);
+            }
+        }
+        
+        // Pattern 2: Transform string literal arguments in function calls
+        // For each function with String parameters, find calls and transform literals
+        for fn_name in &string_fn_names {
+            // Match: fn_name(arg1, "literal", ...) or fn_name("literal")
+            // This is a simplified approach - we transform all string literals in the call
+            let call_re = Regex::new(&format!(
+                r"{}\s*\(([^)]+)\)",
+                regex::escape(fn_name)
+            )).map_err(|e| TranspileError::TransformError(e.to_string()))?;
+            
+            result = call_re.replace_all(&result, |caps: &regex::Captures| {
+                let args = &caps[1];
+                // Transform string literals in arguments
+                let transformed_args = self.transform_string_literals_in_args(args);
+                format!("{}({})", fn_name, transformed_args)
+            }).to_string();
+        }
+        
+        // Pattern 3: Transform return statements with string literals
+        // return "literal"; -> return "literal".to_string();
+        let return_re = Regex::new(r#"return\s+"([^"]+)"\s*;"#)
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        
+        result = return_re.replace_all(&result, |caps: &regex::Captures| {
+            let literal = &caps[1];
+            format!("return \"{}\".to_string();", literal)
+        }).to_string();
+        
+        Ok(result)
+    }
+    
+    /// Helper: Transform string literals in function arguments
+    fn transform_string_literals_in_args(&self, args: &str) -> String {
+        use regex::Regex;
+        
+        // Match string literals: "..." (not followed by .to_string())
+        // Simple approach: match all string literals, then check if already has .to_string()
+        let lit_re = Regex::new(r#""([^"]+)""#).unwrap();
+        
+        let mut result = String::new();
+        let mut last_end = 0;
+        
+        for caps in lit_re.captures_iter(args) {
+            let match_start = caps.get(0).unwrap().start();
+            let match_end = caps.get(0).unwrap().end();
+            let literal = &caps[1];
+            
+            // Add text before this match
+            result.push_str(&args[last_end..match_start]);
+            
+            // Check if followed by .to_string()
+            let after = &args[match_end..];
+            if after.starts_with(".to_string()") {
+                // Already has .to_string(), keep as-is
+                result.push_str(&format!("\"{}\"", literal));
+            } else {
+                // Add .to_string()
+                result.push_str(&format!("\"{}\".to_string()", literal));
+            }
+            
+            last_end = match_end;
+        }
+        
+        // Add remaining text
+        result.push_str(&args[last_end..]);
+        
+        result
     }
 
     /// V0.3: Transform pass to ()
