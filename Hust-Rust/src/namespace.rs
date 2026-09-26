@@ -35,6 +35,9 @@ pub enum NamespaceError {
 
     #[error("Reserved namespace: {0} is reserved for Hust system (UPPERCASE not allowed for users)")]
     ReservedNamespace(String),
+
+    #[error("Nested namespace not supported: '{0}'\nHust namespaces are flat - use a single name without dots\nExample: namespace math; not namespace math.utils;")]
+    NestedNamespace(String),
 }
 
 /// Namespace declaration info
@@ -139,6 +142,11 @@ impl NamespaceRegistry {
                 let ns_name = trimmed[10..trimmed.len() - 1].trim().to_string();
                 if ns_name.is_empty() {
                     return Err(NamespaceError::InvalidPosition(file_path.to_string()));
+                }
+
+                // Check for nested namespace (contains dot)
+                if ns_name.contains('.') {
+                    return Err(NamespaceError::NestedNamespace(ns_name));
                 }
 
                 // Check for reserved UPPERCASE namespace
@@ -566,5 +574,31 @@ use HUST.math;
         assert_eq!(uses.len(), 2);
         assert_eq!(uses[0].namespace, "RUST.std.io");
         assert_eq!(uses[1].namespace, "HUST.math");
+    }
+
+    #[test]
+    fn test_nested_namespace_rejected() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+namespace math.utils;
+"#;
+
+        let result = registry.parse_declaration(source, "test.hust");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), NamespaceError::NestedNamespace(_)));
+    }
+
+    #[test]
+    fn test_nested_namespace_error_message() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+namespace a.b.c;
+"#;
+
+        let result = registry.parse_declaration(source, "test.hust");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Nested namespace not supported"));
+        assert!(err.to_string().contains("a.b.c"));
     }
 }
