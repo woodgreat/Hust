@@ -216,6 +216,22 @@ impl Module {
                 // Extract module name: "use math;" -> "math"
                 let module_name = line[4..line.len() - 1].trim();
                 if !module_name.is_empty() {
+                    // Check if it's a namespace import (contains . or ends with .*)
+                    // Namespace imports are handled by namespace.rs, not module resolver
+                    if module_name.contains('.') || module_name.ends_with(".*") {
+                        // This is a namespace import, skip module resolution
+                        // Examples: use math_ops.max3; use math_ops.*; use RUST.std.io.*;
+                        continue;
+                    }
+                    // Check for alias: "use math_ops as mo;" -> extract "math_ops"
+                    if let Some(pos) = module_name.find(" as ") {
+                        let ns_name = module_name[..pos].trim();
+                        if !ns_name.is_empty() {
+                            imports.push(ns_name.to_string());
+                        }
+                        continue;
+                    }
+                    // Regular module import: use math_ops;
                     imports.push(module_name.to_string());
                 }
             }

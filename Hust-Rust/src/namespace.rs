@@ -382,8 +382,13 @@ impl NamespaceRegistry {
                         item,
                         alias,
                     });
-                    // Remove use line from source
-                    remaining = remaining.replacen(line, "", 1);
+                    // Remove use line from source (match the exact trimmed line)
+                    let line_to_remove = format!("{}\n", trimmed);
+                    remaining = remaining.replacen(&line_to_remove, "", 1);
+                    // Also try without newline (in case it's the last line)
+                    if remaining.contains(trimmed) {
+                        remaining = remaining.replacen(trimmed, "", 1);
+                    }
                 }
             }
         }

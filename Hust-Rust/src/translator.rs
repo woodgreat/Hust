@@ -2245,6 +2245,31 @@ impl Translator {
             }
         }
 
+        // Phase 3.5: Handle alias calls (mo.funcName) and namespace calls (ns.funcName)
+        // Get entry file for use statement lookup
+        let entry_file_for_alias = module_sources
+            .iter()
+            .find(|(n, _, _)| n == &entry_module.name)
+            .map(|(_, _, f)| f.clone())
+            .unwrap_or_default();
+        
+        // Get all use statements from entry file
+        if let Some(uses) = registry.use_statements.get(&entry_file_for_alias) {
+            for use_stmt in uses {
+                // Handle alias: use ns as alias; → alias.funcName( → funcName(
+                // Namespace is logical grouping, all functions are in same crate
+                if let Some(alias) = &use_stmt.alias {
+                    // Replace alias.funcName( with funcName(
+                    let pattern = format!(r"{}\.(\w+)\s*\(", regex::escape(alias));
+                    if let Ok(re) = Regex::new(&pattern) {
+                        result = re
+                            .replace_all(&result, "${1}(")
+                            .to_string();
+                    }
+                }
+            }
+        }
+
         // Phase 4: Print distribution report
         registry.print_report();
 
