@@ -778,6 +778,7 @@ impl Translator {
     /// V0.6: Transform class instantiation
     /// ClassName var; -> let mut var: ClassName = ClassName::default();
     /// ClassName var = new ClassName(args); -> let mut var: ClassName = ClassName::new(args);
+    /// Outer.Inner var; -> let mut var: Outer_Inner = Outer_Inner::default();  (nested class)
     ///
     /// (owner design, 2026.09.20: 语言核不合成默认值，要不要默认值由程序员
     /// 负责。此处 ::default() 仅为转译器过渡期的后端兼容措施 —— Rust 不允许
@@ -789,7 +790,8 @@ impl Translator {
 
         // Pattern 1: ClassName var = new ClassName(args);
         // Transform to: let mut var: ClassName = ClassName::new(args);
-        let re_new = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*new\s+([A-Z][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*;")
+        // Supports nested classes: Outer.Inner var = new Outer.Inner(args);
+        let re_new = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*new\s+([A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s*\(([^)]*)\)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let mut result = re_new
@@ -805,13 +807,17 @@ impl Translator {
                     return caps[0].to_string();
                 }
                 
-                format!("let mut {}: {} = {}::new({});", var_name, class_name, class_name, args)
+                // Convert nested class name to Rust format: Outer.Inner -> Outer_Inner
+                let rust_type = var_type.replace('.', "_");
+                
+                format!("let mut {}: {} = {}::new({});", var_name, rust_type, rust_type, args)
             })
             .to_string();
 
         // Pattern 2: ClassName var;  /  ClassName a, b, c;  (comma list,
         // 2026.09.09 — same shape as scalar no-init declarations)
-        let re = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*(?:\s*,\s*[a-z_][a-zA-Z0-9_]*)*)\s*;")
+        // Supports nested classes: Outer.Inner var;
+        let re = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s+([a-z_][a-zA-Z0-9_]*(?:\s*,\s*[a-z_][a-zA-Z0-9_]*)*)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         result = re
@@ -837,9 +843,11 @@ impl Translator {
 
                 // Transform to Rust struct instantiation with default values
                 // For now, use Default::default() - requires #[derive(Default)]
+                // Convert nested class name to Rust format: Outer.Inner -> Outer_Inner
+                let rust_type = class_name.replace('.', "_");
                 var_names
                     .iter()
-                    .map(|v| format!("let mut {}: {} = {}::default();", v, class_name, class_name))
+                    .map(|v| format!("let mut {}: {} = {}::default();", v, rust_type, rust_type))
                     .collect::<Vec<_>>()
                     .join("\n")
             })
@@ -2729,21 +2737,102 @@ impl Translator {
         }
     }
 
+    /// Extract nested class table from source
+    /// Returns NestedClassTable with outer->inner mappings and full definitions
+    fn extract_nested_class_table(&self, source: &str) -> NestedClassTable {
+        use regex::Regex;
+        let mut table = NestedClassTable::default();
+        
+        // Find all class definitions with their bodies
+        // Use brace-depth matching to handle nested braces correctly
+        let class_re = Regex::new(r"(?m)^\s*class\s+([A-Z][a-zA-Z0-9_]*)\s*\{").unwrap();
+        
+        for caps in class_re.captures_iter(source) {
+            let class_name = caps[1].to_string();
+            let body_start = caps.get(0).unwrap().end();
+            
+            // Extract body with brace matching
+            let mut depth = 1;
+            let mut pos = body_start;
+            let bytes = source.as_bytes();
+            while pos < bytes.len() && depth > 0 {
+                match bytes[pos] as char {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                pos += 1;
+            }
+            
+            if depth == 0 {
+                let body = &source[body_start..pos - 1];
+                
+                // Check for nested class definitions in body
+                let nested_re = Regex::new(r"(?m)^\s*class\s+([A-Z][a-zA-Z0-9_]*)\s*\{").unwrap();
+                for nested_caps in nested_re.captures_iter(body) {
+                    let inner_name = nested_caps[1].to_string();
+                    
+                    // Record nesting relationship
+                    table.outer_to_inner
+                        .entry(class_name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(inner_name.clone());
+                    table.inner_to_outer.insert(inner_name.clone(), class_name.clone());
+                    
+                    // Extract full nested class definition
+                    let nested_start = nested_caps.get(0).unwrap().start();
+                    let mut nested_depth = 1;
+                    let mut nested_pos = nested_caps.get(0).unwrap().end();
+                    let body_bytes = body.as_bytes();
+                    while nested_pos < body_bytes.len() && nested_depth > 0 {
+                        match body_bytes[nested_pos] as char {
+                            '{' => nested_depth += 1,
+                            '}' => nested_depth -= 1,
+                            _ => {}
+                        }
+                        nested_pos += 1;
+                    }
+                    
+                    if nested_depth == 0 {
+                        let full_def = &body[nested_start..nested_pos];
+                        let key = format!("{}.{}", class_name, inner_name);
+                        table.nested_defs.insert(key, full_def.to_string());
+                    }
+                }
+            }
+        }
+        
+        table
+    }
+
     /// V0.6: Transform class definitions to Rust struct + impl
+    /// Supports nested classes using table-driven approach (类似继承表)
     fn transform_class_definitions(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
         use std::collections::HashMap;
 
         // Pre-pass: extract all class definitions with brace-depth matching.
-        // This avoids O(n²) parent-chain walking — each class lookup is O(1).
         let class_table = self.extract_class_table(source);
+        
+        // Pre-pass: extract nested class table
+        let nested_table = self.extract_nested_class_table(source);
+        
+        // Debug: print nested table info
+        eprintln!("DEBUG: nested_table.outer_to_inner = {:?}", nested_table.outer_to_inner);
+        eprintln!("DEBUG: nested_table.nested_defs keys = {:?}", nested_table.nested_defs.keys().collect::<Vec<_>>());
+        
+        // Remove nested class definitions from source (they'll be generated separately)
+        let mut cleaned_source = source.to_string();
+        for (key, def) in &nested_table.nested_defs {
+            // Remove the nested class definition from its outer class body
+            cleaned_source = cleaned_source.replace(def.as_str(), "");
+        }
 
         // Match class definition with optional extends and implements
-        // The body is matched up to a line containing only }
         let re = Regex::new(r"(?m)^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+(\w+))?\s*(?:implements\s+([\w,\s]+))?\s*\{([\s\S]*?)^\}")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let result = re.replace_all(source, |caps: &regex::Captures| {
+        let mut result = re.replace_all(&cleaned_source, |caps: &regex::Captures| {
             let class_name = &caps[1];
             let parent_class = caps.get(2).map(|m| m.as_str());
             let interfaces = caps.get(3).map(|m| m.as_str());
@@ -2753,11 +2842,9 @@ impl Translator {
             let (fields, methods) = self.parse_class_body(body);
 
             // Collect all interfaces from parent chain (for auto-delegation)
-            // Using pre-parsed class_table for O(1) lookup per ancestor.
             let mut all_interfaces: Vec<String> = Vec::new();
             let mut parent_chain: Vec<String> = Vec::new();
             
-            // Add own interfaces
             if let Some(ifs) = interfaces {
                 for if_name in ifs.split(',').map(|s| s.trim()) {
                     if !if_name.is_empty() {
@@ -2766,48 +2853,32 @@ impl Translator {
                 }
             }
             
-            // Walk up parent chain using pre-parsed table (O(1) per step)
-            // Cycle-safe: track visited classes to prevent infinite loops
             let mut visited: HashSet<String> = HashSet::new();
             let mut current_parent = parent_class.map(|s| s.to_string());
             while let Some(ref parent) = current_parent {
                 if !visited.insert(parent.clone()) {
-                    break; // Cycle detected
+                    break;
                 }
                 parent_chain.push(parent.clone());
                 if let Some(class_info) = class_table.get(parent) {
-                    // Add parent's interfaces
                     for if_name in &class_info.interfaces {
                         if !all_interfaces.contains(if_name) {
                             all_interfaces.push(if_name.clone());
                         }
                     }
-                    // Continue up the chain
                     current_parent = class_info.parent.clone();
                 } else {
                     current_parent = None;
                 }
             }
 
-            // Interface method names (for trait-impl routing, 2026.09.11):
-            // the implemented interfaces' traits are already generated in
-            // source (Rule 1 ran before this) — scan their method names so
-            // only interface members go into the trait impl, while other
-            // class methods stay inherent-only (E0407 otherwise).
-            // Now includes interfaces from parent chain (2026.09.21).
             let mut trait_methods: HashSet<String> = HashSet::new();
             let mut interface_methods_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
             
             for if_name in &all_interfaces {
-                let t_re = Regex::new(&format!(
-                    r"(?s)trait\s+{}\s*\{{([^}}]*)\}}",
-                    if_name
-                ))
-                .expect("static regex");
+                let t_re = Regex::new(&format!(r"(?s)trait\s+{}\s*\{{([^}}]*)\}}", if_name)).expect("static regex");
                 if let Some(tc) = t_re.captures(source) {
-                    let f_re =
-                        Regex::new(r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
-                            .expect("static regex");
+                    let f_re = Regex::new(r"fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(").expect("static regex");
                     let mut methods_in_iface: Vec<String> = Vec::new();
                     for f in f_re.captures_iter(&tc[1]) {
                         trait_methods.insert(f[1].to_string());
@@ -2820,7 +2891,7 @@ impl Translator {
             // Generate struct
             let struct_def = self.generate_struct(class_name, &fields, parent_class);
 
-            // Generate impl block with auto-delegation for inherited interfaces
+            // Generate impl block
             let impl_def = self.generate_impl_with_delegation(
                 class_name,
                 &methods,
@@ -2830,21 +2901,93 @@ impl Translator {
                 &parent_chain,
                 &interface_methods_map,
                 &class_table,
-                source,  // Pass source for method signature extraction
+                source,
             );
 
             format!("{}\n{}", struct_def, impl_def)
-        });
+        }).to_string();
 
-        Ok(result.to_string())
+        // Generate nested class definitions (flat Outer_Inner structs)
+        if !nested_table.nested_defs.is_empty() {
+            result.push_str("\n\n// Nested classes (flattened)\n");
+            for (key, def) in &nested_table.nested_defs {
+                // key is "Outer.Inner", convert to "Outer_Inner"
+                let flat_name = key.replace('.', "_");
+                let nested_code = self.generate_flat_nested_class(&flat_name, def);
+                result.push_str(&nested_code);
+                result.push('\n');
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Generate flat nested class definition
+    fn generate_flat_nested_class(&self, flat_name: &str, class_def: &str) -> String {
+        // Extract body from class definition
+        let body_start = class_def.find('{').unwrap_or(0) + 1;
+        let body_end = class_def.rfind('}').unwrap_or(class_def.len());
+        let body = &class_def[body_start..body_end];
+        
+        // Parse fields and methods
+        let (fields, methods) = self.parse_class_body(body);
+        
+        // Generate struct
+        let mut result = format!("#[derive(Default)]\nstruct {} {{", flat_name);
+        for field in &fields {
+            let rust_field = self.to_snake_case(&field.name);
+            result.push_str(format!("\n    {}: {},", rust_field, field.type_name).as_str());
+        }
+        result.push_str("\n}\n");
+        
+        // Generate impl block
+        result.push_str(format!("impl {} {{", flat_name).as_str());
+        for method in &methods {
+            let visibility = match method.visibility {
+                Visibility::Public => "pub ",
+                Visibility::Private => "",
+            };
+            
+            // Add &self parameter for methods (Hust methods are instance methods by default)
+            let params_with_self = if method.params.is_empty() {
+                "&self".to_string()
+            } else {
+                format!("&self, {}", method.params)
+            };
+            
+            if method.ret_type == "void" || method.ret_type.is_empty() {
+                result.push_str(format!("\n    {}fn {}({}) {{", visibility, method.name, params_with_self).as_str());
+            } else {
+                result.push_str(format!("\n    {}fn {}({}) -> {} {{", visibility, method.name, params_with_self, method.ret_type).as_str());
+            }
+            
+            if let Some(body) = &method.body {
+                for line in body.lines() {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        result.push_str(format!("\n        {}", trimmed).as_str());
+                    }
+                }
+            }
+            
+            result.push_str("\n    }");
+        }
+        result.push_str("\n}\n");
+        
+        result
     }
 
     /// Pre-parse all class definitions in source.
     /// Returns a HashMap: class_name -> ClassInfo { parent, interfaces }
     /// Uses brace-depth matching to correctly handle nested braces in class bodies.
+    /// Skips nested classes (those inside other classes) - they are handled separately.
     fn extract_class_table(&self, source: &str) -> std::collections::HashMap<String, ClassInfo> {
         use regex::Regex;
         let mut table = std::collections::HashMap::new();
+        
+        // First, get nested class table to know which classes are nested
+        let nested_table = self.extract_nested_class_table(source);
+        let nested_classes: std::collections::HashSet<String> = nested_table.inner_to_outer.keys().cloned().collect();
         
         // Match class header: class Name [extends Parent] [implements I1, I2...] {
         let header_re = Regex::new(
@@ -2853,6 +2996,12 @@ impl Translator {
         
         for caps in header_re.captures_iter(source) {
             let class_name = caps[1].to_string();
+            
+            // Skip nested classes - they are handled by nested class table
+            if nested_classes.contains(&class_name) {
+                continue;
+            }
+            
             let parent = caps.get(2).map(|m| m.as_str().to_string());
             let interfaces: Vec<String> = caps.get(3)
                 .map(|m| m.as_str().split(',')
@@ -3733,6 +3882,17 @@ impl Translator {
 struct ClassInfo {
     parent: Option<String>,
     interfaces: Vec<String>,
+}
+
+/// Nested class table entry
+#[derive(Debug, Default)]
+struct NestedClassTable {
+    /// outer_class_name -> list of inner_class_names
+    outer_to_inner: std::collections::HashMap<String, Vec<String>>,
+    /// inner_class_name -> outer_class_name (reverse lookup)
+    inner_to_outer: std::collections::HashMap<String, String>,
+    /// full nested class definitions: "Outer.Inner" -> class_body
+    nested_defs: std::collections::HashMap<String, String>,
 }
 
 /// Class field representation

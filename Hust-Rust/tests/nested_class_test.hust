@@ -1,0 +1,30 @@
+// Nested Class Test
+// Test basic nested class definition and usage
+
+class Outer {
+    i32 outer_field;
+    
+    class Inner {
+        i32 inner_field;
+        
+        public i32 get_value() {
+            return self.inner_field;
+        }
+    }
+    
+    public void init() {
+        self.outer_field = 10;
+    }
+}
+
+void main() {
+    Outer o;
+    o.init();
+    
+    // Access nested class
+    Outer.Inner inner;
+    inner.inner_field = 42;
+    
+    i32 val = inner.get_value();
+    println!("Value: {}", val);
+}
