@@ -1,7 +1,7 @@
 //! Transpiler Core Module
 //! Transpiles Hust code to Rust code
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -4102,6 +4102,9 @@ impl Translator {
     fn transform_match_expressions(&self, source: &str) -> Result<String, TranspileError> {
         // Strategy: protect code blocks first, then transform, then restore
         
+        // Step 0: Check for exhaustive match (warning only, not blocking)
+        self.check_match_exhaustiveness(source)?;
+        
         // Step 1: Find and protect match branch bodies
         let (protected_source, protected_bodies) = self.extract_and_protect_match_bodies(source);
         
@@ -4112,6 +4115,197 @@ impl Translator {
         let result = self.restore_protected_bodies(&transformed, &protected_bodies);
         
         Ok(result)
+    }
+    
+    /// Check match exhaustiveness and output [Hust Note] if not exhaustive
+    /// This is a non-blocking check - compilation continues regardless
+    fn check_match_exhaustiveness(&self, source: &str) -> Result<(), TranspileError> {
+        // Parse all enum definitions
+        let enum_table = self.extract_enum_table(source);
+        
+        // Parse all match expressions and check exhaustiveness
+        let mut chars = source.chars().peekable();
+        let mut in_match = false;
+        let mut match_brace_depth = 0;
+        let mut current_match_var = String::new();
+        let mut covered_variants: HashSet<String> = HashSet::new();
+        let mut has_default = false;
+        
+        while let Some(c) = chars.next() {
+            if !in_match {
+                // Look for "match "
+                if c == 'm' {
+                    let mut word = String::from("m");
+                    while let Some(&nc) = chars.peek() {
+                        if nc.is_alphabetic() {
+                            word.push(nc);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if word == "match" {
+                        in_match = true;
+                        match_brace_depth = 0;
+                        covered_variants.clear();
+                        has_default = false;
+                        
+                        // Read the variable being matched
+                        while let Some(&nc) = chars.peek() {
+                            if nc.is_whitespace() {
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                        let mut var_name = String::new();
+                        while let Some(&nc) = chars.peek() {
+                            if nc.is_alphanumeric() || nc == '_' {
+                                var_name.push(nc);
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                        current_match_var = var_name;
+                        continue;
+                    }
+                }
+            } else {
+                // Inside match block
+                match c {
+                    '{' => {
+                        match_brace_depth += 1;
+                    }
+                    '}' => {
+                        match_brace_depth -= 1;
+                        if match_brace_depth == 0 {
+                            // End of match block, check exhaustiveness
+                            self.report_non_exhaustive_match(
+                                &current_match_var,
+                                &covered_variants,
+                                has_default,
+                                &enum_table,
+                            );
+                            in_match = false;
+                        }
+                    }
+                    _ => {
+                        // Check for enum variant patterns
+                        if c.is_uppercase() {
+                            let mut type_name = String::from(c);
+                            while let Some(&nc) = chars.peek() {
+                                if nc.is_alphanumeric() || nc == '_' {
+                                    type_name.push(nc);
+                                    chars.next();
+                                } else {
+                                    break;
+                                }
+                            }
+                            
+                            // Check if followed by .VariantName
+                            if let Some(&'.') = chars.peek() {
+                                chars.next(); // consume '.'
+                                let mut variant_name = String::new();
+                                while let Some(&nc) = chars.peek() {
+                                    if nc.is_alphanumeric() || nc == '_' {
+                                        variant_name.push(nc);
+                                        chars.next();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                
+                                // Record covered variant
+                                covered_variants.insert(format!("{}.{}", type_name, variant_name));
+                            }
+                        }
+                        
+                        // Check for default branch
+                        if c == 'd' {
+                            let mut word = String::from("d");
+                            while let Some(&nc) = chars.peek() {
+                                if nc.is_alphabetic() {
+                                    word.push(nc);
+                                    chars.next();
+                                } else {
+                                    break;
+                                }
+                            }
+                            if word == "default" {
+                                has_default = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Extract enum definitions from source
+    fn extract_enum_table(&self, source: &str) -> HashMap<String, HashSet<String>> {
+        let mut enum_table: HashMap<String, HashSet<String>> = HashMap::new();
+        let enum_regex = regex::Regex::new(r"enum\s+([A-Za-z_]\w*)\s*\{([^}]+)\}")
+            .unwrap();
+        
+        for cap in enum_regex.captures_iter(source) {
+            let enum_name = cap.get(1).unwrap().as_str().to_string();
+            let variants_str = cap.get(2).unwrap().as_str();
+            
+            let variants: HashSet<String> = variants_str
+                .split(',')
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect();
+            
+            enum_table.insert(enum_name, variants);
+        }
+        
+        enum_table
+    }
+    
+    /// Report non-exhaustive match as [Hust Note] (non-blocking)
+    fn report_non_exhaustive_match(
+        &self,
+        match_var: &str,
+        covered: &HashSet<String>,
+        has_default: bool,
+        enum_table: &HashMap<String, HashSet<String>>,
+    ) {
+        // Skip if has default branch (covers all cases)
+        if has_default {
+            return;
+        }
+        
+        // Find the type of the matched variable
+        // For now, we check if any enum type matches the covered variants
+        for (enum_name, variants) in enum_table {
+            // Check if this enum is being matched
+            let enum_prefix = format!("{}.", enum_name);
+            let is_matching_this_enum = covered.iter().any(|v| v.starts_with(&enum_prefix));
+            
+            if is_matching_this_enum {
+                // Find uncovered variants
+                let uncovered: Vec<&String> = variants
+                    .iter()
+                    .filter(|v| !covered.contains(&format!("{}.{}", enum_name, v)))
+                    .collect();
+                
+                if !uncovered.is_empty() {
+                    let uncovered_str: Vec<String> = uncovered
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                    eprintln!(
+                        "[Hust Note] match on '{}' is not exhaustive - missing variants: {}",
+                        enum_name,
+                        uncovered_str.join(", ")
+                    );
+                }
+            }
+        }
     }
     
     /// Extract match branch bodies and replace with markers

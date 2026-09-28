@@ -1,0 +1,19 @@
+// Step 7.3 Test: Exhaustive match (no warning expected)
+// This should NOT output any [Hust Note]
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Color c = Color.Red;
+    
+    // Exhaustive: all variants covered
+    match c {
+        Color.Red : println!("Red"),
+        Color.Green : println!("Green"),
+        Color.Blue : println!("Blue")
+    }
+}
