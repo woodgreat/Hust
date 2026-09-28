@@ -360,7 +360,7 @@ impl Translator {
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
             if !write_re.is_match(&masked) {
                 eprintln!(
-                    "[Hust 提醒] 第 {} 行: 变量 `{}` 声明后未赋值——使用前要先初始化，否则语言核可能报错。",
+                    "[Hust Note] line {}: variable `{}` declared but not initialized - initialize before use to avoid language-core errors.",
                     line, name
                 );
             }
@@ -1252,7 +1252,7 @@ impl Translator {
                 // For multidimensional, this needs nested braces, but we don't support that yet
                 if dims.len() > 1 {
                     // Multidimensional with non-zero init - not supported yet
-                    eprintln!("[Hust 提醒] 多维数组暂只支持 {{0}} 全零初始化");
+                    eprintln!("[Hust Note] multi-dimensional arrays only support {{0}} zero initialization");
                     format!("let mut {}: {};", var_name, dims_str)
                 } else {
                     format!("let mut {}: [{}; {}] = [{}];", var_name, type_name, dims[0], elements)
