@@ -1,0 +1,30 @@
+// Step 7.2 Test: Match with Code Blocks
+// Test match branches with multi-line code blocks
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Color c = Color.Green;
+    
+    match c {
+        Color.Red : {
+            println!("This is Red");
+            println!("Color code: #FF0000");
+        },
+        Color.Green : {
+            println!("This is Green");
+            println!("Color code: #00FF00");
+        },
+        Color.Blue : {
+            println!("This is Blue");
+            println!("Color code: #0000FF");
+        },
+        default : {
+            println!("Unknown color");
+        }
+    }
+}

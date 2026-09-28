@@ -3987,15 +3987,221 @@ impl Translator {
     }
     
     /// Transform match expressions
+    /// Protect match branch bodies from transformation
+    /// Replace { ... } with markers to prevent internal : from being transformed
+    fn protect_match_bodies(&self, source: &str) -> String {
+        let mut result = source.to_string();
+        
+        // Find match blocks and protect their bodies
+        let mut i = 0;
+        while i < result.len() {
+            // Look for match keyword
+            if let Some(match_pos) = result[i..].find("match ") {
+                let abs_match_pos = i + match_pos;
+                
+                // Find the opening brace of match block
+                if let Some(brace_pos) = result[abs_match_pos..].find('{') {
+                    let abs_brace_pos = abs_match_pos + brace_pos;
+                    
+                    // Find matching closing brace
+                    let mut depth = 1;
+                    let mut j = abs_brace_pos + 1;
+                    while j < result.len() && depth > 0 {
+                        match result.chars().nth(j) {
+                            Some('{') => depth += 1,
+                            Some('}') => depth -= 1,
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    
+                    if depth == 0 {
+                        // Extract the match block content
+                        let match_block = result[abs_brace_pos..j].to_string();
+                        
+                        // Protect code blocks inside match branches
+                        let protected_block = self.protect_code_blocks_in_match(&match_block);
+                        
+                        // Replace original with protected version
+                        result = format!("{}{}{}", &result[..abs_brace_pos], protected_block, &result[j..]);
+                        
+                        // Move past this match block
+                        i = abs_brace_pos + protected_block.len();
+                    } else {
+                        i = abs_brace_pos + 1;
+                    }
+                } else {
+                    i = abs_match_pos + 6;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        result
+    }
+    
+    /// Protect code blocks inside match branches
+    /// Replace { ... } with ###MATCH_BLOCK_N### markers
+    fn protect_code_blocks_in_match(&self, match_block: &str) -> String {
+        let mut result = String::new();
+        let mut chars = match_block.chars().peekable();
+        let mut block_count = 0;
+        
+        while let Some(c) = chars.next() {
+            if c == '{' {
+                // Check if this is a branch body (not the match block itself)
+                // Find matching closing brace
+                let mut depth = 1;
+                let mut body = String::new();
+                
+                while let Some(bc) = chars.next() {
+                    match bc {
+                        '{' => {
+                            depth += 1;
+                            body.push(bc);
+                        }
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                            body.push(bc);
+                        }
+                        _ => body.push(bc),
+                    }
+                }
+                
+                // Replace with marker
+                let marker = format!("###MATCH_BLOCK_{}###", block_count);
+                block_count += 1;
+                result.push_str(&marker);
+                
+                // Store the body for later restoration (we'll embed it)
+                // For now, just use the marker
+            } else {
+                result.push(c);
+            }
+        }
+        
+        result
+    }
+    
+    /// Restore protected match bodies
+    fn restore_match_bodies(&self, source: &str, bodies: &[(String, String)]) -> String {
+        let mut result = source.to_string();
+        
+        for (marker, body) in bodies {
+            result = result.replace(marker, &format!("{{{} }}", body));
+        }
+        
+        result
+    }
+
     /// match c { Color.Red : ..., default : ... } -> match c { Color::Red => ..., _ => ... }
     fn transform_match_expressions(&self, source: &str) -> Result<String, TranspileError> {
-        // Find match expressions and transform them
-        // This is a simplified implementation for basic match
+        // Strategy: protect code blocks first, then transform, then restore
         
-        // For now, we do a simple line-based transformation
-        // Look for patterns like: Pattern : body,
-        // And replace with: Pattern => body,
+        // Step 1: Find and protect match branch bodies
+        let (protected_source, protected_bodies) = self.extract_and_protect_match_bodies(source);
         
+        // Step 2: Transform match expressions on protected source
+        let transformed = self.transform_match_simple(&protected_source)?;
+        
+        // Step 3: Restore protected bodies
+        let result = self.restore_protected_bodies(&transformed, &protected_bodies);
+        
+        Ok(result)
+    }
+    
+    /// Extract match branch bodies and replace with markers
+    fn extract_and_protect_match_bodies(&self, source: &str) -> (String, Vec<(String, String)>) {
+        let mut result = String::new();
+        let mut bodies = Vec::new();
+        let mut chars = source.chars().peekable();
+        let mut in_match = false;
+        let mut match_brace_depth = 0;  // Track match block depth
+        let mut block_count = 0;
+        
+        while let Some(c) = chars.next() {
+            if !in_match {
+                // Look for "match "
+                if c == 'm' {
+                    let mut word = String::from("m");
+                    while let Some(&nc) = chars.peek() {
+                        if nc.is_alphabetic() {
+                            word.push(nc);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if word == "match" {
+                        in_match = true;
+                        match_brace_depth = 0;
+                        result.push_str(&word);
+                        result.push(' ');
+                        continue;
+                    } else {
+                        result.push_str(&word);
+                        continue;
+                    }
+                }
+                result.push(c);
+            } else {
+                // Inside match block
+                match c {
+                    '{' => {
+                        match_brace_depth += 1;
+                        if match_brace_depth == 2 {
+                            // This is a branch body, protect it
+                            let mut body = String::new();
+                            let mut depth = 1;
+                            
+                            while let Some(bc) = chars.next() {
+                                match bc {
+                                    '{' => {
+                                        depth += 1;
+                                        body.push(bc);
+                                    }
+                                    '}' => {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            break;
+                                        }
+                                        body.push(bc);
+                                    }
+                                    _ => body.push(bc),
+                                }
+                            }
+                            
+                            let marker = format!("###MATCH_BLOCK_{}###", block_count);
+                            block_count += 1;
+                            bodies.push((marker.clone(), body));
+                            result.push_str(&marker);
+                            // Don't increment match_brace_depth for the closing brace of this block
+                            match_brace_depth -= 1;
+                            continue;
+                        }
+                        result.push(c);
+                    }
+                    '}' => {
+                        match_brace_depth -= 1;
+                        if match_brace_depth == 0 {
+                            in_match = false;
+                        }
+                        result.push(c);
+                    }
+                    _ => result.push(c),
+                }
+            }
+        }
+        
+        (result, bodies)
+    }
+    
+    /// Simple match transformation (no code blocks to worry about)
+    fn transform_match_simple(&self, source: &str) -> Result<String, TranspileError> {
         let mut result = String::new();
         let mut in_match_block = false;
         let mut brace_depth = 0;
@@ -4030,7 +4236,6 @@ impl Translator {
                             "_".to_string()
                         } else {
                             // Transform enum access in pattern (Color.Red -> Color::Red)
-                            // Use regex to match EnumName.VariantName
                             let enum_access_regex = regex::Regex::new(r"\b([A-Z]\w*)\.([A-Z]\w*)\b")
                                 .map_err(|e| TranspileError::ParseError(e.to_string()))?;
                             enum_access_regex.replace_all(pattern, "${1}::${2}").to_string()
@@ -4058,6 +4263,18 @@ impl Translator {
         }
         
         Ok(result)
+    }
+    
+    /// Restore protected bodies
+    fn restore_protected_bodies(&self, source: &str, bodies: &[(String, String)]) -> String {
+        let mut result = source.to_string();
+        
+        for (marker, body) in bodies {
+            // Replace marker with actual body (including braces)
+            result = result.replace(marker, &format!("{{ {} }}", body));
+        }
+        
+        result
     }
 }
 
