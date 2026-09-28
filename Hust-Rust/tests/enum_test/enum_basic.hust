@@ -1,0 +1,18 @@
+// Step 7.1 Test: Basic Enum
+// Test enum definition and match expression
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Color c = Color.Red;
+    
+    match c {
+        Color.Red : println!("Red"),
+        Color.Green : println!("Green"),
+        default : println!("Other")
+    }
+}

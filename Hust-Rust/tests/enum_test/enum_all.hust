@@ -1,0 +1,37 @@
+// Step 7.1 Test: Enum All Branches
+// Test enum with all branches matched
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    // Test Red
+    Color c1 = Color.Red;
+    match c1 {
+        Color.Red : println!("Red"),
+        Color.Green : println!("Green"),
+        Color.Blue : println!("Blue"),
+        default : println!("Other")
+    }
+    
+    // Test Green
+    Color c2 = Color.Green;
+    match c2 {
+        Color.Red : println!("Red"),
+        Color.Green : println!("Green"),
+        Color.Blue : println!("Blue"),
+        default : println!("Other")
+    }
+    
+    // Test Blue
+    Color c3 = Color.Blue;
+    match c3 {
+        Color.Red : println!("Red"),
+        Color.Green : println!("Green"),
+        Color.Blue : println!("Blue"),
+        default : println!("Other")
+    }
+}

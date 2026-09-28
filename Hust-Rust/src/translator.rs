@@ -209,6 +209,18 @@ impl Translator {
         // Rust requires usize for array indexing: scores[i] -> scores[(i) as usize]
         output = self.transform_array_indices(&output)?;
 
+        // Rule 19: Transform enum definitions
+        // enum Color { Red, Green, Blue } -> enum Color { Red, Green, Blue }
+        output = self.transform_enum_definitions(&output)?;
+
+        // Rule 21: Transform match expressions (BEFORE enum value access)
+        // match c { Color.Red : ..., default : ... } -> match c { Color::Red => ..., _ => ... }
+        output = self.transform_match_expressions(&output)?;
+
+        // Rule 20: Transform enum value access (AFTER match)
+        // Color.Red -> Color::Red
+        output = self.transform_enum_value_access(&output)?;
+
         // Prepend #![recursion_limit] if deep inheritance detected
         if needs_limit {
             output = format!("#![recursion_limit = \"32767\"]\n\n{}", output);
@@ -1284,7 +1296,8 @@ impl Translator {
         // branch can tell a literal from a runtime expression)
         // NOTE: a `;` inside a string literal in the initializer would
         // truncate the capture — not seen in practice, recorded as a limit.
-        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
+        // 2026-09-28: Added custom type support (enum, class) - [A-Z]\w*
+        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
@@ -1348,7 +1361,7 @@ impl Translator {
         // use-before-assign (E0381). const form rejected at Rule 4.8.
         // Mutually exclusive with the `= value` form above (name followed by
         // `;`, not `=`).
-        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;")
+        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re_no_init.replace_all(&result, |caps: &regex::Captures| {
@@ -3906,6 +3919,146 @@ struct ClassMethod {
 enum Visibility {
     Public,
     Private,
+}
+
+/// Enum definition representation
+#[derive(Debug)]
+struct EnumDefinition {
+    name: String,
+    variants: Vec<String>,
+}
+
+/// Match branch representation
+#[derive(Debug)]
+struct MatchBranch {
+    pattern: String,
+    body: String,
+}
+
+impl Translator {
+    /// Transform enum definitions
+    /// enum Color { Red, Green, Blue } -> enum Color { Red, Green, Blue }
+    fn transform_enum_definitions(&self, source: &str) -> Result<String, TranspileError> {
+        // For now, Hust enum syntax is identical to Rust enum syntax
+        // Just validate the enum definition
+        let enum_regex = regex::Regex::new(r"enum\s+([A-Za-z_]\w*)\s*\{([^}]+)\}")
+            .map_err(|e| TranspileError::ParseError(e.to_string()))?;
+        
+        let mut result = source.to_string();
+        
+        for cap in enum_regex.captures_iter(source) {
+            let enum_name = cap.get(1).unwrap().as_str();
+            let variants_str = cap.get(2).unwrap().as_str();
+            
+            // Parse variants
+            let variants: Vec<String> = variants_str
+                .split(',')
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect();
+            
+            // Validate: variant names should be valid identifiers
+            for variant in &variants {
+                if !variant.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_') {
+                    return Err(TranspileError::TransformError(
+                        format!("Invalid enum variant name '{}' in enum '{}'", variant, enum_name)
+                    ));
+                }
+            }
+            
+            // Hust enum syntax is identical to Rust, no transformation needed
+            // Just mark it as processed (for future extensions)
+        }
+        
+        Ok(result)
+    }
+    
+    /// Transform enum value access
+    /// Color.Red -> Color::Red
+    fn transform_enum_value_access(&self, source: &str) -> Result<String, TranspileError> {
+        // Match EnumName.VariantName pattern
+        // But avoid matching method calls or field access
+        let enum_access_regex = regex::Regex::new(r"\b([A-Z]\w*)\.([A-Z]\w*)\b")
+            .map_err(|e| TranspileError::ParseError(e.to_string()))?;
+        
+        let result = enum_access_regex.replace_all(source, "${1}::${2}");
+        
+        Ok(result.to_string())
+    }
+    
+    /// Transform match expressions
+    /// match c { Color.Red : ..., default : ... } -> match c { Color::Red => ..., _ => ... }
+    fn transform_match_expressions(&self, source: &str) -> Result<String, TranspileError> {
+        // Find match expressions and transform them
+        // This is a simplified implementation for basic match
+        
+        // For now, we do a simple line-based transformation
+        // Look for patterns like: Pattern : body,
+        // And replace with: Pattern => body,
+        
+        let mut result = String::new();
+        let mut in_match_block = false;
+        let mut brace_depth = 0;
+        
+        for line in source.lines() {
+            let trimmed = line.trim();
+            
+            // Check if this line starts a match block
+            if trimmed.starts_with("match ") && trimmed.contains('{') {
+                in_match_block = true;
+                brace_depth = 1;
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+            
+            if in_match_block {
+                // Count braces
+                brace_depth += line.matches('{').count();
+                brace_depth -= line.matches('}').count();
+                
+                // Transform this line if it contains a match branch
+                let transformed_line = if trimmed.contains(':') && !trimmed.starts_with("//") {
+                    // Split on first ':' to separate pattern from body
+                    if let Some(colon_pos) = line.find(':') {
+                        let pattern = &line[..colon_pos];
+                        let body = &line[colon_pos + 1..];
+                        
+                        // Transform pattern
+                        let pattern = pattern.trim();
+                        let transformed_pattern = if pattern == "default" {
+                            "_".to_string()
+                        } else {
+                            // Transform enum access in pattern (Color.Red -> Color::Red)
+                            // Use regex to match EnumName.VariantName
+                            let enum_access_regex = regex::Regex::new(r"\b([A-Z]\w*)\.([A-Z]\w*)\b")
+                                .map_err(|e| TranspileError::ParseError(e.to_string()))?;
+                            enum_access_regex.replace_all(pattern, "${1}::${2}").to_string()
+                        };
+                        
+                        format!("{} => {}", transformed_pattern, body)
+                    } else {
+                        line.to_string()
+                    }
+                } else {
+                    line.to_string()
+                };
+                
+                result.push_str(&transformed_line);
+                result.push('\n');
+                
+                // Check if match block ends
+                if brace_depth == 0 {
+                    in_match_block = false;
+                }
+            } else {
+                result.push_str(line);
+                result.push('\n');
+            }
+        }
+        
+        Ok(result)
+    }
 }
 
 /// Main entry function
