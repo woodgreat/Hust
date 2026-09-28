@@ -863,10 +863,6 @@ impl Translator {
         
         // Build class table from source
         let class_table = self.extract_class_table(source);
-        eprintln!("DEBUG: found {} classes in source", class_table.len());
-        for (name, info) in &class_table {
-            eprintln!("DEBUG: class {} extends {:?}", name, info.parent);
-        }
         
         // For each class, build field path map
         let mut all_field_maps: std::collections::HashMap<String, std::collections::HashMap<String, String>> = std::collections::HashMap::new();
@@ -879,17 +875,10 @@ impl Translator {
         
         // If no inheritance, return early
         if all_field_maps.is_empty() {
-            eprintln!("DEBUG: no inheritance field maps found");
             return Ok(source.to_string());
         }
         
-        eprintln!("DEBUG: found {} classes with inherited fields", all_field_maps.len());
-        for (class_name, field_map) in &all_field_maps {
-            eprintln!("DEBUG: class {} has inherited fields: {:?}", class_name, field_map.keys().collect::<Vec<_>>());
-        }
-        
         let mut result = source.to_string();
-        eprintln!("DEBUG: source length: {}, first 200 chars: {:?}", result.len(), &result[..result.len().min(200)]);
         
         // For each class with inherited fields, transform obj.field -> obj.ParentChain.field
         // We need to find variable declarations of these types and transform their field accesses
@@ -905,11 +894,8 @@ impl Translator {
             if let Ok(re) = var_decl_re {
                 let result_clone = result.clone();
                 let captures: Vec<_> = re.captures_iter(&result_clone).collect();
-                eprintln!("DEBUG: pattern: {:?}", re.as_str());
-                eprintln!("DEBUG: found {} variable declarations for class {}", captures.len(), class_name);
                 for caps in captures {
                     let var_name = caps[1].to_string();
-                    eprintln!("DEBUG: transforming field access for variable: {} (type: {})", var_name, class_name);
                     
                     // Transform var.field -> var.ParentChain.field for each inherited field
                     for (field, path) in field_map {
@@ -1232,7 +1218,6 @@ impl Translator {
                 .map(|c| self.dim_expr(&c[1]))
                 .collect();
             
-            eprintln!("[DEBUG] dims_str='{}', dims={:?}, elements='{}'", dims_str, dims, elements);
             
             // Check if elements is just "0" (zero initialization)
             let is_zero_init = elements.trim() == "0";
@@ -2407,7 +2392,6 @@ impl Translator {
             let func_re = Regex::new(r"(?m)^\s*(public\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-            eprintln!("DEBUG: extracting functions from module '{}' with remaining length {}", module.name, remaining.len());
             
             for caps in func_re.captures_iter(&remaining) {
                 let is_pub = caps.get(1).is_some();
@@ -2415,7 +2399,6 @@ impl Translator {
                 let func_name = caps[3].to_string();
                 let params = caps[4].to_string();
 
-                eprintln!("DEBUG: registering function '{}' in namespace '{}'", func_name, ns_name);
                 
                 registry.register_function(FunctionInfo {
                     name: func_name,
@@ -2537,7 +2520,6 @@ impl Translator {
 
         // For each known function, replace bare calls with namespaced calls
         let mut result = all_code;
-        eprintln!("DEBUG: known_funcs = {:?}", known_funcs);
         for func_name in &known_funcs {
             // Skip main - it's the entry point
             if func_name == "main" {
@@ -2551,10 +2533,8 @@ impl Translator {
                 .map(|(_, _, f)| f.clone())
                 .unwrap_or_default();
             
-            eprintln!("DEBUG: resolving function '{}' in file '{}'", func_name, entry_file);
             
             if let Ok(Some(ns)) = registry.resolve_with_imports(func_name, &entry_file, &registry.default_space) {
-                eprintln!("DEBUG: resolved '{}' to namespace '{}'", func_name, ns);
                 if ns != registry.default_space {
                     // Replace bare calls with namespaced calls using `.` separator
                     // Match: funcName( but not: ns.funcName( or .funcName(
@@ -2566,7 +2546,6 @@ impl Translator {
                     }
                 }
             } else {
-                eprintln!("DEBUG: failed to resolve '{}'", func_name);
             }
         }
 
@@ -2671,9 +2650,6 @@ impl Translator {
                 }
             }
         }
-
-        // Phase 4: Print distribution report
-        registry.print_report();
 
         Ok(result)
     }
@@ -2819,7 +2795,6 @@ impl Translator {
     /// Supports nested classes using table-driven approach (类似继承表)
     fn transform_class_definitions(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
-        use std::collections::HashMap;
 
         // Pre-pass: extract all class definitions with brace-depth matching.
         let class_table = self.extract_class_table(source);
@@ -2827,13 +2802,9 @@ impl Translator {
         // Pre-pass: extract nested class table
         let nested_table = self.extract_nested_class_table(source);
         
-        // Debug: print nested table info
-        eprintln!("DEBUG: nested_table.outer_to_inner = {:?}", nested_table.outer_to_inner);
-        eprintln!("DEBUG: nested_table.nested_defs keys = {:?}", nested_table.nested_defs.keys().collect::<Vec<_>>());
-        
         // Remove nested class definitions from source (they'll be generated separately)
         let mut cleaned_source = source.to_string();
-        for (key, def) in &nested_table.nested_defs {
+        for (_key, def) in &nested_table.nested_defs {
             // Remove the nested class definition from its outer class body
             cleaned_source = cleaned_source.replace(def.as_str(), "");
         }

@@ -167,7 +167,7 @@ impl NamespaceRegistry {
             }
 
             // First non-comment, non-namespace line = code starts
-            if !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*") 
+            if !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
                 && !trimmed.starts_with("namespace ") {
                 break;
             }
@@ -198,7 +198,7 @@ impl NamespaceRegistry {
                 ));
             }
         }
-        
+
         self.classes
             .entry(cls.name.clone())
             .or_insert_with(Vec::new)
@@ -279,10 +279,10 @@ impl NamespaceRegistry {
         if parts.len() < 2 {
             return None;
         }
-        
+
         let outer = parts[0];
         let inner = parts[1..].join(".");
-        
+
         if let Some(classes) = self.classes.get(outer) {
             for cls in classes.iter() {
                 if cls.namespace == namespace {
@@ -340,7 +340,7 @@ impl NamespaceRegistry {
     pub fn register_system_namespaces(&mut self) {
         // RUST - Rust bridge
         self.spaces.insert("RUST".to_string(), vec!["[system]".to_string()]);
-        
+
         // HUST - Hust standard library
         self.spaces.insert("HUST".to_string(), vec!["[system]".to_string()]);
     }
@@ -351,20 +351,20 @@ impl NamespaceRegistry {
     pub fn parse_use_statements(&mut self, source: &str, file_path: &str) -> (Vec<UseStmt>, String) {
         let mut uses = Vec::new();
         let mut remaining = source.to_string();
-        
+
         for line in source.lines() {
             let trimmed = line.trim();
             if trimmed.starts_with("use ") && trimmed.ends_with(';') {
                 // Parse: use ns; / use ns.item; / use ns.*; / use ns as alias;
                 let stmt = &trimmed[4..trimmed.len() - 1];
-                
+
                 // Check for alias: use ns as alias;
                 let (ns_part, alias) = if let Some(pos) = stmt.find(" as ") {
                     (&stmt[..pos], Some(stmt[pos + 4..].trim().to_string()))
                 } else {
                     (stmt, None)
                 };
-                
+
                 // Check for system namespace: RUST-std-io.* or HUST-math
                 // System namespaces use '-' separator
                 if ns_part.contains('-') {
@@ -386,7 +386,7 @@ impl NamespaceRegistry {
                     }
                     continue;
                 }
-                
+
                 // Check for wildcard: use ns.*;
                 let (namespace, item) = if ns_part.ends_with(".*") {
                     let ns = ns_part[..ns_part.len() - 2].trim();
@@ -399,7 +399,7 @@ impl NamespaceRegistry {
                 } else {
                     (ns_part.trim().to_string(), None)  // Whole namespace
                 };
-                
+
                 if !namespace.is_empty() {
                     uses.push(UseStmt {
                         namespace,
@@ -416,53 +416,42 @@ impl NamespaceRegistry {
                 }
             }
         }
-        
+
         self.use_statements.insert(file_path.to_string(), uses.clone());
         (uses, remaining)
     }
-    
+
     /// Apply inheritance (过继) - move parent class to child's namespace
     pub fn apply_inheritance(&mut self, child_class: &str, parent_class: &str, child_ns: &str) {
         // Find parent class
         if let Some(parent_classes) = self.classes.get(parent_class) {
             // Clone parent info
             let parent_info = parent_classes[0].clone();
-            
+
             // Remove from old namespace
             if let Some(old_classes) = self.classes.get_mut(parent_class) {
                 old_classes.retain(|c| c.namespace != parent_info.namespace);
             }
-            
+
             // Add to new namespace (过继)
             let mut new_parent = parent_info.clone();
             new_parent.namespace = child_ns.to_string();
             self.register_class(new_parent);
-            
+
             self.warnings.push(format!(
                 "Class '{}' inherited by '{}' - moved to namespace '{}' (过继)",
                 parent_class, child_class, child_ns
             ));
         }
     }
-    
+
     /// Resolve with use statements - check if name is imported
     pub fn resolve_with_imports(&self, name: &str, current_file: &str, current_ns: &str) -> Result<Option<String>, NamespaceError> {
         // Check current namespace first
         if let Some(ns) = self.resolve_function(name, current_ns)? {
             return Ok(Some(ns));
         }
-        
-        // Debug: print use statements for current file
-        eprintln!("DEBUG: resolve_with_imports for '{}' in file '{}'", name, current_file);
-        if let Some(uses) = self.use_statements.get(current_file) {
-            eprintln!("DEBUG: found {} use statements", uses.len());
-            for use_stmt in uses {
-                eprintln!("DEBUG: use stmt: namespace='{}', item={:?}, alias={:?}", use_stmt.namespace, use_stmt.item, use_stmt.alias);
-            }
-        } else {
-            eprintln!("DEBUG: no use statements found for file '{}'", current_file);
-        }
-        
+
         // Check use statements
         if let Some(uses) = self.use_statements.get(current_file) {
             for use_stmt in uses {
@@ -471,80 +460,26 @@ impl NamespaceRegistry {
                     None => true,  // use ns; - imports all
                     Some(item) => item == name,  // use ns.item;
                 };
-                
-                eprintln!("DEBUG: checking use stmt: namespace='{}', item={:?}, matches={}", use_stmt.namespace, use_stmt.item, matches);
-                
+
+
                 if matches {
                     // Verify function exists in that namespace
                     if let Some(funcs) = self.functions.get(name) {
                         let in_ns: Vec<_> = funcs.iter()
                             .filter(|f| f.namespace == use_stmt.namespace)
                             .collect();
-                        eprintln!("DEBUG: function '{}' found in {} namespaces", name, in_ns.len());
                         if !in_ns.is_empty() {
                             return Ok(Some(use_stmt.namespace.clone()));
                         }
                     } else {
-                        eprintln!("DEBUG: function '{}' not found in registry", name);
                     }
                 }
             }
         }
-        
+
         Ok(None)
     }
 
-    /// Generate report of namespace distribution
-    pub fn distribution_report(&self) -> String {
-        let mut report = String::from("=== Namespace Distribution Report ===\n\n");
-
-        // Group by namespace
-        let mut ns_files: Vec<(&String, &Vec<String>)> = self.spaces.iter().collect();
-        ns_files.sort_by_key(|(k, _)| k.clone());
-
-        for (ns, files) in ns_files {
-            report.push_str(&format!("namespace \"{}\":\n", ns));
-            
-            // Count functions and classes
-            let func_count = self.functions.values()
-                .flatten()
-                .filter(|f| f.namespace == *ns)
-                .count();
-            let class_count = self.classes.values()
-                .flatten()
-                .filter(|c| c.namespace == *ns)
-                .count();
-            
-            report.push_str(&format!("  functions: {}\n", func_count));
-            report.push_str(&format!("  classes: {}\n", class_count));
-            report.push_str(&format!("  files ({}):\n", files.len()));
-            
-            for file in files {
-                // Extract just filename for readability
-                let fname = std::path::Path::new(file)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(file);
-                report.push_str(&format!("    - {}\n", fname));
-            }
-            report.push('\n');
-        }
-
-        // Warnings
-        if !self.warnings.is_empty() {
-            report.push_str("Warnings:\n");
-            for warning in &self.warnings {
-                report.push_str(&format!("  ⚠ {}\n", warning));
-            }
-        }
-
-        report
-    }
-
-    /// Print distribution report to stderr
-    pub fn print_report(&self) {
-        eprintln!("{}", self.distribution_report());
-    }
 }
 
 #[cfg(test)]
