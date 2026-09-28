@@ -96,6 +96,10 @@ impl Translator {
         // 4. Function definitions with visibility
         // 5-12. Other transformations...
 
+        // r45 (pre-Rule-1): interface-typed variable declarations must see
+        // `interface` blocks (Rule 1 turns them into traits below).
+        output = self.transform_interface_variable_declarations(&output)?;
+
         // Rule 1: Transform interface definitions to traits
         // interface Shape { public f64 area(); } -> trait Shape { fn area(&self) -> f64; }
         output = self.transform_interface_definitions(&output)?;
@@ -2717,6 +2721,185 @@ impl Translator {
         Ok(out)
     }
 
+    /// r45: interface-typed variables (dynamic dispatch), phase 1.
+    ///
+    /// `Printer(String) p = new TextPrinter();` becomes
+    /// `let mut p: Box<dyn Printer<Content = String>> = Box::new(TextPrinter::new());`
+    ///
+    /// Declared blanks must match the implementor's fill, in interface blank
+    /// declaration order (r44 machinery reused). `new InterfaceName(...)` is a
+    /// hard, teaching-oriented error. Runs BEFORE Rule 9 (variable
+    /// declarations) so the paren form is claimed first.
+    fn transform_interface_variable_declarations(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // Collect interface shapes: name -> assoc list in declaration order.
+        let iface_re = Regex::new(r"(?s)interface\s+(\w+)\s*\{(.*?)\}")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let mut shapes: HashMap<String, Vec<String>> = HashMap::new();
+        for caps in iface_re.captures_iter(source) {
+            let shape = self.parse_interface_shape(&caps[1], &caps[2])?;
+            shapes.insert(caps[1].to_string(), shape.assoc_names);
+        }
+        if shapes.is_empty() {
+            return Ok(source.to_string());
+        }
+
+        let decl_re = Regex::new(r"\b([A-Z]\w*)\s*\(([^)]*)\)\s+([a-zA-Z_]\w*)\s*=\s*new\s+([A-Z]\w*)\s*\(([^)]*)\)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        // Manual iteration so r45 teaching errors propagate (replace_all
+        // closures cannot return Result — same lesson as r44).
+        let mut result = String::with_capacity(source.len());
+        let mut last = 0;
+        // Track declared interface vars for the reassignment pass below:
+        // var name -> (interface name, declared blanks)
+        let mut iface_vars: HashMap<String, (String, Vec<String>)> = HashMap::new();
+        for caps in decl_re.captures_iter(source) {
+            let m = caps.get(0).unwrap();
+            result.push_str(&source[last..m.start()]);
+            last = m.end();
+
+            let iface_name = caps[1].to_string();
+            if !shapes.contains_key(&iface_name) {
+                // Not an interface declaration (some other paren form) —
+                // leave untouched for downstream rules.
+                result.push_str(&caps[0]);
+                continue;
+            }
+
+            let declared: Vec<String> = caps[2]
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let var_name = caps[3].to_string();
+            let impl_class = caps[4].to_string();
+            let ctor_args = caps[5].to_string();
+
+            // Use case 5: instantiating an interface is a hard error.
+            if shapes.contains_key(&impl_class) {
+                return Err(TranspileError::TransformError(format!(
+                    "interface `{}` cannot be instantiated (r45): define a class with `implements {}` and `new` that class",
+                    impl_class, impl_class
+                )));
+            }
+
+            // The implementor must actually implement this interface.
+            let impl_re = Regex::new(&format!(
+                r"class\s+{}\s+implements\s+[^{{]*\b{}",
+                regex::escape(&impl_class),
+                regex::escape(&iface_name)
+            ))
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+            if !impl_re.is_match(source) {
+                return Err(TranspileError::TransformError(format!(
+                    "class `{}` does not implement interface `{}` (r45): cannot assign to `{}(..)` variable",
+                    impl_class, iface_name, iface_name
+                )));
+            }
+
+            // Blank match: declared list vs implementor's inferred fill.
+            let assoc_list = &shapes[&iface_name];
+            if declared.len() != assoc_list.len() {
+                return Err(TranspileError::TransformError(format!(
+                    "interface `{}` has {} blank(s) ({}), but `{}` declares {} type(s) (r45)",
+                    iface_name,
+                    assoc_list.len(),
+                    assoc_list.join(", "),
+                    var_name,
+                    declared.len()
+                )));
+            }
+            let methods = self.extract_class_methods_by_name(&impl_class, source);
+            let fills = self.infer_assoc_fills(&iface_name, &methods, source);
+            for (i, (assoc, filled_ty)) in fills.iter().enumerate() {
+                if declared[i] != *filled_ty {
+                    return Err(TranspileError::TransformError(format!(
+                        "blank mismatch (r45): `{}` fills `{}` with `{}`, but variable `{}` declares `{}` (r45)",
+                        impl_class, assoc, filled_ty, var_name, declared[i]
+                    )));
+                }
+            }
+
+            iface_vars.insert(var_name.clone(), (iface_name.clone(), declared.clone()));
+
+            // Emit the dyn binding.
+            let assoc_binds: Vec<String> = assoc_list
+                .iter()
+                .enumerate()
+                .map(|(i, a)| format!("{} = {}", a, declared[i]))
+                .collect();
+            result.push_str(&format!(
+                "let mut {}: Box<dyn {}<{}>> = Box::new({}::new({}));",
+                var_name, iface_name, assoc_binds.join(", "), impl_class, ctor_args
+            ));
+        }
+        result.push_str(&source[last..]);
+
+        // Pass 2: reassignment to an interface variable.
+        // `p = new FancyPrinter();` -> `p = Box::new(FancyPrinter::new());`
+        // (blank match checked against the declaration).
+        if !iface_vars.is_empty() {
+            let reassign_re = Regex::new(r"\b([a-zA-Z_]\w*)\s*=\s*new\s+([A-Z]\w*)\s*\(([^)]*)\)\s*;")
+                .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+            let src2 = result;
+            let mut out2 = String::with_capacity(src2.len());
+            let mut last2 = 0;
+            for caps in reassign_re.captures_iter(&src2) {
+                let var_name = &caps[1];
+                let Some((iface_name, declared)) = iface_vars.get(var_name) else {
+                    continue; // not an interface variable — leave for other rules
+                };
+                let m = caps.get(0).unwrap();
+                out2.push_str(&src2[last2..m.start()]);
+                last2 = m.end();
+
+                let impl_class = caps[2].to_string();
+                let ctor_args = caps[3].to_string();
+
+                if shapes.contains_key(&impl_class) {
+                    return Err(TranspileError::TransformError(format!(
+                        "interface `{}` cannot be instantiated (r45): define a class with `implements {}` and `new` that class",
+                        impl_class, impl_class
+                    )));
+                }
+                let impl_re = Regex::new(&format!(
+                    r"class\s+{}\s+implements\s+[^{{]*\b{}",
+                    regex::escape(&impl_class),
+                    regex::escape(iface_name)
+                ))
+                .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                if !impl_re.is_match(source) {
+                    return Err(TranspileError::TransformError(format!(
+                        "class `{}` does not implement interface `{}` (r45)",
+                        impl_class, iface_name
+                    )));
+                }
+                let assoc_list = &shapes[iface_name];
+                let methods = self.extract_class_methods_by_name(&impl_class, source);
+                let fills = self.infer_assoc_fills(iface_name, &methods, source);
+                for (i, (assoc, filled_ty)) in fills.iter().enumerate() {
+                    if declared[i] != *filled_ty {
+                        return Err(TranspileError::TransformError(format!(
+                            "blank mismatch (r45): `{}` fills `{}` with `{}`, but variable `{}` declares `{}`",
+                            impl_class, assoc, filled_ty, var_name, declared[i]
+                        )));
+                    }
+                }
+                let _ = assoc_list;
+                out2.push_str(&format!(
+                    "{} = Box::new({}::new({}));",
+                    var_name, impl_class, ctor_args
+                ));
+            }
+            out2.push_str(&src2[last2..]);
+            result = out2;
+        }
+
+        Ok(result)
+    }
+
     /// r44: parse an interface body into its shape. Any concrete (non-void)
     /// type in a parameter or return position is a hard error with guidance,
     /// per the biconditional classification law: untyped ⇔ interface.
@@ -3803,6 +3986,8 @@ impl Translator {
 
         // The trait body (post-Rule-1) is the single source of truth.
         // (`trait` form: this runs after transform_interface_definitions.)
+        // r45 callers run PRE-Rule-1 (interface form still present) — fall
+        // back to deriving the trait from the interface declaration.
         let if_re = Regex::new(&format!(
             r"(?m)^\s*trait\s+{}\s*\{{([^}}]+)\}}",
             regex::escape(interface_name)
@@ -3810,7 +3995,28 @@ impl Translator {
         .unwrap();
         let trait_body = match if_re.captures(source) {
             Some(c) => c[1].to_string(),
-            None => return Vec::new(),
+            None => {
+                let iface_re = Regex::new(&format!(
+                    r"(?s)interface\s+{}\s*\{{(.*?)\}}",
+                    regex::escape(interface_name)
+                ))
+                .unwrap();
+                let Some(c) = iface_re.captures(source) else {
+                    return Vec::new();
+                };
+                let Ok(shape) = self.parse_interface_shape(interface_name, &c[1]) else {
+                    return Vec::new();
+                };
+                let trait_src = format!(
+                    "trait {} {{{}\n}}",
+                    interface_name,
+                    self.shape_to_trait(&shape)
+                );
+                match if_re.captures(&trait_src) {
+                    Some(c2) => c2[1].to_string(),
+                    None => return Vec::new(),
+                }
+            }
         };
 
         // Assoc declarations: `type Item;`
