@@ -110,6 +110,10 @@ impl Translator {
         // enforced here because generate_trait_impl returns String)
         self.check_interface_impl_visibility(&output)?;
 
+        // r45 phase 2 (pre-Rule-2): interface-typed function params/returns,
+        // call-site Box wrapping. Class decls must still be present.
+        output = self.transform_interface_function_signatures(&output)?;
+
         // Rule 2: Transform class definitions
         // class Point { i32 x; public i32 getX() { return self.x; } }
         // -> struct Point { x: i32 } impl Point { fn get_x(&self) -> i32 { self.x } }
@@ -225,12 +229,65 @@ impl Translator {
         // Color.Red -> Color::Red
         output = self.transform_enum_value_access(&output)?;
 
+        // r45 phase 2: mop up bare `new X(...)` expressions (return values,
+        // call arguments) that Rule 13's declaration-form pattern misses.
+        // Runs after Rule 13: declaration-form news are already `X::new`,
+        // only expression-position `new` survives. Skips string literals.
+        output = self.transform_bare_new_expressions(&output)?;
+
         // Prepend #![recursion_limit] if deep inheritance detected
         if needs_limit {
             output = format!("#![recursion_limit = \"32767\"]\n\n{}", output);
         }
 
         Ok(output)
+    }
+
+    /// r45 phase 2: translate expression-position `new X(args)` to
+    /// `X::new(args)`. Rule 13 only claims declaration form
+    /// (`X x = new X(args);`); returns and call arguments were left as bare
+    /// `new` reaching rustc. String literals are skipped (quote-state scan).
+    fn transform_bare_new_expressions(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        // `new X(`. Skip matches preceded by ':' (already-translated
+        // `X::new(` forms, incl. r45's own `Box::new(X::new(...))`).
+        let re = Regex::new(r"new\s+([A-Z]\w*)\s*\(")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let mut out = String::with_capacity(source.len());
+        let bytes = source.as_bytes();
+        let mut in_str = false;
+        let mut prev = 0;
+        for m in re.find_iter(source) {
+            // quote-state scan from prev to m.start()
+            let seg = &source.as_bytes()[prev..m.start()];
+            for (k, &b) in seg.iter().enumerate() {
+                if b == b'"' {
+                    let mut backslashes = 0;
+                    let mut j = k;
+                    while j > 0 && seg[j - 1] == b'\\' {
+                        backslashes += 1;
+                        j -= 1;
+                    }
+                    if backslashes % 2 == 0 {
+                        in_str = !in_str;
+                    }
+                }
+            }
+            if in_str {
+                continue; // inside a string literal — leave as-is
+            }
+            // Skip `::new(` (already translated)
+            if m.start() > 0 && bytes[m.start() - 1] == b':' {
+                continue;
+            }
+            let caps = re.captures(&source[m.start()..]).unwrap();
+            out.push_str(&source[prev..m.start()]);
+            out.push_str(&format!("{}::new(", &caps[1]));
+            prev = m.end();
+        }
+        out.push_str(&source[prev..]);
+        Ok(out)
     }
 
     /// Compute maximum inheritance depth in source.
@@ -1391,6 +1448,381 @@ impl Translator {
         });
 
         Ok(result.to_string())
+    }
+
+    /// r45 phase 2 helper: extract assoc-type names (declaration order) per
+    /// trait from post-Rule-1 source (`type X;` lines inside `trait N { .. }`).
+    fn extract_trait_assocs(&self, source: &str) -> HashMap<String, Vec<String>> {
+        use regex::Regex;
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        let head_re = Regex::new(r"(?m)^\s*trait\s+([A-Za-z_]\w*)[^{;]*\{").unwrap();
+        let type_re = Regex::new(r"(?m)type\s+([A-Za-z_]\w*)\s*;").unwrap();
+        let bytes = source.as_bytes();
+        for caps in head_re.captures_iter(source) {
+            let name = caps[1].to_string();
+            let mut depth = 0i32;
+            let mut i = caps.get(0).unwrap().end() - 1;
+            let mut end = bytes.len();
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = i;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            let body = &source[caps.get(0).unwrap().end()..end];
+            let assocs: Vec<String> = type_re
+                .captures_iter(body)
+                .map(|c| c[1].to_string())
+                .collect();
+            if !assocs.is_empty() {
+                map.insert(name, assocs);
+            }
+        }
+        map
+    }
+
+    /// Render `Iface(T1, T2)` as a `Box<dyn Iface<A1 = T1, A2 = T2>>` type.
+    /// Returns None when name is not a known interface (leave for others).
+    fn render_dyn_type(
+        &self,
+        name: &str,
+        blanks: &[String],
+        assocs: &HashMap<String, Vec<String>>,
+    ) -> Option<String> {
+        let assoc_list = assocs.get(name)?;
+        if blanks.len() != assoc_list.len() {
+            return Some(format!(
+                "compile_error!(\"interface `{}` has {} blank(s) ({}), but {} type(s) given (r45)\")",
+                name,
+                assoc_list.len(),
+                assoc_list.join(", "),
+                blanks.len()
+            ));
+        }
+        let binds: Vec<String> = assoc_list
+            .iter()
+            .enumerate()
+            .map(|(i, a)| format!("{} = {}", a, blanks[i]))
+            .collect();
+        Some(format!("Box<dyn {}<{}>>", name, binds.join(", ")))
+    }
+
+    /// r45 phase 2: transform interface-typed function params/returns.
+    ///
+    /// `void feed(Printer(String) p) {` -> `fn feed(p: Box<dyn ...>) {`
+    /// `Printer(String) makePrinter() {` -> `fn makePrinter() -> Box<dyn ...> {`
+    /// Inside interface-returning functions, `return new X(...);` is wrapped
+    /// as `return Box::new(new X(...));` (Rule 13 translates the inner new).
+    /// Position: AFTER Rule 1 (trait form, assoc extraction works) and BEFORE
+    /// Rule 2 (class declarations still present — needed for implements
+    /// checks and method-signature fill inference). Class bodies are masked
+    /// during matching so class methods don't match the free-function
+    /// signature pattern; all slices are taken from the original source
+    /// (masking is length-preserving, so coordinates line up).
+    fn transform_interface_function_signatures(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        let masked = mask_class_bodies(source);
+        let assocs = self.extract_trait_assocs(source);
+        if assocs.is_empty() {
+            return Ok(source.to_string());
+        }
+
+        // Param group allows one level of nesting (interface blanks like
+        // `Printer(String)` inside the parameter list).
+        let re = Regex::new(r"(?m)^[ \t]*((?:pub|public)[ \t]+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let paren_re = Regex::new(r"^([A-Z]\w*)\s*\(([^)]*)\)$").unwrap();
+
+        let mut result = String::with_capacity(source.len());
+        let mut last = 0;
+        // r45 phase 2: func name -> per-position interface blanks
+        // (None = ordinary parameter) for call-site Box wrapping.
+        let mut iface_params: HashMap<String, Vec<Option<(String, Vec<String>)>>> = HashMap::new();
+        for caps in re.captures_iter(&masked) {
+            let m = caps.get(0).unwrap();
+            result.push_str(&source[last..m.start()]);
+
+            let is_pub = caps.get(1).is_some();
+            let ret_word = caps[2].to_string();
+            let func_name = caps[3].to_string();
+            let params = caps[4].to_string();
+
+            // Parameters: interface-typed ones become Box<dyn ..>.
+            // Parameters: interface-typed ones become Box<dyn ..>.
+            // Split on top-level commas only — interface blanks contain
+            // their own commas (`Container(i32, i32, i32) c`).
+            let mut param_pieces: Vec<String> = Vec::new();
+            {
+                let mut d = 0i32;
+                let mut seg_start = 0;
+                for (idx, ch) in params.char_indices() {
+                    match ch {
+                        '(' | '[' | '{' => d += 1,
+                        ')' | ']' | '}' => d -= 1,
+                        ',' if d == 0 => {
+                            param_pieces.push(params[seg_start..idx].trim().to_string());
+                            seg_start = idx + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                let tail = params[seg_start..].trim().to_string();
+                if !tail.is_empty() {
+                    param_pieces.push(tail);
+                }
+            }
+            let param_re = Regex::new(
+                r"^([A-Za-z_]\w*(?:[ \t]*\([^()]*\))?)[ \t]+([a-zA-Z_]\w*)$"
+            )
+            .unwrap();
+            let mut transformed_params = Vec::new();
+            let mut iface_param_map: Vec<Option<(String, Vec<String>)>> = Vec::new();
+            for param in param_pieces.iter().map(|s| s.as_str()) {
+                let param = param.trim();
+                if param.is_empty() {
+                    continue;
+                }
+                if let Some(pw) = param_re.captures(param) {
+                    let type_word = pw[1].trim();
+                    let var_word = pw[2].trim();
+                    if let Some(pc) = paren_re.captures(type_word) {
+                        let blanks: Vec<String> = pc[2]
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        match self.render_dyn_type(&pc[1], &blanks, &assocs) {
+                            Some(dyn_ty) => {
+                                transformed_params
+                                    .push(format!("mut {}: {}", var_word, dyn_ty));
+                                iface_param_map.push(Some((pc[1].to_string(), blanks)));
+                            }
+                            None => {
+                                transformed_params
+                                    .push(format!("{}: {}", var_word, type_word));
+                                iface_param_map.push(None);
+                            }
+                        }
+                        continue;
+                    }
+                    transformed_params.push(format!("{}: {}", var_word, type_word));
+                    iface_param_map.push(None);
+                } else {
+                    transformed_params.push(param.to_string());
+                    iface_param_map.push(None);
+                }
+            }
+            iface_params.insert(func_name.clone(), iface_param_map);
+
+            // Return type: interface paren form -> Box<dyn ..>
+            let (ret_rust, ret_is_iface) = if let Some(rc) = paren_re.captures(&ret_word) {
+                let blanks: Vec<String> = rc[2]
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                match self.render_dyn_type(&rc[1], &blanks, &assocs) {
+                    Some(dyn_ty) => (dyn_ty, true),
+                    None => (ret_word.clone(), false),
+                }
+            } else {
+                (ret_word.clone(), false)
+            };
+
+            let vis = if is_pub { "pub " } else { "" };
+            let sig = if ret_word == "void" {
+                format!("{}fn {}({}) {{", vis, func_name, transformed_params.join(", "))
+            } else {
+                format!(
+                    "{}fn {}({}) -> {} {{",
+                    vis,
+                    func_name,
+                    transformed_params.join(", "),
+                    ret_rust
+                )
+            };
+            result.push_str(&sig);
+
+            // Interface-returning body: wrap `return new X(..);`.
+            if ret_is_iface {
+                let mut depth = 1i32;
+                let mut i = m.end();
+                let bytes = source.as_bytes();
+                let mut body_end = bytes.len();
+                while i < bytes.len() {
+                    match bytes[i] {
+                        b'{' => depth += 1,
+                        b'}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                body_end = i;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                let body = &source[m.end()..body_end];
+                let ret_new_re =
+                    Regex::new(r"return\s+new\s+([A-Z]\w*)\s*\(([^;]*)\);").unwrap();
+                let new_body = ret_new_re
+                    .replace_all(body, "return Box::new(new $1($2));")
+                    .to_string();
+                result.push_str(&new_body);
+                last = body_end;
+            } else {
+                last = m.end();
+            }
+        }
+        result.push_str(&source[last..]);
+
+        // r45 phase 2: call-site wrapping. `feed(new X(args))` where feed's
+        // corresponding parameter is interface-typed becomes
+        // `feed(Box::new(new X(args)))` (bare-new mop-up translates the
+        // inner new later). Blank match checked in Hust terms.
+        if !iface_params.is_empty() {
+            let bytes = result.as_bytes();
+            let mut out = String::with_capacity(result.len());
+            let mut prev = 0;
+            let mut i = 0;
+            while i < bytes.len() {
+                // scan identifier
+                if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+                    let start = i;
+                    while i < bytes.len()
+                        && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_')
+                    {
+                        i += 1;
+                    }
+                    let name = &result[start..i];
+                    let Some(param_map) = iface_params.get(name) else {
+                        continue;
+                    };
+                    // skip whitespace, expect '('
+                    let mut j = i;
+                    while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                        j += 1;
+                    }
+                    if j >= bytes.len() || bytes[j] != b'(' {
+                        continue;
+                    }
+                    // method call? previous non-ws char before name must not be '.'
+                    let mut k = start;
+                    while k > 0 && (bytes[k - 1] == b' ' || bytes[k - 1] == b'\t') {
+                        k -= 1;
+                    }
+                    if k > 0 && bytes[k - 1] == b'.' {
+                        i = j + 1;
+                        continue;
+                    }
+                    // find matching close paren
+                    let open = j;
+                    let mut depth = 0i32;
+                    let mut p = open;
+                    let mut close = bytes.len();
+                    while p < bytes.len() {
+                        match bytes[p] {
+                            b'(' => depth += 1,
+                            b')' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    close = p;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        p += 1;
+                    }
+                    if close >= bytes.len() {
+                        break;
+                    }
+                    let inner = &result[open + 1..close];
+                    // split top-level commas
+                    let mut args: Vec<String> = Vec::new();
+                    let mut d = 0i32;
+                    let mut arg_start = 0;
+                    for (idx, ch) in inner.char_indices() {
+                        match ch {
+                            '(' | '[' | '{' => d += 1,
+                            ')' | ']' | '}' => d -= 1,
+                            ',' if d == 0 => {
+                                args.push(inner[arg_start..idx].trim().to_string());
+                                arg_start = idx + 1;
+                            }
+                            _ => {}
+                        }
+                    }
+                    let tail = inner[arg_start..].trim().to_string();
+                    if !tail.is_empty() {
+                        args.push(tail);
+                    }
+                    if args.len() != param_map.len() {
+                        i = close + 1;
+                        continue; // arity mismatch — not this overload shape
+                    }
+                    let new_arg_re = Regex::new(r"^new\s+([A-Z]\w*)\s*\((.*)\)$").unwrap();
+                    let mut changed = false;
+                    for (pos, arg) in args.iter_mut().enumerate() {
+                        let Some((iface_name, blanks)) = &param_map[pos] else {
+                            continue;
+                        };
+                        let Some(ac) = new_arg_re.captures(arg) else {
+                            continue;
+                        };
+                        let impl_class = ac[1].to_string();
+                        // blank match check
+                        let impl_re = Regex::new(&format!(
+                            r"class\s+{}\s+implements\s+[^{{]*\b{}",
+                            regex::escape(&impl_class),
+                            regex::escape(iface_name)
+                        ))
+                        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                        if !impl_re.is_match(source) {
+                            return Err(TranspileError::TransformError(format!(
+                                "class `{}` does not implement interface `{}` (r45)",
+                                impl_class, iface_name
+                            )));
+                        }
+                        let methods = self.extract_class_methods_by_name(&impl_class, source);
+                        let fills = self.infer_assoc_fills(iface_name, &methods, source);
+                        for (bi, (assoc, filled_ty)) in fills.iter().enumerate() {
+                            if blanks[bi] != *filled_ty {
+                                return Err(TranspileError::TransformError(format!(
+                                    "blank mismatch (r45): `{}` fills `{}` with `{}`, but parameter {} of `{}` declares `{}`",
+                                    impl_class, assoc, filled_ty, pos + 1, name, blanks[bi]
+                                )));
+                            }
+                        }
+                        *arg = format!("Box::new({})", arg);
+                        changed = true;
+                    }
+                    if changed {
+                        out.push_str(&result[prev..open + 1]);
+                        out.push_str(&args.join(", "));
+                        prev = close;
+                    }
+                    i = close + 1;
+                    continue;
+                }
+                i += 1;
+            }
+            out.push_str(&result[prev..]);
+            result = out;
+        }
+
+        Ok(result)
     }
 
     /// V0.5: Transform function definitions with return types and visibility
@@ -2748,6 +3180,33 @@ impl Translator {
         let decl_re = Regex::new(r"\b([A-Z]\w*)\s*\(([^)]*)\)\s+([a-zA-Z_]\w*)\s*=\s*new\s+([A-Z]\w*)\s*\(([^)]*)\)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
+        // r45 phase 2: functions returning an interface
+        // (`Printer(String) makePrinter() {`) — calls to them may be
+        // assigned to interface variables without `new`.
+        let ret_iface_re = Regex::new(r"(?m)^\s*(?:pub|public\s+)?([A-Z]\w*)\s*\(([^)]*)\)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let mut iface_returning_funcs: HashMap<String, (String, Vec<String>)> = HashMap::new();
+        for caps in ret_iface_re.captures_iter(source) {
+            if !shapes.contains_key(&caps[1]) {
+                continue;
+            }
+            let blanks: Vec<String> = caps[2]
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let assoc_list = &shapes[&caps[1]];
+            if blanks.len() != assoc_list.len() {
+                return Err(TranspileError::TransformError(format!(
+                    "interface `{}` has {} blank(s) ({}), but function `{}` returns {} type(s) (r45)",
+                    &caps[1], assoc_list.len(), assoc_list.join(", "),
+                    &caps[3], blanks.len()
+                )));
+            }
+            iface_returning_funcs
+                .insert(caps[3].to_string(), (caps[1].to_string(), blanks));
+        }
+
         // Manual iteration so r45 teaching errors propagate (replace_all
         // closures cannot return Result — same lesson as r44).
         let mut result = String::with_capacity(source.len());
@@ -2837,7 +3296,56 @@ impl Translator {
         }
         result.push_str(&source[last..]);
 
-        // Pass 2: reassignment to an interface variable.
+        // Pass 1b: interface variable assigned from an interface-returning
+        // function call: `Printer(String) p = makePrinter();`
+        if !iface_returning_funcs.is_empty() {
+            let call_decl_re = Regex::new(r"\b([A-Z]\w*)\s*\(([^)]*)\)\s+([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*;")
+                .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+            let src1 = result;
+            let mut out1 = String::with_capacity(src1.len());
+            let mut last1 = 0;
+            for caps in call_decl_re.captures_iter(&src1) {
+                let iface_name = caps[1].to_string();
+                if !shapes.contains_key(&iface_name) {
+                    continue;
+                }
+                let declared: Vec<String> = caps[2]
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let var_name = caps[3].to_string();
+                let func_name = caps[4].to_string();
+                let call_args = caps[5].to_string();
+                let Some((ret_iface, ret_blanks)) = iface_returning_funcs.get(&func_name) else {
+                    continue;
+                };
+                // Blank match: declaration vs the function's return blanks.
+                if declared != *ret_blanks {
+                    return Err(TranspileError::TransformError(format!(
+                        "blank mismatch (r45): function `{}` returns `{}({}), but variable `{}` declares `{}({})`",
+                        func_name, ret_iface, ret_blanks.join(", "),
+                        var_name, iface_name, declared.join(", ")
+                    )));
+                }
+                let m = caps.get(0).unwrap();
+                out1.push_str(&src1[last1..m.start()]);
+                last1 = m.end();
+                let assoc_list = &shapes[&iface_name];
+                let binds: Vec<String> = assoc_list
+                    .iter()
+                    .enumerate()
+                    .map(|(i, a)| format!("{} = {}", a, declared[i]))
+                    .collect();
+                out1.push_str(&format!(
+                    "let mut {}: Box<dyn {}<{}>> = {}({});",
+                    var_name, iface_name, binds.join(", "), func_name, call_args
+                ));
+                iface_vars.insert(var_name.clone(), (iface_name, declared));
+            }
+            out1.push_str(&src1[last1..]);
+            result = out1;
+        }
         // `p = new FancyPrinter();` -> `p = Box::new(FancyPrinter::new());`
         // (blank match checked against the declaration).
         if !iface_vars.is_empty() {
