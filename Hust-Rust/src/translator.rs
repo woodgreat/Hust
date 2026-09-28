@@ -114,6 +114,15 @@ impl Translator {
         // call-site Box wrapping. Class decls must still be present.
         output = self.transform_interface_function_signatures(&output)?;
 
+        // r45 phase 3c (pre-Rule-2): class methods with interface
+        // params/returns — swap type words for self-describing placeholders
+        // (`__hdyn_Iface_T1_T2`); Rule 2 transports them, decoded post-Rule-2.
+        let (rewritten, _ph) = self.rewrite_class_method_interface_types(
+            &output,
+            &self.extract_trait_assocs(&output),
+        )?;
+        output = rewritten;
+
         // Rule 2: Transform class definitions
         // class Point { i32 x; public i32 getX() { return self.x; } }
         // -> struct Point { x: i32 } impl Point { fn get_x(&self) -> i32 { self.x } }
@@ -159,6 +168,10 @@ impl Translator {
         // Rule 7: Transform dynamic array declaration
         output = self.transform_dynamic_array_decl(&output)?;
 
+        // r45 phase 3a: dynamic arrays of interface type (polymorphic
+        // containers, dyn-only by design)
+        output = self.transform_interface_array_declarations(&output)?;
+
         // Rule 7.5: `x.push([])` pushes an empty (nested) dynamic array —
         // how a row is created for Vec<Vec<T>> (2026.09.09)
         output = self.translate_empty_push(&output)?;
@@ -193,6 +206,10 @@ impl Translator {
 
         // Rule 12: Transform pass to ()
         output = self.transform_pass(&output)?;
+
+        // r45 phase 3c (post-Rule-2): decode `__hdyn_Iface_T1_T2`
+        // placeholders in impl blocks into Box<dyn ...>.
+        output = self.replace_dyn_placeholders(&output)?;
 
         // Rule 13: Transform class instantiation
         // ClassName var; -> let mut var: ClassName = ClassName { ... };
@@ -1536,12 +1553,129 @@ impl Translator {
             return Ok(source.to_string());
         }
 
+        // r45 phase 3a: interface dynamic-array declarations (`Iface(T)[] v;`),
+        // still in Hust form here (Rule 7 runs later). Receiver -> blanks map
+        // for `.push(new X())` wrapping below.
+        let arr_re = Regex::new(r"\b([A-Z]\w*)\s*\(([^)]*)\)[ \t]*\[\][ \t]*([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*;")
+            .unwrap();
+        let mut iface_arrays: HashMap<String, (String, Vec<String>)> = HashMap::new();
+        for caps in arr_re.captures_iter(source) {
+            if !assocs.contains_key(&caps[1]) {
+                continue;
+            }
+            let blanks: Vec<String> = caps[2]
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            iface_arrays.insert(caps[3].to_string(), (caps[1].to_string(), blanks));
+        }
+
         // Param group allows one level of nesting (interface blanks like
         // `Printer(String)` inside the parameter list).
         let re = Regex::new(r"(?m)^[ \t]*((?:pub|public)[ \t]+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let paren_re = Regex::new(r"^([A-Z]\w*)\s*\(([^)]*)\)$").unwrap();
+
+        // r45 phase 3b: class-variable table for upcast arguments
+        // (`feed(tp);` where tp is a TextPrinter).
+        let class_var_re = Regex::new(r"\b([A-Z]\w*)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*=[ \t]*new\s+")
+            .unwrap();
+        let mut class_vars: HashMap<String, String> = HashMap::new();
+        for caps in class_var_re.captures_iter(source) {
+            if !assocs.contains_key(&caps[1]) {
+                class_vars.insert(caps[2].to_string(), caps[1].to_string());
+            }
+        }
+
+        // shared parameter-piece pattern (type word may contain one
+        // paren group: `Container(i32, i32, i32) c`).
+        let param_re = Regex::new(
+            r"^([A-Za-z_]\w*(?:[ \t]*\([^()]*\))?)[ \t]+([a-zA-Z_]\w*)$"
+        )
+        .unwrap();
+
+        // r45 phase 3c-pre: class-method interface-param table, for
+        // method-call-site wrapping (`n.notify(new X(), 1)`).
+        let meth_head_re = Regex::new(r"\b(?:class)\s+\w+[^{;]*\{").unwrap();
+        let mut class_spans: Vec<(usize, usize)> = Vec::new();
+        {
+            let mut depth = 0i32;
+            for m in meth_head_re.find_iter(source) {
+                let mut d2 = 0i32;
+                let mut i2 = m.end() - 1;
+                let mut e2 = source.len();
+                let b2 = source.as_bytes();
+                while i2 < b2.len() {
+                    match b2[i2] {
+                        b'{' => d2 += 1,
+                        b'}' => {
+                            d2 -= 1;
+                            if d2 == 0 {
+                                e2 = i2 + 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    i2 += 1;
+                }
+                class_spans.push((m.start(), e2));
+            }
+        }
+        let _ = &mut class_spans;
+        let meth_re = Regex::new(
+            r"(?m)^[ \t]*(public[ \t]+)?(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+(\w+)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{",
+        )
+        .unwrap();
+        let mut iface_method_params: HashMap<String, Vec<Option<(String, Vec<String>)>>> =
+            HashMap::new();
+        for m in meth_re.find_iter(source) {
+            if !class_spans.iter().any(|(s, e)| m.start() >= *s && m.end() <= *e) {
+                continue;
+            }
+            let caps = meth_re.captures(&source[m.start()..]).unwrap();
+            let params = caps[4].to_string();
+            let mut pmap: Vec<Option<(String, Vec<String>)>> = Vec::new();
+            let mut d = 0i32;
+            let mut seg_start = 0;
+            let mut pieces: Vec<(usize, usize)> = Vec::new();
+            for (idx, ch) in params.char_indices() {
+                match ch {
+                    '(' | '[' | '{' => d += 1,
+                    ')' | ']' | '}' => d -= 1,
+                    ',' if d == 0 => {
+                        pieces.push((seg_start, idx));
+                        seg_start = idx + 1;
+                    }
+                    _ => {}
+                }
+            }
+            pieces.push((seg_start, params.len()));
+            for (ps, pe) in pieces {
+                let piece = params[ps..pe].trim();
+                if piece.is_empty() {
+                    continue;
+                }
+                if let Some(pw) = param_re.captures(piece) {
+                    let tw = pw[1].trim();
+                    if let Some(pc) = paren_re.captures(tw) {
+                        if assocs.contains_key(&pc[1]) {
+                            let blanks: Vec<String> = pc[2]
+                                .split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            pmap.push(Some((pc[1].to_string(), blanks)));
+                            continue;
+                        }
+                    }
+                }
+                pmap.push(None);
+            }
+            iface_method_params.insert(caps[3].to_string(), pmap);
+        }
 
         let mut result = String::with_capacity(source.len());
         let mut last = 0;
@@ -1581,10 +1715,6 @@ impl Translator {
                     param_pieces.push(tail);
                 }
             }
-            let param_re = Regex::new(
-                r"^([A-Za-z_]\w*(?:[ \t]*\([^()]*\))?)[ \t]+([a-zA-Z_]\w*)$"
-            )
-            .unwrap();
             let mut transformed_params = Vec::new();
             let mut iface_param_map: Vec<Option<(String, Vec<String>)>> = Vec::new();
             for param in param_pieces.iter().map(|s| s.as_str()) {
@@ -1706,23 +1836,293 @@ impl Translator {
                         i += 1;
                     }
                     let name = &result[start..i];
-                    let Some(param_map) = iface_params.get(name) else {
-                        continue;
-                    };
+                    // Free-function call path: name must be a known interface-param
+                    // function AND be followed by '('. Otherwise fall through
+                    // to the receiver.push( path below.
+                    let is_free_iface_fn = iface_params.contains_key(name);
                     // skip whitespace, expect '('
                     let mut j = i;
                     while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
                         j += 1;
                     }
-                    if j >= bytes.len() || bytes[j] != b'(' {
+                    let next_is_paren = j < bytes.len() && bytes[j] == b'(';
+                    // receiver.method( path: `name` is followed by `.`.
+                    if !is_free_iface_fn || !next_is_paren {
+                        // expect: ws* '.' ws* identifier ws* '('
+                        let mut j2 = j;
+                        if j2 < bytes.len() && bytes[j2] == b'.' {
+                            j2 += 1;
+                            while j2 < bytes.len()
+                                && (bytes[j2] == b' ' || bytes[j2] == b'\t')
+                            {
+                                j2 += 1;
+                            }
+                            let mstart = j2;
+                            while j2 < bytes.len()
+                                && (bytes[j2].is_ascii_alphanumeric() || bytes[j2] == b'_')
+                            {
+                                j2 += 1;
+                            }
+                            let method = &result[mstart..j2];
+                            while j2 < bytes.len()
+                                && (bytes[j2] == b' ' || bytes[j2] == b'\t')
+                            {
+                                j2 += 1;
+                            }
+                            if j2 < bytes.len() && bytes[j2] == b'(' {
+                                // find matching close paren
+                                let open_j = j2;
+                                let mut depth_j = 0i32;
+                                let mut p_j = open_j;
+                                let mut close_j = bytes.len();
+                                while p_j < bytes.len() {
+                                    match bytes[p_j] {
+                                        b'(' => depth_j += 1,
+                                        b')' => {
+                                            depth_j -= 1;
+                                            if depth_j == 0 {
+                                                close_j = p_j;
+                                                break;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                    p_j += 1;
+                                }
+                                if close_j < bytes.len() {
+                                    let inner = &result[open_j + 1..close_j];
+                                    // Case A: interface-array push
+                                    if method == "push"
+                                        && iface_arrays.contains_key(name)
+                                    {
+                                        if let Some((arr_iface, arr_blanks)) =
+                                            iface_arrays.get(name)
+                                        {
+                                            let new_arg_re = Regex::new(
+                                                r"^new\s+([A-Z]\w*)\s*\((.*)\)$"
+                                            )
+                                            .unwrap();
+                                            if let Some(ac) =
+                                                new_arg_re.captures(inner.trim())
+                                            {
+                                                let impl_class = ac[1].to_string();
+                                                let impl_re = Regex::new(&format!(
+                                                    r"class\s+{}\s+implements\s+[^{{]*\b{}",
+                                                    regex::escape(&impl_class),
+                                                    regex::escape(arr_iface)
+                                                ))
+                                                .map_err(|e| {
+                                                    TranspileError::TransformError(e.to_string())
+                                                })?;
+                                                if !impl_re.is_match(source) {
+                                                    return Err(
+                                                        TranspileError::TransformError(format!(
+                                                            "class `{}` does not implement interface `{}` (r45)",
+                                                            impl_class, arr_iface
+                                                        )),
+                                                    );
+                                                }
+                                                let methods = self
+                                                    .extract_class_methods_by_name(
+                                                        &impl_class, source,
+                                                    );
+                                                let fills = self.infer_assoc_fills(
+                                                    arr_iface, &methods, source,
+                                                );
+                                                for (bi, (assoc, filled_ty)) in
+                                                    fills.iter().enumerate()
+                                                {
+                                                    if arr_blanks[bi] != *filled_ty {
+                                                        return Err(
+                                                            TranspileError::TransformError(format!(
+                                                                "blank mismatch (r45): `{}` fills `{}` with `{}`, but array `{}` holds `{}({})",
+                                                                impl_class, assoc, filled_ty, name,
+                                                                arr_iface, arr_blanks.join(", ")
+                                                            )),
+                                                        );
+                                                    }
+                                                }
+                                                out.push_str(&result[prev..open_j + 1]);
+                                                out.push_str(&format!(
+                                                    "Box::new({})",
+                                                    inner.trim()
+                                                ));
+                                                prev = close_j;
+                                                i = close_j + 1;
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                    // Case B: method with interface params
+                                    if let Some(pmap) = iface_method_params.get(method) {
+                                        let arg_pieces = self
+                                            .split_top_level_args(inner);
+                                        let mut new_args: Vec<String> =
+                                            Vec::with_capacity(arg_pieces.len());
+                                        let mut changed = false;
+                                        for (pos, ap) in arg_pieces.iter().enumerate() {
+                                            let arg = ap.trim();
+                                            let Some(Some((iface_name, blanks))) =
+                                                pmap.get(pos)
+                                            else {
+                                                new_args.push(arg.to_string());
+                                                continue;
+                                            };
+                                            let new_arg_re = Regex::new(
+                                                r"^new\s+([A-Z]\w*)\s*\((.*)\)$"
+                                            )
+                                            .unwrap();
+                                            if let Some(ac) = new_arg_re.captures(arg)
+                                            {
+                                                let impl_class = ac[1].to_string();
+                                                let impl_re = Regex::new(&format!(
+                                                    r"class\s+{}\s+implements\s+[^{{]*\b{}",
+                                                    regex::escape(&impl_class),
+                                                    regex::escape(iface_name)
+                                                ))
+                                                .map_err(|e| {
+                                                    TranspileError::TransformError(e.to_string())
+                                                })?;
+                                                if !impl_re.is_match(source) {
+                                                    return Err(
+                                                        TranspileError::TransformError(format!(
+                                                            "class `{}` does not implement interface `{}` (r45)",
+                                                            impl_class, iface_name
+                                                        )),
+                                                    );
+                                                }
+                                                let methods = self
+                                                    .extract_class_methods_by_name(
+                                                        &impl_class, source,
+                                                    );
+                                                let fills = self.infer_assoc_fills(
+                                                    iface_name, &methods, source,
+                                                );
+                                                for (bi, (assoc, filled_ty)) in
+                                                    fills.iter().enumerate()
+                                                {
+                                                    if blanks[bi] != *filled_ty {
+                                                        return Err(
+                                                            TranspileError::TransformError(format!(
+                                                                "blank mismatch (r45): `{}` fills `{}` with `{}`, but parameter {} of `{}` declares `{}`",
+                                                                impl_class, assoc, filled_ty,
+                                                                pos + 1, method, blanks[bi]
+                                                            )),
+                                                        );
+                                                    }
+                                                }
+                                                new_args.push(format!(
+                                                    "Box::new({})",
+                                                    arg
+                                                ));
+                                                changed = true;
+                                            } else {
+                                                new_args.push(arg.to_string());
+                                            }
+                                        }
+                                        if changed {
+                                            out.push_str(&result[prev..open_j + 1]);
+                                            out.push_str(&new_args.join(", "));
+                                            prev = close_j;
+                                            i = close_j + 1;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        i = j + 1;
                         continue;
                     }
-                    // method call? previous non-ws char before name must not be '.'
+                    let param_map = iface_params.get(name).unwrap();
+                    // method call? `.`-prefixed: if it is `ifaceArray.push(new X())`,
+                    // wrap the argument; otherwise leave untouched.
                     let mut k = start;
                     while k > 0 && (bytes[k - 1] == b' ' || bytes[k - 1] == b'\t') {
                         k -= 1;
                     }
                     if k > 0 && bytes[k - 1] == b'.' {
+                        // read receiver identifier before the dot
+                        let mut r_end = k - 1;
+                        let mut r_start = r_end;
+                        while r_start > 0
+                            && (bytes[r_start - 1].is_ascii_alphanumeric()
+                                || bytes[r_start - 1] == b'_')
+                        {
+                            r_start -= 1;
+                        }
+                        let receiver = &result[r_start..r_end];
+                        let handled = if name == "push" {
+                            if let Some((arr_iface, arr_blanks)) = iface_arrays.get(receiver) {
+                                // locate matching close paren for this call
+                                let open_j = j;
+                                let mut depth_j = 0i32;
+                                let mut p_j = open_j;
+                                let mut close_j = bytes.len();
+                                while p_j < bytes.len() {
+                                    match bytes[p_j] {
+                                        b'(' => depth_j += 1,
+                                        b')' => {
+                                            depth_j -= 1;
+                                            if depth_j == 0 {
+                                                close_j = p_j;
+                                                break;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                    p_j += 1;
+                                }
+                                if close_j >= bytes.len() {
+                                    false
+                                } else {
+                                let inner = &result[open_j + 1..close_j];
+                                let new_arg_re = Regex::new(
+                                    r"^new\s+([A-Z]\w*)\s*\((.*)\)$"
+                                )
+                                .unwrap();
+                                if let Some(ac) = new_arg_re.captures(inner.trim()) {
+                                    let impl_class = ac[1].to_string();
+                                    let impl_re = Regex::new(&format!(
+                                        r"class\s+{}\s+implements\s+[^{{]*\b{}",
+                                        regex::escape(&impl_class),
+                                        regex::escape(arr_iface)
+                                    ))
+                                    .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                                    if !impl_re.is_match(source) {
+                                        return Err(TranspileError::TransformError(format!(
+                                            "class `{}` does not implement interface `{}` (r45)",
+                                            impl_class, arr_iface
+                                        )));
+                                    }
+                                    let methods =
+                                        self.extract_class_methods_by_name(&impl_class, source);
+                                    let fills =
+                                        self.infer_assoc_fills(arr_iface, &methods, source);
+                                    for (bi, (assoc, filled_ty)) in fills.iter().enumerate() {
+                                        if arr_blanks[bi] != *filled_ty {
+                                            return Err(TranspileError::TransformError(format!(
+                                                "blank mismatch (r45): `{}` fills `{}` with `{}`, but array `{}` holds `{}({})",
+                                                impl_class, assoc, filled_ty, receiver,
+                                                arr_iface, arr_blanks.join(", ")
+                                            )));
+                                        }
+                                    }
+                                    out.push_str(&result[prev..open_j + 1]);
+                                    out.push_str(&format!("Box::new({})", inner.trim()));
+                                    prev = close_j;
+                                    true
+                                } else {
+                                    false
+                                }
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+                        let _ = handled;
                         i = j + 1;
                         continue;
                     }
@@ -1773,11 +2173,44 @@ impl Translator {
                         continue; // arity mismatch — not this overload shape
                     }
                     let new_arg_re = Regex::new(r"^new\s+([A-Z]\w*)\s*\((.*)\)$").unwrap();
+                    let ident_re = Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").unwrap();
                     let mut changed = false;
                     for (pos, arg) in args.iter_mut().enumerate() {
                         let Some((iface_name, blanks)) = &param_map[pos] else {
                             continue;
                         };
+                        let arg_trim = arg.trim().to_string();
+                        // r45 phase 3b: upcast argument — an existing class
+                        // variable handed over to an interface parameter.
+                        if ident_re.is_match(&arg_trim) {
+                            if let Some(src_class) = class_vars.get(&arg_trim) {
+                                let impl_re = Regex::new(&format!(
+                                    r"class\s+{}\s+implements\s+[^{{]*\b{}",
+                                    regex::escape(src_class),
+                                    regex::escape(iface_name)
+                                ))
+                                .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                                if !impl_re.is_match(source) {
+                                    return Err(TranspileError::TransformError(format!(
+                                        "class `{}` does not implement interface `{}` (r45)",
+                                        src_class, iface_name
+                                    )));
+                                }
+                                let methods = self.extract_class_methods_by_name(src_class, source);
+                                let fills = self.infer_assoc_fills(iface_name, &methods, source);
+                                for (bi, (assoc, filled_ty)) in fills.iter().enumerate() {
+                                    if blanks[bi] != *filled_ty {
+                                        return Err(TranspileError::TransformError(format!(
+                                            "blank mismatch (r45): `{}` fills `{}` with `{}`, but parameter {} of `{}` declares `{}`",
+                                            src_class, assoc, filled_ty, pos + 1, name, blanks[bi]
+                                        )));
+                                    }
+                                }
+                                *arg = format!("Box::new({})", arg_trim);
+                                changed = true;
+                            }
+                            continue;
+                        }
                         let Some(ac) = new_arg_re.captures(arg) else {
                             continue;
                         };
@@ -2629,6 +3062,313 @@ impl Translator {
         Ok(result.to_string())
     }
 
+    /// r45 phase 3a: dynamic arrays of interface type (polymorphic
+    /// containers, dyn-only by design — fixed arrays are excluded: a dyn
+    /// object has no empty state, so `[Box<dyn P>; N]` cannot be legally
+    /// initialized; Vec starts from vacuum which fits the no-empty-state
+    /// principle).
+    ///
+    /// `Printer(String)[] ps;` ->
+    /// `let mut ps: Vec<Box<dyn Printer<Content = String>>> = Vec::new();`
+    /// Runs right after Rule 7 (transform_dynamic_array_decl): its pattern
+    /// only claims atomic types, so the paren interface form reaches here
+    /// untouched.
+    fn transform_interface_array_declarations(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        let assocs = self.extract_trait_assocs(source);
+        if assocs.is_empty() {
+            return Ok(source.to_string());
+        }
+
+        let re = Regex::new(r"\b([A-Z]\w*)\s*\(([^)]*)\)[ \t]*(\[\])[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let mut result = String::with_capacity(source.len());
+        let mut last = 0;
+        for caps in re.captures_iter(source) {
+            let iface_name = caps[1].to_string();
+            let Some(assoc_list) = assocs.get(&iface_name) else {
+                continue; // not an interface — leave for other rules
+            };
+            let blanks: Vec<String> = caps[2]
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let var_name = caps[4].to_string();
+
+            if blanks.len() != assoc_list.len() {
+                return Err(TranspileError::TransformError(format!(
+                    "interface `{}` has {} blank(s) ({}), but array `{}` declares {} type(s) (r45)",
+                    iface_name,
+                    assoc_list.len(),
+                    assoc_list.join(", "),
+                    var_name,
+                    blanks.len()
+                )));
+            }
+            let binds: Vec<String> = assoc_list
+                .iter()
+                .enumerate()
+                .map(|(i, a)| format!("{} = {}", a, blanks[i]))
+                .collect();
+            let m = caps.get(0).unwrap();
+            result.push_str(&source[last..m.start()]);
+            result.push_str(&format!(
+                "let mut {}: Vec<Box<dyn {}<{}>>> = Vec::new();",
+                var_name, iface_name, binds.join(", ")
+            ));
+            last = m.end();
+        }
+        result.push_str(&source[last..]);
+        Ok(result)
+    }
+
+    /// r45 phase 3c: interface params/returns on CLASS methods.
+    ///
+    /// Class methods cannot be rewritten to Rust form here (Rule 2 splits
+    /// classes downstream and expects Hust-shaped method signatures), so the
+    /// interface type word is swapped for a self-describing placeholder
+    /// (`__hdyn_Ifacename_T1_T2`), which Rule 2 transports untouched;
+    /// replace_dyn_placeholders (post-Rule-2) decodes it into
+    /// `Box<dyn Iface<Assoc = T...>>`.
+    ///
+    /// Returns (rewritten_source, placeholders) — placeholders map the
+    /// placeholder word to its `Box<dyn ...>` expansion.
+    fn rewrite_class_method_interface_types(
+        &self,
+        source: &str,
+        assocs: &HashMap<String, Vec<String>>,
+    ) -> Result<(String, HashMap<String, String>), TranspileError> {
+        use regex::Regex;
+        let mut placeholders: HashMap<String, String> = HashMap::new();
+
+        // locate class body spans (same scan as mask_class_bodies)
+        let head_re = Regex::new(r"\b(?:class)\s+\w+[^{;]*\{").unwrap();
+        let bytes = source.as_bytes();
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        for m in head_re.find_iter(source) {
+            let mut depth = 0i32;
+            let mut i = m.end() - 1;
+            let mut end = bytes.len();
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            spans.push((m.start(), end));
+        }
+        if spans.is_empty() {
+            return Ok((source.to_string(), placeholders));
+        }
+
+        // method signature inside a class body (Hust form)
+        let meth_re = Regex::new(
+            r"(?m)^[ \t]*(public[ \t]+)?(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+(\w+)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{",
+        )
+        .unwrap();
+        let param_word_re = Regex::new(r"^([A-Z]\w*)\s*\(([^)]*)\)$").unwrap();
+        let param_re = Regex::new(
+            r"^([A-Za-z_]\w*(?:[ \t]*\([^()]*\))?)[ \t]+([a-zA-Z_]\w*)$"
+        )
+        .unwrap();
+
+        let mut out = String::with_capacity(source.len());
+        let mut prev = 0;
+        for m in meth_re.find_iter(source) {
+            // only class-body methods
+            if !spans.iter().any(|(s, e)| m.start() >= *s && m.end() <= *e) {
+                continue;
+            }
+            let caps = meth_re.captures(&source[m.start()..]).unwrap();
+            let ret_word = caps[2].to_string();
+            let params = caps[4].to_string();
+
+            // rewrite params
+            let mut new_params = Vec::new();
+            let mut any = false;
+            {
+                let mut d = 0i32;
+                let mut seg_start = 0;
+                let mut pieces: Vec<(usize, usize)> = Vec::new();
+                for (idx, ch) in params.char_indices() {
+                    match ch {
+                        '(' | '[' | '{' => d += 1,
+                        ')' | ']' | '}' => d -= 1,
+                        ',' if d == 0 => {
+                            pieces.push((seg_start, idx));
+                            seg_start = idx + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                pieces.push((seg_start, params.len()));
+                for (ps, pe) in pieces {
+                    let piece = params[ps..pe].trim();
+                    if piece.is_empty() {
+                        continue;
+                    }
+                    if let Some(pw) = param_re.captures(piece) {
+                        let tw = pw[1].trim();
+                        let vn = pw[2].trim();
+                        if let Some(pc) = param_word_re.captures(tw) {
+                            let blanks: Vec<String> = pc[2]
+                                .split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            if let Some(dyn_ty) =
+                                self.render_dyn_type(&pc[1], &blanks, assocs)
+                            {
+                                if dyn_ty.starts_with("compile_error!") {
+                                    new_params.push(piece.to_string());
+                                    continue;
+                                }
+                                // self-describing placeholder:
+                                // __hdyn_Ifacename_T1_T2
+                                let mut ph = format!("__hdyn_{}", &pc[1]);
+                                for b in &blanks {
+                                    ph.push('_');
+                                    ph.push_str(b);
+                                }
+                                placeholders.insert(ph.clone(), dyn_ty);
+                                new_params.push(format!("{} {}", ph, vn));
+                                any = true;
+                                continue;
+                            }
+                        }
+                    }
+                    new_params.push(piece.to_string());
+                }
+            }
+
+            // rewrite return type
+            let mut new_ret = ret_word.clone();
+            if let Some(rc) = param_word_re.captures(&ret_word) {
+                let blanks: Vec<String> = rc[2]
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if let Some(dyn_ty) = self.render_dyn_type(&rc[1], &blanks, assocs) {
+                    if !dyn_ty.starts_with("compile_error!") {
+                        let mut ph = format!("__hdyn_{}", &rc[1]);
+                        for b in &blanks {
+                            ph.push('_');
+                            ph.push_str(b);
+                        }
+                        placeholders.insert(ph.clone(), dyn_ty);
+                        new_ret = ph;
+                        any = true;
+                    }
+                }
+            }
+
+            if !any {
+                continue;
+            }
+            // rebuild the signature span: pub + ret + name + params + '{'
+            let pub_word = caps
+                .get(1)
+                .map(|g| g.as_str().to_string())
+                .unwrap_or_default();
+            out.push_str(&source[prev..m.start()]);
+            out.push_str(&format!(
+                "{}{} {}({}) {{",
+                pub_word, new_ret, &caps[3], new_params.join(", ")
+            ));
+            prev = m.end();
+        }
+        out.push_str(&source[prev..]);
+        Ok((out, placeholders))
+    }
+
+    /// r45 phase 3c (post-Rule-2): decode `__hdyn_Ifacename_T1_T2`
+    /// placeholders into `Box<dyn Iface<Assoc = T...>>`.
+    fn replace_dyn_placeholders(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        let re = Regex::new(r"\b__hdyn_([A-Za-z_]\w*)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        // self-describing: decode iface + blanks from the word itself
+        let assocs = self.extract_trait_assocs(source);
+        // parameter position after Rule 2 is `name: __hdyn_Iface_T`;
+        // dyn methods take &mut self, so the binding must be mutable
+        // (free-function path marks it mut too).
+        let param_re = Regex::new(r"(?m)([ \t,(])([a-zA-Z_]\w*): __hdyn_([A-Za-z_]\w*)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let decoded_param = |caps: &regex::Captures| -> String {
+            let word = &caps[3];
+            let (iface, blanks_str) = match word.find('_') {
+                Some(k) => (&word[..k], &word[k + 1..]),
+                None => (word, ""),
+            };
+            let blanks: Vec<String> = if blanks_str.is_empty() {
+                Vec::new()
+            } else {
+                blanks_str.split('_').map(|s| s.to_string()).collect()
+            };
+            match self.render_dyn_type(iface, &blanks, &assocs) {
+                Some(ty) if !ty.starts_with("compile_error!") => {
+                    format!("{}mut {}: {}", &caps[1], &caps[2], ty)
+                }
+                _ => caps[0].to_string(),
+            }
+        };
+        let stage1 = param_re.replace_all(source, decoded_param);
+        // return-type position: bare placeholder word.
+        let result = re.replace_all(&stage1, |caps: &regex::Captures| {
+            let word = &caps[1];
+            let (iface, blanks_str) = match word.find('_') {
+                Some(k) => (&word[..k], &word[k + 1..]),
+                None => (word, ""),
+            };
+            let blanks: Vec<String> = if blanks_str.is_empty() {
+                Vec::new()
+            } else {
+                blanks_str.split('_').map(|s| s.to_string()).collect()
+            };
+            match self.render_dyn_type(iface, &blanks, &assocs) {
+                Some(ty) if !ty.starts_with("compile_error!") => ty,
+                _ => caps[0].to_string(),
+            }
+        });
+        Ok(result.to_string())
+    }
+
+    /// split `a, new X(b, c), d` into ["a", "new X(b, c)", "d"] at
+    /// top-level commas (paren/bracket/brace depth aware).
+    fn split_top_level_args(&self, s: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut d = 0i32;
+        let mut seg_start = 0;
+        for (idx, ch) in s.char_indices() {
+            match ch {
+                '(' | '[' | '{' => d += 1,
+                ')' | ']' | '}' => d -= 1,
+                ',' if d == 0 => {
+                    out.push(s[seg_start..idx].trim().to_string());
+                    seg_start = idx + 1;
+                }
+                _ => {}
+            }
+        }
+        let last = s[seg_start..].trim().to_string();
+        if !last.is_empty() {
+            out.push(last);
+        }
+        out
+    }
+
     /// `x.push([])` -> `x.push(Vec::new())`: pushing an empty array literal
     /// creates a new row for nested dynamic arrays (Vec<Vec<T>>).
     fn translate_empty_push(&self, source: &str) -> Result<String, TranspileError> {
@@ -3345,6 +4085,89 @@ impl Translator {
             }
             out1.push_str(&src1[last1..]);
             result = out1;
+        }
+
+        // Class-variable table (var -> class) for upcasting: collect
+        // `X v = new X(...);` instantiations present at this stage.
+        let class_var_re = Regex::new(r"\b([A-Z]\w*)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*=[ \t]*new\s+")
+            .unwrap();
+        let mut class_vars: HashMap<String, String> = HashMap::new();
+        for caps in class_var_re.captures_iter(source) {
+            if !shapes.contains_key(&caps[1]) {
+                class_vars.insert(caps[2].to_string(), caps[1].to_string());
+            }
+        }
+
+        // Pass 1c: upcasting — an interface variable assigned from an
+        // existing class variable (ownership hand-over, wood 2026-09-29):
+        // `Printer(String) p = tp;` where tp is a TextPrinter.
+        if !class_vars.is_empty() {
+            let up_re = Regex::new(r"\b([A-Z]\w*)\s*\(([^)]*)\)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*=[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*;")
+                .unwrap();
+            let src1c = result;
+            let mut out1c = String::with_capacity(src1c.len());
+            let mut last1c = 0;
+            for caps in up_re.captures_iter(&src1c) {
+                let iface_name = caps[1].to_string();
+                if !shapes.contains_key(&iface_name) {
+                    continue;
+                }
+                let src_var = caps[4].to_string();
+                let Some(src_class) = class_vars.get(&src_var) else {
+                    continue;
+                };
+                let declared: Vec<String> = caps[2]
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let var_name = caps[3].to_string();
+                let assoc_list = &shapes[&iface_name];
+                if declared.len() != assoc_list.len() {
+                    return Err(TranspileError::TransformError(format!(
+                        "interface `{}` has {} blank(s) ({}), but `{}` declares {} type(s) (r45)",
+                        iface_name, assoc_list.len(), assoc_list.join(", "),
+                        var_name, declared.len()
+                    )));
+                }
+                let impl_re = Regex::new(&format!(
+                    r"class\s+{}\s+implements\s+[^{{]*\b{}",
+                    regex::escape(src_class),
+                    regex::escape(&iface_name)
+                ))
+                .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+                if !impl_re.is_match(source) {
+                    return Err(TranspileError::TransformError(format!(
+                        "class `{}` does not implement interface `{}` (r45): cannot hand over `{}` to `{}(..)`",
+                        src_class, iface_name, src_var, iface_name
+                    )));
+                }
+                let methods = self.extract_class_methods_by_name(src_class, source);
+                let fills = self.infer_assoc_fills(&iface_name, &methods, source);
+                for (i, (assoc, filled_ty)) in fills.iter().enumerate() {
+                    if declared[i] != *filled_ty {
+                        return Err(TranspileError::TransformError(format!(
+                            "blank mismatch (r45): `{}` fills `{}` with `{}`, but variable `{}` declares `{}`",
+                            src_class, assoc, filled_ty, var_name, declared[i]
+                        )));
+                    }
+                }
+                let m = caps.get(0).unwrap();
+                out1c.push_str(&src1c[last1c..m.start()]);
+                last1c = m.end();
+                let binds: Vec<String> = assoc_list
+                    .iter()
+                    .enumerate()
+                    .map(|(i, a)| format!("{} = {}", a, declared[i]))
+                    .collect();
+                out1c.push_str(&format!(
+                    "let mut {}: Box<dyn {}<{}>> = Box::new({});",
+                    var_name, iface_name, binds.join(", "), src_var
+                ));
+                iface_vars.insert(var_name.clone(), (iface_name, declared));
+            }
+            out1c.push_str(&src1c[last1c..]);
+            result = out1c;
         }
         // `p = new FancyPrinter();` -> `p = Box::new(FancyPrinter::new());`
         // (blank match checked against the declaration).

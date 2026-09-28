@@ -1,0 +1,30 @@
+interface Printer {
+    public void print(content);
+}
+
+class TextPrinter implements Printer {
+    public TextPrinter() {}
+    public void print(String content) {
+        println!("Text: {}", content);
+    }
+}
+
+class FancyPrinter implements Printer {
+    public FancyPrinter() {}
+    public void print(String content) {
+        println!("[fancy] {}", content);
+    }
+}
+
+void feed(Printer(String) p) {
+    p.print("fed");
+}
+
+void main() {
+    TextPrinter tp = new TextPrinter();
+    tp.print("direct");
+    Printer(String) p = tp;
+    p.print("handed");
+    FancyPrinter fp = new FancyPrinter();
+    feed(fp);
+}
