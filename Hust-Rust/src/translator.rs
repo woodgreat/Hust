@@ -1323,6 +1323,13 @@ impl Translator {
             // Don't transform it - the for loop transformer will handle it
             let is_for_loop_var = before.contains("for (") || before.contains("for(");
 
+            // Class instantiation `ClassName var = new ClassName(args);` belongs
+            // to Rule 13 (transform_class_instantiation), which runs AFTER Rule 9.
+            // The 2026-09-28 custom-type extension ([A-Z]\w*) would otherwise
+            // swallow it here and emit `let mut var: T = new T(...)` — the
+            // literal `new` then reaches rustc untranslated (q8 regression).
+            let is_class_instantiation = value.starts_with("new ");
+
             if is_const
                 && !value.is_empty()
                 && value.chars().all(|c| c.is_ascii_digit())
@@ -1343,8 +1350,9 @@ impl Translator {
                 } else {
                     format!("let {}: {} = {};", var_name, type_name, value)
                 }
-            } else if is_for_loop_var {
-                // Keep original format - for loop transformer will handle this
+            } else if is_for_loop_var || is_class_instantiation {
+                // Keep original format - for-loop transformer / Rule 13 will
+                // handle this declaration downstream
                 format!("{} {} = {};", type_name, var_name, value)
             } else if type_name == "String" && value.starts_with('"') {
                 // r3: String declaration with literal -> owned String
@@ -2402,11 +2410,18 @@ impl Translator {
             let (_uses, remaining) = registry.parse_use_statements(&after_ns, &file_path);
 
             // Extract function declarations for registry
+            // r44 fix: mask class/interface bodies first — class methods are
+            // class-scoped, not namespace-scoped. Without masking, two
+            // implementors sharing a method name (a core shape-interface
+            // scenario) get registered twice and resolve_function reports a
+            // bogus AmbiguousCall (printer_shape_test regression).
+            let masked_src = mask_class_bodies(&remaining);
+
             let func_re = Regex::new(r"(?m)^\s*(public\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
             
-            for caps in func_re.captures_iter(&remaining) {
+            for caps in func_re.captures_iter(&masked_src) {
                 let is_pub = caps.get(1).is_some();
                 let ret_type = caps[2].to_string();
                 let func_name = caps[3].to_string();
@@ -2669,6 +2684,9 @@ impl Translator {
 
     /// V0.6: Transform interface definitions to Rust traits
     /// interface Shape { public f64 area(); } -> trait Shape { fn area(&self) -> f64; }
+    /// r44 形状接口(2026-09-28 wood 决议): 接口统一为形状形态——参数一律无
+    /// 类型(填空), 返回仅 void 或缺省(待填), 接口内禁止具体类型(否则报错
+    /// 教学)。转译为关联类型 trait; 无填空接口等价于普通 trait。
     fn transform_interface_definitions(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
@@ -2677,20 +2695,170 @@ impl Translator {
         let re = Regex::new(r"(?m)^\s*interface\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{([^}]+)\}")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let result = re.replace_all(source, |caps: &regex::Captures| {
+        // Manual build (not replace_all) so r44 teaching errors propagate.
+        let mut out = String::with_capacity(source.len() + 256);
+        let mut last = 0usize;
+        for caps in re.captures_iter(source) {
+            let whole = caps.get(0).unwrap();
+            out.push_str(&source[last..whole.start()]);
             let interface_name = &caps[1];
             let body = &caps[2];
 
-            // Transform method declarations in interface
-            let trait_body = self.transform_interface_methods(body);
+            // Parse shape first: concrete types inside an interface are a
+            // hard, teaching-oriented error (r44 core classification law).
+            let shape = self.parse_interface_shape(interface_name, body)?;
+            let trait_body = self.shape_to_trait(&shape);
 
-            format!("trait {} {{{}}}\n", interface_name, trait_body)
-        });
+            out.push_str(&format!("trait {} {{{}}}\n", interface_name, trait_body));
+            last = whole.end();
+        }
+        out.push_str(&source[last..]);
 
-        Ok(result.to_string())
+        Ok(out)
+    }
+
+    /// r44: parse an interface body into its shape. Any concrete (non-void)
+    /// type in a parameter or return position is a hard error with guidance,
+    /// per the biconditional classification law: untyped ⇔ interface.
+    fn parse_interface_shape(
+        &self,
+        interface_name: &str,
+        body: &str,
+    ) -> Result<InterfaceShape, TranspileError> {
+        use regex::Regex;
+
+        // Method decl: [public] [retType] name(params) ;
+        // retType optional (blank = ShapeRet::Blank). Backtracking resolves
+        // `get(index);` (no ret) vs `i32 get(index);` (concrete = error).
+        let re = Regex::new(r"(?m)^\s*(?:public\s+)?(\w+\s+)?(\w+)\s*\(([^)]*)\)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let mut assoc_names: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut methods = Vec::new();
+
+        let mut reg_assoc = |raw: &str, assoc_names: &mut Vec<String>, seen: &mut HashSet<String>| -> String {
+            let pascal = to_pascal_case(raw);
+            if seen.insert(pascal.clone()) {
+                assoc_names.push(pascal.clone());
+            }
+            pascal
+        };
+
+        for caps in re.captures_iter(body) {
+            let ret_word = caps.get(1).map(|m| m.as_str().trim().to_string());
+            let method_name = caps[2].to_string();
+            let params_raw = caps[3].trim();
+
+            // Return classification
+            let ret = match ret_word.as_deref() {
+                None => {
+                    // untyped return => blank named after the method
+                    let assoc = reg_assoc(&method_name, &mut assoc_names, &mut seen);
+                    ShapeRet::Blank(assoc)
+                }
+                Some("void") => ShapeRet::Void,
+                Some(other) => {
+                    let paren = if params_raw.is_empty() {
+                        "()".to_string()
+                    } else {
+                        format!("({})", params_raw)
+                    };
+                    return Err(TranspileError::TransformError(format!(
+                        "syntax error: interface `{}` method `{}` declares a concrete \
+                         return type `{}`. Shape interfaces must not contain concrete \
+                         types (r44): write `{}{};` (blank return) and let each \
+                         implementing class fill it in. Classes, not interfaces, \
+                         own types.",
+                        interface_name, method_name, other, method_name, paren
+                    )));
+                }
+            };
+
+            // Params: each is either `type name` (concrete => error) or
+            // bare `name` (blank). `void` alone (no name) = no params.
+            let mut params = Vec::new();
+            if !params_raw.is_empty() {
+                for piece in params_raw.split(',') {
+                    let piece = piece.trim();
+                    if piece.is_empty() {
+                        continue;
+                    }
+                    let words: Vec<&str> = piece.split_whitespace().collect();
+                    match words.len() {
+                        1 => {
+                            let assoc = reg_assoc(words[0], &mut assoc_names, &mut seen);
+                            params.push(ShapeParam {
+                                pname: words[0].to_string(),
+                                assoc: Some(assoc),
+                            });
+                        }
+                        _ => {
+                            return Err(TranspileError::TransformError(format!(
+                                "syntax error: interface `{}` method `{}` parameter \
+                                 `{}` declares a concrete type. Shape interfaces \
+                                 must not contain concrete types (r44): write bare \
+                                 parameter names, e.g. `({})` — each implementing \
+                                 class fills in the types.",
+                                interface_name,
+                                method_name,
+                                piece,
+                                params
+                                    .iter()
+                                    .map(|p: &ShapeParam| p.pname.clone())
+                                    .chain(std::iter::once(words[words.len() - 1].to_string()))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )));
+                        }
+                    }
+                }
+            }
+
+            methods.push(ShapeMethod {
+                name: self.to_snake_case(&method_name),
+                params,
+                ret,
+            });
+        }
+
+        Ok(InterfaceShape {
+            assoc_names,
+            methods,
+        })
+    }
+
+    /// r44: render a parsed shape into trait body text.
+    fn shape_to_trait(&self, shape: &InterfaceShape) -> String {
+        let mut out = String::new();
+        for assoc in &shape.assoc_names {
+            out.push_str(&format!("\n    type {};", assoc));
+        }
+        for m in &shape.methods {
+            let mut params = String::new();
+            for p in &m.params {
+                params.push_str(&format!(", {}: Self::{}",
+                    self.to_snake_case(&p.pname),
+                    p.assoc.as_deref().unwrap_or("()"),
+                ));
+            }
+            let sig = match &m.ret {
+                ShapeRet::Void => format!("\n    fn {}(&mut self{});", m.name, params),
+                ShapeRet::Blank(a) => {
+                    format!("\n    fn {}(&mut self{}) -> Self::{};", m.name, params, a)
+                }
+            };
+            out.push_str(&sig);
+        }
+        if out.is_empty() {
+            out
+        } else {
+            format!("{}\n", out)
+        }
     }
 
     /// Transform interface method declarations to trait method signatures
+    /// (legacy V0.6 signature-extraction path for delegates)
     fn transform_interface_methods(&self, body: &str) -> String {
         use regex::Regex;
 
@@ -3251,7 +3419,7 @@ impl Translator {
         // Generate trait implementations for own interfaces (normal)
         for if_name in &own_interfaces {
             let trait_impl =
-                self.generate_trait_impl(class_name, if_name, methods, trait_methods);
+                self.generate_trait_impl(class_name, if_name, methods, trait_methods, source);
             result.push_str(&trait_impl);
         }
 
@@ -3295,12 +3463,16 @@ impl Translator {
         // Find which parent in the chain implements this interface
         let mut delegation_path = String::new();
         let mut found = false;
+        // r44: remember the ancestor that actually implements the interface —
+        // its method signatures fill the assoc types of this delegate impl.
+        let mut implementing_ancestor: Option<String> = None;
         
         if let Some(parent) = parent_class {
             // Check immediate parent first
             let parent_implements = self.class_implements_interface(parent, interface_name, class_table);
             if parent_implements {
                 delegation_path = format!("self.{}", parent);
+                implementing_ancestor = Some(parent.to_string());
                 found = true;
             } else {
                 // Check grandparents (cycle-safe)
@@ -3314,6 +3486,7 @@ impl Translator {
                     path.push_str(format!(".{}", ancestor).as_str());
                     if self.class_implements_interface(ancestor, interface_name, class_table) {
                         delegation_path = path;
+                        implementing_ancestor = Some(ancestor.clone());
                         found = true;
                         break;
                     }
@@ -3327,6 +3500,14 @@ impl Translator {
                 delegation_path = format!("self.{}", parent);
             } else {
                 delegation_path = "self".to_string();
+            }
+        }
+
+        // r44: fill assoc types from the implementing ancestor's signatures
+        if let Some(ref ancestor) = implementing_ancestor {
+            let ancestor_methods = self.extract_class_methods_by_name(ancestor, source);
+            for (assoc, ty) in self.infer_assoc_fills(interface_name, &ancestor_methods, source) {
+                result.push_str(&format!("\n    type {} = {};", assoc, ty));
             }
         }
 
@@ -3436,7 +3617,7 @@ impl Translator {
             let if_names: Vec<&str> = ifs.split(',').map(|s| s.trim()).collect();
             for if_name in if_names {
                 let trait_impl =
-                    self.generate_trait_impl(class_name, if_name, methods, trait_methods);
+                    self.generate_trait_impl(class_name, if_name, methods, trait_methods, source);
                 result.push_str(&trait_impl);
             }
         }
@@ -3529,8 +3710,16 @@ impl Translator {
         interface_name: &str,
         methods: &[ClassMethod],
         trait_methods: &HashSet<String>,
+        source: &str,
     ) -> String {
+        // r44: shape interfaces carry assoc types; fill them from this
+        // class's method signatures (the class owns the types).
+        let assoc_fills = self.infer_assoc_fills(interface_name, methods, source);
+
         let mut result = format!("impl {} for {} {{", interface_name, class_name);
+        for (assoc, ty) in &assoc_fills {
+            result.push_str(&format!("\n    type {} = {};", assoc, ty));
+        }
 
         for method in methods {
             let rust_name = self.to_snake_case(&method.name);
@@ -3568,6 +3757,153 @@ impl Translator {
 
         result.push_str("\n}\n");
         result
+    }
+
+    /// r44 helper: extract a class's method list from source (by class name),
+    /// used to fill delegate-impl assoc types from the implementing ancestor.
+    fn extract_class_methods_by_name(&self, class_name: &str, source: &str) -> Vec<ClassMethod> {
+        use regex::Regex;
+        let re = Regex::new(&format!(
+            r"(?m)^\s*(?:public\s+)?class\s+{}\s*(?:extends\s+\w+\s*)?(?:implements\s+[\w,\s]+)?\{{",
+            regex::escape(class_name)
+        ))
+        .unwrap();
+        if let Some(caps) = re.captures(source) {
+            let body_start = caps.get(0).unwrap().end();
+            let mut depth = 1;
+            let mut pos = body_start;
+            let bytes = source.as_bytes();
+            while pos < bytes.len() && depth > 0 {
+                match bytes[pos] as char {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                pos += 1;
+            }
+            if depth == 0 {
+                let body = &source[body_start..pos - 1];
+                return self.parse_class_body(body).1;
+            }
+        }
+        Vec::new()
+    }
+
+    /// r44: infer assoc-type fills (`type Item = i32;`) for a class's
+    /// trait impl. Shape source-of-truth is the GENERATED trait body
+    /// (assoc decls + `Self::X` slots); the implementing class's method
+    /// signatures provide the fills — classes own types (r44 law).
+    fn infer_assoc_fills(
+        &self,
+        interface_name: &str,
+        provider: &[ClassMethod],
+        source: &str,
+    ) -> Vec<(String, String)> {
+        use regex::Regex;
+
+        // The trait body (post-Rule-1) is the single source of truth.
+        // (`trait` form: this runs after transform_interface_definitions.)
+        let if_re = Regex::new(&format!(
+            r"(?m)^\s*trait\s+{}\s*\{{([^}}]+)\}}",
+            regex::escape(interface_name)
+        ))
+        .unwrap();
+        let trait_body = match if_re.captures(source) {
+            Some(c) => c[1].to_string(),
+            None => return Vec::new(),
+        };
+
+        // Assoc declarations: `type Item;`
+        let type_re = Regex::new(r"(?m)type\s+([A-Za-z_]\w*)\s*;").unwrap();
+        let assoc_names: Vec<String> = type_re
+            .captures_iter(&trait_body)
+            .map(|c| c[1].to_string())
+            .collect();
+        if assoc_names.is_empty() {
+            return Vec::new();
+        }
+
+        // Method shapes: fn name(&mut self, content: Self::Content, ...)
+        //                 -> Self::Get ;
+        let fn_re = Regex::new(
+            r"(?m)fn\s+(\w+)\s*\(([^)]*)\)\s*(?:->\s*Self::(\w+)\s*)?;",
+        )
+        .unwrap();
+        // method -> (param name -> assoc, ret_assoc)
+        let mut shape_map: HashMap<String, (HashMap<String, String>, Option<String>)> =
+            HashMap::new();
+        for caps in fn_re.captures_iter(&trait_body) {
+            let mname = caps[1].to_string();
+            let mut param_assoc: HashMap<String, String> = HashMap::new();
+            for piece in caps[2].split(',') {
+                let piece = piece.trim();
+                if piece.is_empty() || piece == "&mut self" || piece == "&self" {
+                    continue;
+                }
+                // `content: Self::Content`
+                if let Some(idx) = piece.find(':') {
+                    let pname = piece[..idx].trim().to_string();
+                    let pty = piece[idx + 1..].trim();
+                    if let Some(rest) = pty.strip_prefix("Self::") {
+                        param_assoc.insert(pname, rest.trim().to_string());
+                    }
+                }
+            }
+            let ret_assoc = caps.get(3).map(|m| m.as_str().to_string());
+            shape_map.insert(mname, (param_assoc, ret_assoc));
+        }
+
+        // Provider method table: snake_name -> (param type by name, ret_type)
+        let mut provider_map: HashMap<String, (HashMap<String, String>, String)> = HashMap::new();
+        for m in provider {
+            let key = self.to_snake_case(&m.name);
+            let mut param_types: HashMap<String, String> = HashMap::new();
+            for piece in m.params.split(',') {
+                let words: Vec<&str> = piece.split_whitespace().collect();
+                if words.len() >= 2 {
+                    let pname = words[words.len() - 1].to_string();
+                    let pty = words[..words.len() - 1].join(" ");
+                    param_types.insert(pname, pty);
+                }
+            }
+            provider_map.insert(key, (param_types, m.ret_type.clone()));
+        }
+
+        // Fill each assoc in declaration order
+        let mut fills: Vec<(String, String)> = Vec::new();
+        for assoc in &assoc_names {
+            let mut found: Option<String> = None;
+            for (mname, (param_assoc, ret_assoc)) in &shape_map {
+                if found.is_some() {
+                    break;
+                }
+                if let Some((param_types, ret_type)) = provider_map.get(mname) {
+                    // param blanks: match by parameter name
+                    for (pname, pa) in param_assoc {
+                        if pa == assoc {
+                            if let Some(ty) = param_types.get(pname) {
+                                found = Some(ty.clone());
+                            }
+                            break;
+                        }
+                    }
+                    // return blanks: method name match
+                    if found.is_none() {
+                        if ret_assoc.as_deref() == Some(assoc.as_str())
+                            && ret_type != "void"
+                        {
+                            found = Some(ret_type.clone());
+                        }
+                    }
+                }
+            }
+            if let Some(ty) = found {
+                fills.push((assoc.clone(), ty));
+            }
+            // Unresolved blanks: leave to rustc E0046 — provider missing
+            // the method is already a shape-mismatch error surface.
+        }
+        fills
     }
 
     /// Generate inherent impl block (class methods)
@@ -3904,6 +4240,108 @@ struct ClassField {
     visibility: Visibility,
 }
 
+/// r44: parsed form of a shape interface.
+/// assoc_names: ordered, de-duplicated assoc-type list ("Item", "Key", ...).
+#[derive(Debug)]
+struct InterfaceShape {
+    assoc_names: Vec<String>,
+    methods: Vec<ShapeMethod>,
+}
+
+#[derive(Debug)]
+struct ShapeMethod {
+    name: String,
+    params: Vec<ShapeParam>,
+    ret: ShapeRet,
+}
+
+#[derive(Debug)]
+struct ShapeParam {
+    pname: String,
+    assoc: Option<String>, // Some = untyped blank (Self::X)
+}
+
+#[derive(Debug)]
+enum ShapeRet {
+    Void,
+    Blank(String), // untyped return: Self::<assoc>
+}
+
+/// r44 helper: `item`/`getValue`/`get_average` -> `Item`/`GetValue`/`GetAverage`.
+/// Assoc-type names in traits must be PascalCase (Rust convention).
+fn to_pascal_case(name: &str) -> String {
+    name.split('_')
+        .flat_map(|s| {
+            // split camelCase boundaries
+            let mut words: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            for (i, c) in s.chars().enumerate() {
+                if c.is_uppercase() && i > 0 {
+                    words.push(std::mem::take(&mut cur));
+                }
+                cur.push(c);
+            }
+            if !cur.is_empty() {
+                words.push(cur);
+            }
+            words
+        })
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut cs = w.chars();
+            match cs.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + &cs.as_str().to_lowercase(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+/// Mask class/interface bodies with spaces (newlines preserved so line
+/// numbers stay aligned with the original source). Shared by the
+/// init-before-use reminder and the namespace function registry (r44:
+/// class methods must not be registered as free functions).
+fn mask_class_bodies(source: &str) -> String {
+    let head_re = match regex::Regex::new(r"\b(?:class|interface)\s+\w+[^{;]*\{") {
+        Ok(re) => re,
+        Err(_) => return source.to_string(),
+    };
+    let bytes = source.as_bytes();
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for m in head_re.find_iter(source) {
+        let mut depth = 0i32;
+        let mut i = m.end() - 1; // position of '{'
+        let mut end = bytes.len();
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        spans.push((m.start(), end));
+    }
+    if spans.is_empty() {
+        return source.to_string();
+    }
+    let mut bytes = source.as_bytes().to_vec();
+    for (s, e) in &spans {
+        for b in &mut bytes[*s..*e] {
+            if *b != b'\n' {
+                *b = b' ';
+            }
+        }
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| source.to_string())
+}
+
 /// Class method representation
 #[derive(Debug)]
 struct ClassMethod {
@@ -3976,13 +4414,31 @@ impl Translator {
     /// Transform enum value access
     /// Color.Red -> Color::Red
     fn transform_enum_value_access(&self, source: &str) -> Result<String, TranspileError> {
+        // Collect real enum names first — inheritance field paths also look
+        // like `Parent.Field` (both Capitalized) and must NOT be rewritten
+        // to `Parent::Field` (q8 regression: rect.Rect.Shape.x).
+        let enum_names: HashSet<String> = regex::Regex::new(r"(?m)^\s*enum\s+([A-Z]\w*)")
+            .map_err(|e| TranspileError::ParseError(e.to_string()))?
+            .captures_iter(source)
+            .map(|c| c[1].to_string())
+            .collect();
+
+        if enum_names.is_empty() {
+            return Ok(source.to_string());
+        }
+
         // Match EnumName.VariantName pattern
-        // But avoid matching method calls or field access
         let enum_access_regex = regex::Regex::new(r"\b([A-Z]\w*)\.([A-Z]\w*)\b")
             .map_err(|e| TranspileError::ParseError(e.to_string()))?;
-        
-        let result = enum_access_regex.replace_all(source, "${1}::${2}");
-        
+
+        let result = enum_access_regex.replace_all(source, |caps: &regex::Captures| {
+            if enum_names.contains(&caps[1]) {
+                format!("{}::{}", &caps[1], &caps[2])
+            } else {
+                caps[0].to_string() // inheritance path — leave `Parent.Field`
+            }
+        });
+
         Ok(result.to_string())
     }
     
