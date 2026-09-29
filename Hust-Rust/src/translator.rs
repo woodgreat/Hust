@@ -4626,6 +4626,9 @@ impl Translator {
         
         // Generate impl block
         result.push_str(format!("impl {} {{", flat_name).as_str());
+        // Implicit empty ctor — same rule as generate_inherent_impl
+        // (2026-09-29): no user ctor => implicit new() = Self::default()
+        let mut has_ctor = false;
         for method in &methods {
             let visibility = match method.visibility {
                 Visibility::Public => "pub ",
@@ -4637,6 +4640,7 @@ impl Translator {
             // (`fn Inner(&self) -> Self`), so `Outer_Inner::new()` did not
             // exist. Mirror the top-level ctor path (generate_inherent_impl).
             if method.ret_type == "Self" {
+                has_ctor = true;
                 let new_params = self.transform_params(&method.params);
                 let sig = if new_params.is_empty() {
                     format!("\n    {}fn new() -> Self {{", visibility)
@@ -4696,6 +4700,9 @@ impl Translator {
             }
             
             result.push_str("\n    }");
+        }
+        if !has_ctor {
+            result.push_str("\n    pub fn new() -> Self {\n        Self::default()\n    }");
         }
         result.push_str("\n}\n");
         
@@ -5501,6 +5508,16 @@ impl Translator {
     ) -> String {
         let mut result = format!("impl {} {{", class_name);
         
+        // Implicit empty constructor (2026-09-29, wood decision):
+        // a class with NO user-declared constructor implicitly owns an
+        // empty one, so `new X()` always works. Rule wording follows the
+        // mainstream theory (empty ctor fills the user's omission, as
+        // Java/C# do); implementation is a codegen-level fallback here —
+        // equivalent to what an explicit empty ctor generates
+        // (Self::default()). Mutual exclusion is natural: an explicit
+        // ctor (ret_type == "Self") suppresses the implicit one.
+        let mut has_ctor = false;
+
         // Build field path map for inheritance
         let field_path_map = self.build_field_path_map(class_name, class_table, source);
 
@@ -5535,6 +5552,7 @@ impl Translator {
 
             // Constructor: generate new() method instead of method with &mut self
             if method.ret_type == "Self" {
+                has_ctor = true;
                 // Generate: pub fn new(params) -> Self { ... }
                 let new_params = self.transform_params(&method.params);
                 let sig = if new_params.is_empty() {
@@ -5630,6 +5648,10 @@ impl Translator {
 
                 result.push_str("\n    }");
             }
+        }
+
+        if !has_ctor {
+            result.push_str("\n    pub fn new() -> Self {\n        Self::default()\n    }");
         }
 
         result.push_str("\n}\n");

@@ -1,0 +1,58 @@
+// implicit_ctor_test.hust — 隐式空构造函数（2026-09-29 wood 决议）
+// 规则表述：无构造函数的类隐式拥有一个空构造函数（主流语言同理论，
+// 空构造填补用户缺失）；实现：生成层兜底 new() = Self::default()
+// 互斥：显式构造存在则隐式不出生（不存在 C++ 式"被夺走"的惊讶）
+
+// 场景1：纯字段类，无任何方法 —— 隐式 new 必须可用
+class Counter {
+    i32 count;
+    String label;
+    f64 rate;
+}
+
+// 场景2：有普通方法但无构造函数 —— 隐式 new 同样可用
+class Accumulator {
+    i32 total;
+    
+    public void add(i32 v) {
+        self.total += v;
+    }
+    
+    public i32 get() {
+        return self.total;
+    }
+}
+
+// 场景3：显式构造不受隐式影响（不冲突、不重复）
+class Greeter {
+    String name;
+    
+    public Greeter(String n) {
+        self.name = n;
+    }
+    
+    public void hello() {
+        println!("hi {}", self.name);
+    }
+}
+
+void main() {
+    // 隐式空构造：字段取零值
+    Counter c = new Counter();
+    println!("count={} label={} rate={}", c.count, c.label, c.rate);
+    
+    // 隐式 new + 普通方法协作
+    Accumulator a = new Accumulator();
+    a.add(7);
+    a.add(8);
+    println!("total={}", a.get());
+    
+    // 显式构造照常工作，且只有用户写的那个 new
+    // （注意：字符串字面量实参的转换是已知缺口，见 devlog；
+    //  此处先经 String 变量传入）
+    String w = "wood";
+    Greeter g = new Greeter(w);
+    g.hello();
+    
+    println!("Implicit ctor test passed!");
+}
