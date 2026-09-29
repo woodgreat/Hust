@@ -1,0 +1,13 @@
+// Test: public vs private field
+
+class MyClass {
+    public i32 public_field;     // Explicit public
+    i32 private_field;           // Default private
+}
+
+void main() {
+    MyClass obj = MyClass { public_field: 0, private_field: 0 };
+    obj.public_field = 42;       // OK: public field
+    // obj.private_field = 43;   // ERROR: private field (commented out)
+    println!("public: {}", obj.public_field);
+}

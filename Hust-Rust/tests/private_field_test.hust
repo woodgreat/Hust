@@ -1,0 +1,19 @@
+// Test: private field access
+
+class MyClass {
+    i32 private_field;           // Default private
+    
+    public void set_field(i32 v) {
+        self.private_field = v;  // OK: same class
+    }
+    
+    public i32 get_field() {
+        return self.private_field;  // OK: same class
+    }
+}
+
+void main() {
+    MyClass obj = MyClass { private_field: 0 };
+    obj.set_field(42);
+    println!("value: {}", obj.get_field());
+}

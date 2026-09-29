@@ -1,6 +1,7 @@
 //! Hust-Rust CLI Entry
 //! Usage: hust run main.hust
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Get Hust version in Wood format (4-digit with dot)
@@ -12,7 +13,7 @@ use std::process::Command;
 use clap::{Parser, Subcommand};
 use anyhow::Context;
 
-use hust_rust::{Translator, ProjectConfig, ModuleResolver};
+use hust_rust::{Translator, ProjectConfig, PackageConfig, ModuleResolver};
 
 /// Hust Language Transpiler - Rust Adapter
 #[derive(Parser)]
@@ -194,10 +195,54 @@ fn main() -> anyhow::Result<()> {
 /// Returns the path to the compiled executable (build mode),
 /// or Ok(None) for check mode (cargo check only, no artifacts).
 fn compile_single(file: &Path, release: bool, check_only: bool) -> anyhow::Result<Option<PathBuf>> {
-    // 1. Transpile Hust -> Rust
-    let translator = Translator::default();
-    let rust_code = translator.transpile_file(&file.to_path_buf())
-        .context("Transpilation failed")?;
+    // 1. Check if file contains use statements (module imports)
+    let source = std::fs::read_to_string(file)
+        .context("Failed to read source file")?;
+    
+    // If source contains use statements, resolve modules from current directory
+    let rust_code = if source.contains("use ") {
+        println!("[Hust] Detected use statements, resolving modules...");
+        
+        // Create a minimal project config for module resolution
+        let current_dir = file.parent()
+            .context("Failed to get parent directory")?;
+        
+        // Try to find modules in current directory
+        let mut resolver = ModuleResolver::new();
+        let config = ProjectConfig {
+            package: PackageConfig {
+                name: file.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("hust_temp")
+                    .to_string(),
+                version: "0.1.0".to_string(),
+                entry: file.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("main.hust")
+                    .to_string(),
+                author: None,
+                description: None,
+            },
+            module_paths: vec![current_dir.to_path_buf()],
+            dependencies: HashMap::new(),
+        };
+        
+        let modules = resolver.resolve(file, &config, current_dir)
+            .context("Failed to resolve module dependencies")?;
+        
+        println!("[Hust] Found {} module(s)", modules.len());
+        
+        let translator = Translator::default();
+        let entry_module = modules.last()
+            .context("No entry module found")?;
+        translator.transpile_modules(&modules, entry_module)
+            .context("Transpilation failed")?
+    } else {
+        // No use statements, simple single file transpilation
+        let translator = Translator::default();
+        translator.transpile(&source)
+            .context("Transpilation failed")?
+    };
 
     // 2. Create build directory relative to hust.exe location
     // This ensures build/ is always next to hust.exe, not in current working dir
