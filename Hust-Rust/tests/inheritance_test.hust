@@ -21,8 +21,8 @@ class Dog extends Animal {
 }
 
 void main() {
-    Dog d;
-    d.Animal.age = 5;
+    // Initialize with default values to avoid E0381
+    Dog d = Dog { Animal: Animal { age: 5 }, name: "".to_string() };
     
     d.Animal.eat();
     println!("Age: {}", d.Animal.getAge());

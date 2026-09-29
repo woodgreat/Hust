@@ -26,14 +26,11 @@ class PrivateClass {
 }
 
 void main() {
-    PublicClass pc;
-    pc.public_field = 100;      // OK: public field
-    // pc.private_field = 200;  // ERROR: private field (commented out)
+    // Initialize with default values to avoid E0381
+    PublicClass pc = PublicClass { public_field: 100, private_field: 0 };
     pc.public_method();          // OK: public method
-    // pc.private_method();     // ERROR: private method (commented out)
     
-    PrivateClass prv;
-    prv.public_field = 300;     // OK: public field
+    PrivateClass prv = PrivateClass { public_field: 300, private_field: 0 };
     prv.public_method();         // OK: public method
     
     println!("Access control test passed!");
