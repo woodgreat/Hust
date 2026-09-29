@@ -15,13 +15,15 @@ class Animal {
 class Dog extends Animal {
     String name;
     
+    public Dog() {}
+    
     public void bark() {
         println!("Woof!");
     }
 }
 
 void main() {
-    Dog d;
+    Dog d = new Dog();
     d.Animal.age = 5;
     
     d.Animal.eat();

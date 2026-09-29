@@ -1447,11 +1447,18 @@ impl Translator {
         // use-before-assign (E0381). const form rejected at Rule 4.8.
         // Mutually exclusive with the `= value` form above (name followed by
         // `;`, not `=`).
-        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;")
+        // nested-class no-init fix (2026-09-29, found by nested_class_test):
+        // the type group must accept dotted nested names (`Outer.Inner inner;`),
+        // else `[A-Z]\w*` matches only the tail (`Inner inner;`) and leaves
+        // `Outer.` dangling -> `Outer.let mut inner: Inner;` (invalid Rust).
+        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re_no_init.replace_all(&result, |caps: &regex::Captures| {
             let type_name = &caps[1];
+            // Flatten nested class names, same convention as Rule 13
+            // (Outer.Inner -> Outer_Inner)
+            let rust_type = type_name.replace('.', "_");
             let names: Vec<&str> = caps[2]
                 .split(',')
                 .map(|s| s.trim())
@@ -1459,7 +1466,7 @@ impl Translator {
                 .collect();
             names
                 .iter()
-                .map(|n| format!("let mut {}: {};", n, type_name))
+                .map(|n| format!("let mut {}: {};", n, rust_type))
                 .collect::<Vec<_>>()
                 .join("\n")
         });
@@ -4624,6 +4631,47 @@ impl Translator {
                 Visibility::Public => "pub ",
                 Visibility::Private => "",
             };
+            
+            // Constructor support (2026-09-29, found by nested_class_test):
+            // nested-class ctors were emitted as regular methods
+            // (`fn Inner(&self) -> Self`), so `Outer_Inner::new()` did not
+            // exist. Mirror the top-level ctor path (generate_inherent_impl).
+            if method.ret_type == "Self" {
+                let new_params = self.transform_params(&method.params);
+                let sig = if new_params.is_empty() {
+                    format!("\n    {}fn new() -> Self {{", visibility)
+                } else {
+                    format!("\n    {}fn new({}) -> Self {{", visibility, new_params)
+                };
+                result.push_str(&sig);
+                // Collect field assignments: self.field = value;
+                let mut field_assignments = Vec::new();
+                if let Some(ref body) = method.body {
+                    let body_content = body.trim_start_matches('{').trim_end_matches('}');
+                    let assign_re = regex::Regex::new(r"(?:self|this)\.(\w+)\s*=\s*([^;]+);").unwrap();
+                    for cap in assign_re.captures_iter(body_content) {
+                        let field_name = &cap[1];
+                        let mut value = cap[2].trim().to_string();
+                        if value.starts_with('{') && value.ends_with('}') {
+                            value = format!("[{}]", &value[1..value.len()-1]);
+                        } else if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                            // same convention as the top-level ctor path
+                            value = format!("{}.to_string()", value);
+                        }
+                        field_assignments.push(format!("{}: {}", field_name, value));
+                    }
+                }
+                if field_assignments.is_empty() {
+                    result.push_str("\n        Self::default()");
+                } else {
+                    result.push_str(&format!(
+                        "\n        Self {{ {}, ..Default::default() }}",
+                        field_assignments.join(", ")
+                    ));
+                }
+                result.push_str("\n    }");
+                continue;
+            }
             
             // Add &self parameter for methods (Hust methods are instance methods by default)
             let params_with_self = if method.params.is_empty() {

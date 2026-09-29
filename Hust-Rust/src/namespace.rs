@@ -533,14 +533,16 @@ namespace MATH;
     fn test_use_system_namespace() {
         let mut registry = NamespaceRegistry::new();
         let source = r#"
-use RUST.std.io.*;
-use HUST.math;
+use RUST-std-io.*;
+use HUST-math;
 "#;
 
         let (uses, _) = registry.parse_use_statements(source, "test.hust");
         assert_eq!(uses.len(), 2);
-        assert_eq!(uses[0].namespace, "RUST.std.io");
-        assert_eq!(uses[1].namespace, "HUST.math");
+        // Dash-form system namespaces are stored as-is (wildcard included);
+        // system namespaces carry no items (2026.09.27 revision).
+        assert_eq!(uses[0].namespace, "RUST-std-io.*");
+        assert_eq!(uses[1].namespace, "HUST-math");
     }
 
     #[test]

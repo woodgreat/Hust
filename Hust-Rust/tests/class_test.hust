@@ -1,13 +1,15 @@
 // Class test - V0.6
 
 interface Shape {
-    public f64 area();
+    public area();
     public void draw();
 }
 
 class Rectangle implements Shape {
     f64 width;
     f64 height;
+    
+    public Rectangle() {}
     
     public f64 area() {
         return self.width * self.height;
@@ -21,6 +23,8 @@ class Rectangle implements Shape {
 class Circle implements Shape {
     f64 radius;
     
+    public Circle() {}
+    
     public f64 area() {
         return 3.14159 * self.radius * self.radius;
     }
@@ -31,11 +35,11 @@ class Circle implements Shape {
 }
 
 void main() {
-    Rectangle r;
+    Rectangle r = new Rectangle();
     r.width = 10.0;
     r.height = 5.0;
     
-    Circle c;
+    Circle c = new Circle();
     c.radius = 3.0;
     
     println!("Rectangle area: {}", r.area());
