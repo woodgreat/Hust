@@ -368,8 +368,13 @@ impl NamespaceRegistry {
                 // Check for system namespace: RUST-std-io.* or HUST-math
                 // System namespaces use '-' separator
                 if ns_part.contains('-') {
-                    // System namespace, store as-is
-                    let namespace = ns_part.trim().to_string();
+                    // System namespace
+                    // Handle wildcard: RUST-std-io.* -> RUST-std-io
+                    let namespace = if ns_part.ends_with(".*") {
+                        ns_part[..ns_part.len() - 2].trim().to_string()
+                    } else {
+                        ns_part.trim().to_string()
+                    };
                     let item = None;  // System namespaces don't have items
                     if !namespace.is_empty() {
                         uses.push(UseStmt {
@@ -533,14 +538,14 @@ namespace MATH;
     fn test_use_system_namespace() {
         let mut registry = NamespaceRegistry::new();
         let source = r#"
-use RUST.std.io.*;
-use HUST.math;
+use RUST-std-io.*;
+use HUST-math;
 "#;
 
         let (uses, _) = registry.parse_use_statements(source, "test.hust");
         assert_eq!(uses.len(), 2);
-        assert_eq!(uses[0].namespace, "RUST.std.io");
-        assert_eq!(uses[1].namespace, "HUST.math");
+        assert_eq!(uses[0].namespace, "RUST-std-io");
+        assert_eq!(uses[1].namespace, "HUST-math");
     }
 
     #[test]
