@@ -5508,6 +5508,12 @@ impl Translator {
                         // Convert Hust array literal {a, b, c} to Rust [a, b, c]
                         if value.starts_with('{') && value.ends_with('}') {
                             value = format!("[{}]", &value[1..value.len()-1]);
+                        } else if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                            // String literal in ctor assignment: class bodies are masked
+                            // from Rule 9.5 (translate_string_assign), so the .to_string()
+                            // conversion must happen here. Found by ctor_init_test,
+                            // 2026-09-29 (wood: "这个现在修吧").
+                            value = format!("{}.to_string()", value);
                         }
                         field_assignments.push(format!("{}: {}", field_name, value));
                     }

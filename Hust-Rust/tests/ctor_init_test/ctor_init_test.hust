@@ -1,0 +1,39 @@
+// 构造函数初始化测试（wood 2026-09-29 疑问排除）：
+// 类成员由构造函数显式赋值后，实例化可否免除"用户显式初始化"责任？
+// 验证点：
+//   1. 类内有公开成员变量，构造函数中对成员显式赋初值
+//   2. 使用处 new 实例化，不带任何显式初始化
+//   3. 实例化后直接读成员（应拿到构造函数的初值）
+//   4. 使用过程中仍可自由改写成员变量的值
+
+class Counter {
+    public i32 count;
+    public String name;
+    public f64 value;
+
+    public Counter() {
+        self.count = 0;
+        self.name = "ctor-init";
+        self.value = 1.5;
+    }
+
+    public void show() {
+        println!("count={} name={} value={}", self.count, self.name, self.value);
+    }
+}
+
+void main() {
+    // 疑问点：不显式初始化成员，仅靠构造函数赋值
+    Counter c = new Counter();
+
+    // 读初值（应来自构造函数）
+    c.show();
+
+    // 使用中改写成员
+    c.count = 42;
+    c.name = "changed";
+    c.value = 9.9;
+    c.show();
+
+    println!("ctor_init_test passed!");
+}
