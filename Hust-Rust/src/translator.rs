@@ -884,12 +884,63 @@ impl Translator {
         let re_new = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*new\s+([A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s*\(([^)]*)\)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
+        // String-literal args need .to_string() at the CALL site too —
+        // the call-site counterpart of the ctor-body conversion. Found by
+        // implicit_ctor_test (2026-09-29, wood: "先修第一个已知缺口"):
+        // `new Greeter("wood")` otherwise reaches rustc as &str vs String
+        // (E0308). Split on top-level commas only (quote- and
+        // bracket-aware, so a comma inside a literal or a nested call
+        // does not split).
+        let convert_call_args = |args: &str| -> String {
+            let mut parts: Vec<String> = Vec::new();
+            let mut depth = 0i32;
+            let mut in_str = false;
+            let mut escaped = false;
+            let mut cur = String::new();
+            for ch in args.chars() {
+                if in_str {
+                    cur.push(ch);
+                    if escaped {
+                        escaped = false;
+                    } else if ch == '\\' {
+                        escaped = true;
+                    } else if ch == '"' {
+                        in_str = false;
+                    }
+                } else {
+                    match ch {
+                        '"' => { in_str = true; cur.push(ch); }
+                        '(' | '[' | '{' => { depth += 1; cur.push(ch); }
+                        ')' | ']' | '}' => { depth -= 1; cur.push(ch); }
+                        ',' if depth == 0 => { parts.push(std::mem::take(&mut cur)); }
+                        _ => cur.push(ch),
+                    }
+                }
+            }
+            let last = cur.trim();
+            if !last.is_empty() || !parts.is_empty() {
+                parts.push(cur);
+            }
+            parts
+                .iter()
+                .map(|p| {
+                    let t = p.trim();
+                    if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
+                        format!("{}.to_string()", t)
+                    } else {
+                        t.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
         let mut result = re_new
             .replace_all(source, |caps: &regex::Captures| {
                 let var_type = &caps[1];
                 let var_name = &caps[2];
                 let class_name = &caps[3];
-                let args = &caps[4];
+                let args = convert_call_args(&caps[4]);
                 
                 // Check if types match
                 if var_type != class_name {

@@ -48,10 +48,8 @@ void main() {
     println!("total={}", a.get());
     
     // 显式构造照常工作，且只有用户写的那个 new
-    // （注意：字符串字面量实参的转换是已知缺口，见 devlog；
-    //  此处先经 String 变量传入）
-    String w = "wood";
-    Greeter g = new Greeter(w);
+    // 调用点字符串字面量直传（2026-09-29 缺口修复的回归守卫）
+    Greeter g = new Greeter("wood");
     g.hello();
     
     println!("Implicit ctor test passed!");
