@@ -888,51 +888,9 @@ impl Translator {
         // the call-site counterpart of the ctor-body conversion. Found by
         // implicit_ctor_test (2026-09-29, wood: "先修第一个已知缺口"):
         // `new Greeter("wood")` otherwise reaches rustc as &str vs String
-        // (E0308). Split on top-level commas only (quote- and
-        // bracket-aware, so a comma inside a literal or a nested call
-        // does not split).
+        // (E0308).
         let convert_call_args = |args: &str| -> String {
-            let mut parts: Vec<String> = Vec::new();
-            let mut depth = 0i32;
-            let mut in_str = false;
-            let mut escaped = false;
-            let mut cur = String::new();
-            for ch in args.chars() {
-                if in_str {
-                    cur.push(ch);
-                    if escaped {
-                        escaped = false;
-                    } else if ch == '\\' {
-                        escaped = true;
-                    } else if ch == '"' {
-                        in_str = false;
-                    }
-                } else {
-                    match ch {
-                        '"' => { in_str = true; cur.push(ch); }
-                        '(' | '[' | '{' => { depth += 1; cur.push(ch); }
-                        ')' | ']' | '}' => { depth -= 1; cur.push(ch); }
-                        ',' if depth == 0 => { parts.push(std::mem::take(&mut cur)); }
-                        _ => cur.push(ch),
-                    }
-                }
-            }
-            let last = cur.trim();
-            if !last.is_empty() || !parts.is_empty() {
-                parts.push(cur);
-            }
-            parts
-                .iter()
-                .map(|p| {
-                    let t = p.trim();
-                    if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
-                        format!("{}.to_string()", t)
-                    } else {
-                        t.to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
+            self.convert_string_literal_args(args)
         };
 
         let mut result = re_new
@@ -995,6 +953,54 @@ impl Translator {
             .to_string();
 
         Ok(result)
+    }
+
+    /// Convert string-literal args to owned Strings (.to_string()).
+    /// Splits on top-level commas only (quote- and bracket-aware, so a
+    /// comma inside a literal or a nested call does not split). Shared by
+    /// the new-call site and the super() call site (2026-09-29).
+    fn convert_string_literal_args(&self, args: &str) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        let mut depth = 0i32;
+        let mut in_str = false;
+        let mut escaped = false;
+        let mut cur = String::new();
+        for ch in args.chars() {
+            if in_str {
+                cur.push(ch);
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_str = false;
+                }
+            } else {
+                match ch {
+                    '"' => { in_str = true; cur.push(ch); }
+                    '(' | '[' | '{' => { depth += 1; cur.push(ch); }
+                    ')' | ']' | '}' => { depth -= 1; cur.push(ch); }
+                    ',' if depth == 0 => { parts.push(std::mem::take(&mut cur)); }
+                    _ => cur.push(ch),
+                }
+            }
+        }
+        let last = cur.trim();
+        if !last.is_empty() || !parts.is_empty() {
+            parts.push(cur);
+        }
+        parts
+            .iter()
+            .map(|p| {
+                let t = p.trim();
+                if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
+                    format!("{}.to_string()", t)
+                } else {
+                    t.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Transform inherited field access in global code
@@ -5636,36 +5642,54 @@ impl Translator {
                     }
                 }
                 
-                if field_assignments.is_empty() {
+                // super-only ctor fix (2026-09-29, found by super_string_test):
+                // decide super BEFORE the empty-field shortcut — a ctor whose
+                // body is only `super(...)` (no own-field assignments) must
+                // still initialize the parent, not silently Self::default().
+                let parent_from_table = class_table.get(class_name).and_then(|info| info.parent.clone());
+                let super_args = if let Some(ref body) = method.body {
+                    let super_re = regex::Regex::new(r"super\s*\(([^)]*)\)").unwrap();
+                    super_re.captures(body)
+                        .map(|cap| cap[1].trim().to_string())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                // String-literal super args need .to_string() too —
+                // same family as the ctor-body / call-site
+                // conversions (fixed 2026-09-29). Without this,
+                // `super("lit")` reaches rustc as &str vs String.
+                let super_args = self.convert_string_literal_args(&super_args);
+                
+                if field_assignments.is_empty() && super_args.is_empty() {
                     result.push_str("\n        Self::default()");
                 } else {
                     // Use inheritance table to build proper nested initialization
                     // For class C extends B extends A:
                     // Self { B: B::new(args), own_field: val, ..Default::default() }
-                    let parent_from_table = class_table.get(class_name).and_then(|info| info.parent.clone());
                     if let Some(parent) = parent_from_table {
-                        // Extract super() args from body to pass to parent constructor
-                        let super_args = if let Some(ref body) = method.body {
-                            let super_re = regex::Regex::new(r"super\s*\(([^)]*)\)").unwrap();
-                            super_re.captures(body)
-                                .map(|cap| cap[1].trim().to_string())
-                                .unwrap_or_default()
-                        } else {
-                            String::new()
-                        };
-                        
                         if super_args.is_empty() {
                             // No super() call, use parent Default
-                            result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                            if field_assignments.is_empty() {
+                                result.push_str("\n        Self::default()");
+                            } else {
+                                result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                            }
                         } else {
                             // Call parent constructor with super() args
-                            result.push_str(&format!("\n        Self {{\n            {}: {}::new({}),\n            {},\n            ..Default::default()\n        }}", 
-                                parent, parent, super_args,
-                                field_assignments.join(",\n            ")
+                            let fields_part = if field_assignments.is_empty() {
+                                String::new()
+                            } else {
+                                format!("{},", field_assignments.join(",\n            "))
+                            };
+                            result.push_str(&format!("\n        Self {{\n            {}: {}::new({}),\n            {}\n            ..Default::default()\n        }}", 
+                                parent, parent, super_args, fields_part
                             ));
                         }
-                    } else {
+                    } else if !field_assignments.is_empty() {
                         result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                    } else {
+                        result.push_str("\n        Self::default()");
                     }
                 }
                 
