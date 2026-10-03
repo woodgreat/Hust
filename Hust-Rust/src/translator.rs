@@ -123,6 +123,12 @@ impl Translator {
         )?;
         output = rewritten;
 
+        // r46 teaching error (2026-09-29, wood): a class declaring more
+        // than one constructor used to fall through to the language core's
+        // cryptic duplicate-definition error (E0592). Reject it here with
+        // guidance, while the class bodies are still Hust-shaped.
+        self.reject_duplicate_ctors(&output)?;
+
         // Rule 2: Transform class definitions
         // class Point { i32 x; public i32 getX() { return self.x; } }
         // -> struct Point { x: i32 } impl Point { fn get_x(&self) -> i32 { self.x } }
@@ -884,12 +890,21 @@ impl Translator {
         let re_new = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*new\s+([A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s*\(([^)]*)\)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
+        // String-literal args need .to_string() at the CALL site too —
+        // the call-site counterpart of the ctor-body conversion. Found by
+        // implicit_ctor_test (2026-09-29, wood: "先修第一个已知缺口"):
+        // `new Greeter("wood")` otherwise reaches rustc as &str vs String
+        // (E0308).
+        let convert_call_args = |args: &str| -> String {
+            self.convert_string_literal_args(args)
+        };
+
         let mut result = re_new
             .replace_all(source, |caps: &regex::Captures| {
                 let var_type = &caps[1];
                 let var_name = &caps[2];
                 let class_name = &caps[3];
-                let args = &caps[4];
+                let args = convert_call_args(&caps[4]);
                 
                 // Check if types match
                 if var_type != class_name {
@@ -944,6 +959,54 @@ impl Translator {
             .to_string();
 
         Ok(result)
+    }
+
+    /// Convert string-literal args to owned Strings (.to_string()).
+    /// Splits on top-level commas only (quote- and bracket-aware, so a
+    /// comma inside a literal or a nested call does not split). Shared by
+    /// the new-call site and the super() call site (2026-09-29).
+    fn convert_string_literal_args(&self, args: &str) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        let mut depth = 0i32;
+        let mut in_str = false;
+        let mut escaped = false;
+        let mut cur = String::new();
+        for ch in args.chars() {
+            if in_str {
+                cur.push(ch);
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_str = false;
+                }
+            } else {
+                match ch {
+                    '"' => { in_str = true; cur.push(ch); }
+                    '(' | '[' | '{' => { depth += 1; cur.push(ch); }
+                    ')' | ']' | '}' => { depth -= 1; cur.push(ch); }
+                    ',' if depth == 0 => { parts.push(std::mem::take(&mut cur)); }
+                    _ => cur.push(ch),
+                }
+            }
+        }
+        let last = cur.trim();
+        if !last.is_empty() || !parts.is_empty() {
+            parts.push(cur);
+        }
+        parts
+            .iter()
+            .map(|p| {
+                let t = p.trim();
+                if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
+                    format!("{}.to_string()", t)
+                } else {
+                    t.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Transform inherited field access in global code
@@ -1034,6 +1097,36 @@ impl Translator {
         let result = re.replace_all(source, "");
 
         Ok(result.to_string())
+    }
+
+    /// r46 teaching error (2026-09-29 wood decision; implemented 2026-10-03):
+    /// a class declaring more than one constructor used to fall through to
+    /// the language core's cryptic duplicate-definition error (E0592).
+    /// Reject it here with guidance, while the class bodies are still
+    /// Hust-shaped. Constructors are methods whose name matches the class.
+    fn reject_duplicate_ctors(&self, source: &str) -> Result<(), TranspileError> {
+        use regex::Regex;
+
+        // Same header pattern as extract_class_table (top-level classes).
+        let header_re = Regex::new(
+            r"(?m)^\s*(?:public\s+)?class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+\w+)?\s*(?:implements\s+[\w,\s]+)?\s*\{"
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        for caps in header_re.captures_iter(source) {
+            let class_name = &caps[1];
+            let methods = self.extract_class_methods_by_name(class_name, source);
+            let ctor_count = methods.iter().filter(|m| m.name == *class_name).count();
+            if ctor_count > 1 {
+                return Err(TranspileError::TransformError(format!(
+                    "class `{}` declares {} constructors (r46: Hust does not support overloading). \
+                     A class supports exactly one constructor; for alternate entry points, \
+                     use static factory methods instead.",
+                    class_name, ctor_count
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Reject `const` applied to array declarations (r6/r18, 2026.09.09).
@@ -1447,11 +1540,18 @@ impl Translator {
         // use-before-assign (E0381). const form rejected at Rule 4.8.
         // Mutually exclusive with the `= value` form above (name followed by
         // `;`, not `=`).
-        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;")
+        // nested-class no-init fix (2026-09-29, found by nested_class_test):
+        // the type group must accept dotted nested names (`Outer.Inner inner;`),
+        // else `[A-Z]\w*` matches only the tail (`Inner inner;`) and leaves
+        // `Outer.` dangling -> `Outer.let mut inner: Inner;` (invalid Rust).
+        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re_no_init.replace_all(&result, |caps: &regex::Captures| {
             let type_name = &caps[1];
+            // Flatten nested class names, same convention as Rule 13
+            // (Outer.Inner -> Outer_Inner)
+            let rust_type = type_name.replace('.', "_");
             let names: Vec<&str> = caps[2]
                 .split(',')
                 .map(|s| s.trim())
@@ -1459,7 +1559,7 @@ impl Translator {
                 .collect();
             names
                 .iter()
-                .map(|n| format!("let mut {}: {};", n, type_name))
+                .map(|n| format!("let mut {}: {};", n, rust_type))
                 .collect::<Vec<_>>()
                 .join("\n")
         });
@@ -4619,11 +4719,56 @@ impl Translator {
         
         // Generate impl block
         result.push_str(format!("impl {} {{", flat_name).as_str());
+        // Implicit empty ctor — same rule as generate_inherent_impl
+        // (2026-09-29): no user ctor => implicit new() = Self::default()
+        let mut has_ctor = false;
         for method in &methods {
             let visibility = match method.visibility {
                 Visibility::Public => "pub ",
                 Visibility::Private => "",
             };
+            
+            // Constructor support (2026-09-29, found by nested_class_test):
+            // nested-class ctors were emitted as regular methods
+            // (`fn Inner(&self) -> Self`), so `Outer_Inner::new()` did not
+            // exist. Mirror the top-level ctor path (generate_inherent_impl).
+            if method.ret_type == "Self" {
+                has_ctor = true;
+                let new_params = self.transform_params(&method.params);
+                let sig = if new_params.is_empty() {
+                    format!("\n    {}fn new() -> Self {{", visibility)
+                } else {
+                    format!("\n    {}fn new({}) -> Self {{", visibility, new_params)
+                };
+                result.push_str(&sig);
+                // Collect field assignments: self.field = value;
+                let mut field_assignments = Vec::new();
+                if let Some(ref body) = method.body {
+                    let body_content = body.trim_start_matches('{').trim_end_matches('}');
+                    let assign_re = regex::Regex::new(r"(?:self|this)\.(\w+)\s*=\s*([^;]+);").unwrap();
+                    for cap in assign_re.captures_iter(body_content) {
+                        let field_name = &cap[1];
+                        let mut value = cap[2].trim().to_string();
+                        if value.starts_with('{') && value.ends_with('}') {
+                            value = format!("[{}]", &value[1..value.len()-1]);
+                        } else if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                            // same convention as the top-level ctor path
+                            value = format!("{}.to_string()", value);
+                        }
+                        field_assignments.push(format!("{}: {}", field_name, value));
+                    }
+                }
+                if field_assignments.is_empty() {
+                    result.push_str("\n        Self::default()");
+                } else {
+                    result.push_str(&format!(
+                        "\n        Self {{ {}, ..Default::default() }}",
+                        field_assignments.join(", ")
+                    ));
+                }
+                result.push_str("\n    }");
+                continue;
+            }
             
             // Add &self parameter for methods (Hust methods are instance methods by default)
             let params_with_self = if method.params.is_empty() {
@@ -4648,6 +4793,9 @@ impl Translator {
             }
             
             result.push_str("\n    }");
+        }
+        if !has_ctor {
+            result.push_str("\n    pub fn new() -> Self {\n        Self::default()\n    }");
         }
         result.push_str("\n}\n");
         
@@ -5453,6 +5601,16 @@ impl Translator {
     ) -> String {
         let mut result = format!("impl {} {{", class_name);
         
+        // Implicit empty constructor (2026-09-29, wood decision):
+        // a class with NO user-declared constructor implicitly owns an
+        // empty one, so `new X()` always works. Rule wording follows the
+        // mainstream theory (empty ctor fills the user's omission, as
+        // Java/C# do); implementation is a codegen-level fallback here —
+        // equivalent to what an explicit empty ctor generates
+        // (Self::default()). Mutual exclusion is natural: an explicit
+        // ctor (ret_type == "Self") suppresses the implicit one.
+        let mut has_ctor = false;
+
         // Build field path map for inheritance
         let field_path_map = self.build_field_path_map(class_name, class_table, source);
 
@@ -5487,6 +5645,7 @@ impl Translator {
 
             // Constructor: generate new() method instead of method with &mut self
             if method.ret_type == "Self" {
+                has_ctor = true;
                 // Generate: pub fn new(params) -> Self { ... }
                 let new_params = self.transform_params(&method.params);
                 let sig = if new_params.is_empty() {
@@ -5508,41 +5667,65 @@ impl Translator {
                         // Convert Hust array literal {a, b, c} to Rust [a, b, c]
                         if value.starts_with('{') && value.ends_with('}') {
                             value = format!("[{}]", &value[1..value.len()-1]);
+                        } else if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                            // String literal in ctor assignment: class bodies are masked
+                            // from Rule 9.5 (translate_string_assign), so the .to_string()
+                            // conversion must happen here. Found by ctor_init_test,
+                            // 2026-09-29 (wood: "这个现在修吧").
+                            value = format!("{}.to_string()", value);
                         }
                         field_assignments.push(format!("{}: {}", field_name, value));
                     }
                 }
                 
-                if field_assignments.is_empty() {
+                // super-only ctor fix (2026-09-29, found by super_string_test):
+                // decide super BEFORE the empty-field shortcut — a ctor whose
+                // body is only `super(...)` (no own-field assignments) must
+                // still initialize the parent, not silently Self::default().
+                let parent_from_table = class_table.get(class_name).and_then(|info| info.parent.clone());
+                let super_args = if let Some(ref body) = method.body {
+                    let super_re = regex::Regex::new(r"super\s*\(([^)]*)\)").unwrap();
+                    super_re.captures(body)
+                        .map(|cap| cap[1].trim().to_string())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                // String-literal super args need .to_string() too —
+                // same family as the ctor-body / call-site
+                // conversions (fixed 2026-09-29). Without this,
+                // `super("lit")` reaches rustc as &str vs String.
+                let super_args = self.convert_string_literal_args(&super_args);
+                
+                if field_assignments.is_empty() && super_args.is_empty() {
                     result.push_str("\n        Self::default()");
                 } else {
                     // Use inheritance table to build proper nested initialization
                     // For class C extends B extends A:
                     // Self { B: B::new(args), own_field: val, ..Default::default() }
-                    let parent_from_table = class_table.get(class_name).and_then(|info| info.parent.clone());
                     if let Some(parent) = parent_from_table {
-                        // Extract super() args from body to pass to parent constructor
-                        let super_args = if let Some(ref body) = method.body {
-                            let super_re = regex::Regex::new(r"super\s*\(([^)]*)\)").unwrap();
-                            super_re.captures(body)
-                                .map(|cap| cap[1].trim().to_string())
-                                .unwrap_or_default()
-                        } else {
-                            String::new()
-                        };
-                        
                         if super_args.is_empty() {
                             // No super() call, use parent Default
-                            result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                            if field_assignments.is_empty() {
+                                result.push_str("\n        Self::default()");
+                            } else {
+                                result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                            }
                         } else {
                             // Call parent constructor with super() args
-                            result.push_str(&format!("\n        Self {{\n            {}: {}::new({}),\n            {},\n            ..Default::default()\n        }}", 
-                                parent, parent, super_args,
-                                field_assignments.join(",\n            ")
+                            let fields_part = if field_assignments.is_empty() {
+                                String::new()
+                            } else {
+                                format!("{},", field_assignments.join(",\n            "))
+                            };
+                            result.push_str(&format!("\n        Self {{\n            {}: {}::new({}),\n            {}\n            ..Default::default()\n        }}", 
+                                parent, parent, super_args, fields_part
                             ));
                         }
-                    } else {
+                    } else if !field_assignments.is_empty() {
                         result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                    } else {
+                        result.push_str("\n        Self::default()");
                     }
                 }
                 
@@ -5576,6 +5759,10 @@ impl Translator {
 
                 result.push_str("\n    }");
             }
+        }
+
+        if !has_ctor {
+            result.push_str("\n    pub fn new() -> Self {\n        Self::default()\n    }");
         }
 
         result.push_str("\n}\n");

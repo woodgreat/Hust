@@ -15,14 +15,16 @@ class Animal {
 class Dog extends Animal {
     String name;
     
+    public Dog() {}
+    
     public void bark() {
         println!("Woof!");
     }
 }
 
 void main() {
-    // Initialize with default values to avoid E0381
-    Dog d = Dog { Animal: Animal { age: 5 }, name: "".to_string() };
+    Dog d = new Dog();
+    d.Animal.age = 5;
     
     d.Animal.eat();
     println!("Age: {}", d.Animal.getAge());

@@ -7,10 +7,14 @@ class Outer {
     class Inner {
         i32 inner_field;
         
+        public Inner() {}
+        
         public i32 get_value() {
             return self.inner_field;
         }
     }
+    
+    public Outer() {}
     
     public void init() {
         self.outer_field = 10;
@@ -18,11 +22,11 @@ class Outer {
 }
 
 void main() {
-    Outer o;
+    Outer o = new Outer();
     o.init();
     
     // Access nested class
-    Outer.Inner inner;
+    Outer.Inner inner = new Outer.Inner();
     inner.inner_field = 42;
     
     i32 val = inner.get_value();

@@ -2,7 +2,7 @@
 
 interface Drawable {
     public void draw();
-    public i32 getArea();
+    public getArea();
 }
 
 class Rectangle implements Drawable {
@@ -19,7 +19,7 @@ class Rectangle implements Drawable {
 }
 
 void main() {
-    Rectangle r;
+    Rectangle r = new Rectangle();
     r.width = 10;
     r.height = 5;
     
