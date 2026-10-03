@@ -123,6 +123,12 @@ impl Translator {
         )?;
         output = rewritten;
 
+        // r46 teaching error (2026-09-29, wood): a class declaring more
+        // than one constructor used to fall through to the language core's
+        // cryptic duplicate-definition error (E0592). Reject it here with
+        // guidance, while the class bodies are still Hust-shaped.
+        self.reject_duplicate_ctors(&output)?;
+
         // Rule 2: Transform class definitions
         // class Point { i32 x; public i32 getX() { return self.x; } }
         // -> struct Point { x: i32 } impl Point { fn get_x(&self) -> i32 { self.x } }
@@ -1091,6 +1097,36 @@ impl Translator {
         let result = re.replace_all(source, "");
 
         Ok(result.to_string())
+    }
+
+    /// r46 teaching error (2026-09-29 wood decision; implemented 2026-10-03):
+    /// a class declaring more than one constructor used to fall through to
+    /// the language core's cryptic duplicate-definition error (E0592).
+    /// Reject it here with guidance, while the class bodies are still
+    /// Hust-shaped. Constructors are methods whose name matches the class.
+    fn reject_duplicate_ctors(&self, source: &str) -> Result<(), TranspileError> {
+        use regex::Regex;
+
+        // Same header pattern as extract_class_table (top-level classes).
+        let header_re = Regex::new(
+            r"(?m)^\s*(?:public\s+)?class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:extends\s+\w+)?\s*(?:implements\s+[\w,\s]+)?\s*\{"
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        for caps in header_re.captures_iter(source) {
+            let class_name = &caps[1];
+            let methods = self.extract_class_methods_by_name(class_name, source);
+            let ctor_count = methods.iter().filter(|m| m.name == *class_name).count();
+            if ctor_count > 1 {
+                return Err(TranspileError::TransformError(format!(
+                    "class `{}` declares {} constructors (r46: Hust does not support overloading). \
+                     A class supports exactly one constructor; for alternate entry points, \
+                     use static factory methods instead.",
+                    class_name, ctor_count
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Reject `const` applied to array declarations (r6/r18, 2026.09.09).
