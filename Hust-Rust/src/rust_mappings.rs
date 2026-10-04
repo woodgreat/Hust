@@ -62,13 +62,91 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
             "Error", "ErrorKind", "Result",
         ],
     },
+    // Result type
+    RustMapping {
+        hust_path: "RUST.STD.RESULT",
+        rust_path: "std::result",
+        items: &[
+            "Result", "Ok", "Err",
+        ],
+    },
+    // Option type
+    RustMapping {
+        hust_path: "RUST.STD.OPTION",
+        rust_path: "std::option",
+        items: &[
+            "Option", "Some", "None",
+        ],
+    },
+    // String type
+    RustMapping {
+        hust_path: "RUST.STD.STRING",
+        rust_path: "std::string",
+        items: &[
+            "String", "FromUtf8Error", "FromUtf16Error",
+        ],
+    },
+    // str type
+    RustMapping {
+        hust_path: "RUST.STD.STR",
+        rust_path: "std::str",
+        items: &[
+            "from_utf8", "from_utf16", "Chars", "Bytes", "Lines",
+        ],
+    },
+    // Char type
+    RustMapping {
+        hust_path: "RUST.STD.CHAR",
+        rust_path: "std::char",
+        items: &[
+            "from_u32", "from_digit", "is_alphabetic", "is_numeric",
+            "is_alphanumeric", "is_whitespace", "is_control",
+            "to_uppercase", "to_lowercase",
+        ],
+    },
+    // Path handling
+    RustMapping {
+        hust_path: "RUST.STD.PATH",
+        rust_path: "std::path",
+        items: &[
+            "Path", "PathBuf", "Component", "Components",
+            "Iter", "Ancestors",
+        ],
+    },
+    // Networking
+    RustMapping {
+        hust_path: "RUST.STD.NET",
+        rust_path: "std::net",
+        items: &[
+            "TcpStream", "TcpListener", "UdpSocket",
+            "IpAddr", "Ipv4Addr", "Ipv6Addr", "SocketAddr",
+        ],
+    },
+    // Threading
+    RustMapping {
+        hust_path: "RUST.STD.THREAD",
+        rust_path: "std::thread",
+        items: &[
+            "spawn", "sleep", "yield_now", "current",
+            "JoinHandle", "Thread",
+        ],
+    },
+    // Synchronization
+    RustMapping {
+        hust_path: "RUST.STD.SYNC",
+        rust_path: "std::sync",
+        items: &[
+            "Mutex", "RwLock", "Arc", "Barrier",
+            "Condvar", "mpsc",
+        ],
+    },
     // Collections
     RustMapping {
         hust_path: "RUST.STD.COLLECTIONS",
         rust_path: "std::collections",
         items: &[
             "HashMap", "HashSet", "BTreeMap", "BTreeSet",
-            "Vec", "VecDeque", "LinkedList", "BinaryHeap",
+            "VecDeque", "LinkedList", "BinaryHeap",
         ],
     },
     // Core memory operations
