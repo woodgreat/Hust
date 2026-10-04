@@ -426,25 +426,22 @@ impl NamespaceRegistry {
         (uses, remaining)
     }
 
-    /// Apply inheritance (过继) - move parent class to child's namespace
+    /// Apply inheritance (过继) - copy parent class to child's namespace
+    /// 2026.10.04: Copy semantics (not move) - original namespace retains the class
+    /// Design: parallel universes, no conflict, original class unchanged
     pub fn apply_inheritance(&mut self, child_class: &str, parent_class: &str, child_ns: &str) {
         // Find parent class
         if let Some(parent_classes) = self.classes.get(parent_class) {
             // Clone parent info
             let parent_info = parent_classes[0].clone();
 
-            // Remove from old namespace
-            if let Some(old_classes) = self.classes.get_mut(parent_class) {
-                old_classes.retain(|c| c.namespace != parent_info.namespace);
-            }
-
-            // Add to new namespace (过继)
+            // Copy to new namespace (过继) - original namespace retains the class
             let mut new_parent = parent_info.clone();
             new_parent.namespace = child_ns.to_string();
             self.register_class(new_parent);
 
             self.warnings.push(format!(
-                "Class '{}' inherited by '{}' - moved to namespace '{}' (过继)",
+                "Class '{}' inherited by '{}' - copied to namespace '{}' (过继)",
                 parent_class, child_class, child_ns
             ));
         }
