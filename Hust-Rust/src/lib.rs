@@ -5,6 +5,7 @@ pub mod project;
 pub mod namespace;
 pub mod translator;
 pub mod plugins;
+pub mod rust_mappings;
 
 // Re-exports
 pub use project::{ProjectConfig, PackageConfig, Module, ModuleResolver, ProjectError};
