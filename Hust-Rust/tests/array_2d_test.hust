@@ -1,0 +1,37 @@
+// 2D array test for Go board representation
+// 2026-10-05: Verify Hust supports 2D arrays
+
+void main() {
+    // 9x9 Go board (simplified)
+    // 0 = empty, 1 = black, 2 = white
+    i32[9][9] board = {
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0}
+    };
+    
+    // Place some stones
+    board[3][3] = 1;  // Black
+    board[4][4] = 2;  // White
+    board[3][4] = 1;  // Black
+    
+    // Print board
+    for (i32 i = 0; i < 9; i = i + 1) {
+        for (i32 j = 0; j < 9; j = j + 1) {
+            if (board[i][j] == 0) {
+                print!(". ");
+            } else if (board[i][j] == 1) {
+                print!("B ");
+            } else {
+                print!("W ");
+            }
+        }
+        println!("");
+    }
+}

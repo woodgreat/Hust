@@ -84,13 +84,6 @@ impl Translator {
 
         let mut output = source.to_string();
 
-        // 2026.10.04: Parse use statements and collect RUST system namespace imports
-        // These will be converted to actual Rust use statements and prepended to output
-        let rust_use_statements = self.generate_rust_use_statements(&output)?;
-        if !rust_use_statements.is_empty() {
-            output = format!("{}\n{}", rust_use_statements, output);
-        }
-
         // Rule 0: Initialization reminder (owner design, 2026.09.20) —
         // 非阻断浅扫描：声明后无任何写入 → 提醒"使用前要先初始化，否则
         // 语言核可能报错"。先于一切变换执行，行号对应原始文件。
@@ -1113,14 +1106,92 @@ impl Translator {
         use crate::rust_mappings;
 
         let mut registry = NamespaceRegistry::new();
-        let (_uses, _remaining) = registry.parse_use_statements(source, "temp.hust");
+        let (uses, _remaining) = registry.parse_use_statements(source, "temp.hust");
+
+        // Debug: print all parsed use statements
+        eprintln!("[DEBUG] Parsed {} use statements", uses.len());
+        for (i, u) in uses.iter().enumerate() {
+            eprintln!("[DEBUG] uses[{}]: namespace={:?}, module={:?}, item={:?}", i, u.namespace, u.module, u.item);
+        }
+        eprintln!("[DEBUG] rust_imports: {:?}", registry.rust_imports);
+
+        // Check for invalid system namespaces (e.g., RUST.UNKNOWN.SOMETHING)
+        // These start with RUST. or HUST. but are not in the mapping table
+        for use_stmt in &uses {
+            if let Some(ref ns) = use_stmt.namespace {
+                if (ns.starts_with("RUST.") || ns.starts_with("HUST.")) && !rust_mappings::is_rust_namespace(ns) {
+                    let available = rust_mappings::get_supported_namespaces();
+                    return Err(TranspileError::TransformError(format!(
+                        "unrecognized system namespace: `{}`\n\n\
+                         Supported system namespaces:\n{}\n\n\
+                         Examples:\n\
+                         - use RUST.STD.IO-*;\n\
+                         - use RUST.STD.COLLECTIONS-*;\n\
+                         - use HUST.MATH;\n\n\
+                         Note: System namespaces use `.` as internal separator (e.g., RUST.STD.IO).",
+                        ns, available.join(", ")
+                    )));
+                }
+            }
+        }
 
         let mut rust_statements = Vec::new();
 
         if let Some(imports) = registry.rust_imports.get("temp.hust") {
             for import in imports {
-                if let Some(stmt) = rust_mappings::get_rust_use(&import.hust_path, &import.item) {
-                    rust_statements.push(stmt);
+                match rust_mappings::get_rust_use(&import.hust_path, &import.item) {
+                    Some(stmt) => rust_statements.push(stmt),
+                    None => {
+                        // Teaching error: unrecognized use path (10-04挂账②)
+                        // Provide helpful guidance instead of letting rustc fail cryptically
+                        let available = rust_mappings::get_supported_namespaces();
+                        return Err(TranspileError::TransformError(format!(
+                            "unrecognized use path: `{}` (item: `{}`)\n\n\
+                             Supported system namespaces:\n{}\n\n\
+                             Examples:\n\
+                             - use RUST.STD.IO-*;\n\
+                             - use RUST.STD.COLLECTIONS-*;\n\
+                             - use HUST.MATH;\n\n\
+                             For user-defined namespaces, ensure the namespace exists and the module/class is public.",
+                            import.hust_path, import.item, available.join(", ")
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(rust_statements.join("\n"))
+    }
+
+    /// Generate Rust use statements from parsed registry (2026.10.06 A方案)
+    /// This is called AFTER parse_use_statements, using the parsed rust_imports
+    fn generate_rust_use_statements_from_registry(
+        &self,
+        registry: &crate::namespace::NamespaceRegistry,
+        file_path: &str,
+    ) -> Result<String, TranspileError> {
+        use crate::rust_mappings;
+
+        let mut rust_statements = Vec::new();
+
+        if let Some(imports) = registry.rust_imports.get(file_path) {
+            for import in imports {
+                match rust_mappings::get_rust_use(&import.hust_path, &import.item) {
+                    Some(stmt) => rust_statements.push(stmt),
+                    None => {
+                        // Teaching error: unrecognized use path (10-04挂账②)
+                        let available = rust_mappings::get_supported_namespaces();
+                        return Err(TranspileError::TransformError(format!(
+                            "unrecognized use path: `{}` (item: `{}`)\n\n\
+                             Supported system namespaces:\n{}\n\n\
+                             Examples:\n\
+                             - use RUST.STD.IO-*;\n\
+                             - use RUST.STD.COLLECTIONS-*;\n\
+                             - use HUST.MATH;\n\n\
+                             For user-defined namespaces, ensure the namespace exists and the module/class is public.",
+                            import.hust_path, import.item, available.join(", ")
+                        )));
+                    }
                 }
             }
         }
@@ -3714,6 +3785,20 @@ impl Translator {
             // Parse use statements
             let (_uses, remaining) = registry.parse_use_statements(&after_ns, &file_path);
 
+            // 2026.10.06: Generate Rust use statements from parsed RUST system namespace imports
+            // This must happen AFTER parse_use_statements (which collects rust_imports)
+            let rust_use_statements = self.generate_rust_use_statements_from_registry(&registry, &file_path)?;
+            let remaining = if rust_use_statements.is_empty() {
+                remaining
+            } else {
+                format!("{}\n{}", rust_use_statements, remaining)
+            };
+
+            // 2026.10.06: Display warnings from namespace parsing (e.g., unrecognized system namespaces)
+            for warning in &registry.warnings {
+                eprintln!("[Hust Warning] {}", warning);
+            }
+
             // Extract function declarations for registry
             // r44 fix: mask class/interface bodies first — class methods are
             // class-scoped, not namespace-scoped. Without masking, two
@@ -5682,7 +5767,7 @@ impl Translator {
                         // Detect field writes: self.field = value or self.field += value
                         // Pattern: self.field or this.field followed by = or +=, -=, *=, /=
                         // Also support array element assignment: self.field[index] = value
-                        regex::Regex::new(r"(?:self|this)\.\w+(?:\[\d+\])?\s*(?:[-+*/])?=").unwrap().is_match(b)
+                        regex::Regex::new(r"(?:self|this)\.\w+(?:\[[^\]]+\])*\s*(?:[-+*/])?=").unwrap().is_match(b)
                     })
                     .unwrap_or(false)
             };
@@ -5950,7 +6035,7 @@ impl Translator {
                 // Match field declarations: Type name; or Type name = value;
                 // Also match array types: Type[dim] name;
                 // Exclude method definitions (which have parentheses)
-                let field_re = Regex::new(r"(?m)^\s*(?:public\s+|private\s+)?(\w+(?:\[\d+\])?)\s+([a-zA-Z_]\w*)\s*(?:=[^;]*)?;\s*$").unwrap();
+                let field_re = Regex::new(r"(?m)^\s*(?:public\s+|private\s+)?(\w+(?:\[[^\]]+\])*)\s+([a-zA-Z_]\w*)\s*(?:=[^;]*)?;\s*$").unwrap();
                 for fcaps in field_re.captures_iter(body) {
                     let field_name = fcaps[2].to_string();
                     // Skip if it looks like a method call (has parentheses after)

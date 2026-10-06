@@ -1,0 +1,36 @@
+// Test: does needs_mut detect array subscript assignment?
+// 2026-10-05: Verify self.grid[x][y] = value generates &mut self
+
+class Board {
+    i32[3][3] grid;
+    
+    public Board() {
+        for (i32 i = 0; i < 3; i = i + 1) {
+            for (i32 j = 0; j < 3; j = j + 1) {
+                self.grid[i][j] = 0;
+            }
+        }
+    }
+    
+    // Test 1: simple field assignment
+    public void set_simple(i32 val) {
+        self.grid[0][0] = val;
+    }
+    
+    // Test 2: array subscript assignment
+    public void set_at(i32 x, i32 y, i32 val) {
+        self.grid[x][y] = val;
+    }
+    
+    // Test 3: read-only method (should be &self)
+    public i32 get_at(i32 x, i32 y) {
+        return self.grid[x][y];
+    }
+}
+
+void main() {
+    Board b = new Board();
+    b.set_simple(1);
+    b.set_at(1, 1, 2);
+    println!("get_at(1,1) = {}", b.get_at(1, 1));
+}

@@ -1,0 +1,21 @@
+// Recursion test for Go engine feasibility
+// 2026-10-05: Verify Hust supports recursive functions
+
+fn factorial(n: i32) -> i32 {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+fn fibonacci(n: i32) -> i32 {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+void main() {
+    println!("factorial(5) = {}", factorial(5));
+    println!("fibonacci(10) = {}", fibonacci(10));
+}

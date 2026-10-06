@@ -307,6 +307,11 @@ pub fn get_rust_use(hust_path: &str, item: &str) -> Option<String> {
     }
 }
 
+/// Get a list of all supported system namespace paths (for error messages)
+pub fn get_supported_namespaces() -> Vec<&'static str> {
+    RUST_MAPPINGS.iter().map(|m| m.hust_path).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

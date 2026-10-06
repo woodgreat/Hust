@@ -1,0 +1,23 @@
+// Test 1: 19x19 array with bool return
+class Board {
+    i32[19][19] grid;
+    
+    public Board() {
+        for (i32 i = 0; i < 19; i = i + 1) {
+            for (i32 j = 0; j < 19; j = j + 1) {
+                self.grid[i][j] = 0;
+            }
+        }
+    }
+    
+    public bool place(i32 x, i32 y, i32 val) {
+        self.grid[x][y] = val;
+        return true;
+    }
+}
+
+void main() {
+    Board b = new Board();
+    bool ok = b.place(1, 1, 2);
+    println!("ok = {}", ok);
+}

@@ -383,6 +383,11 @@ impl NamespaceRegistry {
 
     /// Check if namespace is reserved (UPPERCASE)
     pub fn is_reserved_namespace(name: &str) -> bool {
+        // System namespaces: RUST, HUST, or any path starting with RUST. or HUST.
+        // Examples: RUST, HUST, RUST.STD.IO, HUST.MATH
+        name == "RUST" || name == "HUST" ||
+        name.starts_with("RUST.") || name.starts_with("HUST.") ||
+        // Legacy: all uppercase with underscores (e.g., RUST_STD)
         name.chars().all(|c| c.is_ascii_uppercase() || c == '_')
     }
 
@@ -418,7 +423,10 @@ impl NamespaceRegistry {
 
         for line in source.lines() {
             let trimmed = line.trim();
+            // Debug: print each line being checked
+            eprintln!("[DEBUG parse_use] checking line: '{}'", trimmed);
             if trimmed.starts_with("use ") && trimmed.ends_with(';') {
+                eprintln!("[DEBUG parse_use] found use statement: '{}'", trimmed);
                 // Parse: use ... ;
                 let stmt = &trimmed[4..trimmed.len() - 1];
 
@@ -430,21 +438,26 @@ impl NamespaceRegistry {
                 };
 
                 let path_part = path_part.trim();
+                eprintln!("[DEBUG parse_use] path_part: '{}'", path_part);
 
                 // Step 2: Detect namespace (check for '-')
                 let (namespace, rest) = if let Some(dash_pos) = path_part.find('-') {
                     // Has namespace: Zoo-... or RUST.STD.IO-...
                     let ns = path_part[..dash_pos].trim().to_string();
                     let rest = path_part[dash_pos + 1..].trim().to_string();
+                    eprintln!("[DEBUG parse_use] found dash: ns='{}', rest='{}'", ns, rest);
                     (Some(ns), rest)
                 } else {
                     // No namespace
+                    eprintln!("[DEBUG parse_use] no dash found");
                     (None, path_part.to_string())
                 };
 
                 // Step 3: Check if this is a RUST system namespace import
                 if let Some(ref ns) = namespace {
-                    if crate::rust_mappings::is_rust_namespace(ns) {
+                    let is_rust = crate::rust_mappings::is_rust_namespace(ns);
+                    eprintln!("[DEBUG parse_use] is_rust_namespace('{}') = {}", ns, is_rust);
+                    if is_rust {
                         // This is a RUST system namespace import - collect it separately
                         let item = rest.trim().to_string();
                         if !item.is_empty() {
@@ -461,13 +474,36 @@ impl NamespaceRegistry {
                             }
                             continue;
                         }
+                    } else if ns.starts_with("RUST.") || ns.starts_with("HUST.") {
+                        // Invalid system namespace (e.g., RUST.UNKNOWN.SOMETHING)
+                        // This is a teaching error - provide helpful guidance
+                        let available = crate::rust_mappings::get_supported_namespaces();
+                        self.warnings.push(format!(
+                            "unrecognized system namespace: `{}`\n\n\
+                             Supported system namespaces:\n{}\n\n\
+                             Examples:\n\
+                             - use RUST.STD.IO-*;\n\
+                             - use RUST.STD.COLLECTIONS-*;\n\
+                             - use HUST.MATH;\n\n\
+                             Note: System namespaces use `.` as internal separator (e.g., RUST.STD.IO).",
+                            ns, available.join(", ")
+                        ));
+                        // Remove the invalid use line to prevent further errors
+                        let line_to_remove = format!("{}\n", trimmed);
+                        remaining = remaining.replacen(&line_to_remove, "", 1);
+                        if remaining.contains(trimmed) {
+                            remaining = remaining.replacen(trimmed, "", 1);
+                        }
+                        continue;
                     }
                 }
 
                 // Step 4: Parse rest (module.item / module / Class / Outer.Inner)
                 // Pass namespace context for system namespace detection
                 let is_system_ns = namespace.as_ref().map_or(false, |ns| Self::is_reserved_namespace(ns));
+                eprintln!("[DEBUG parse_use] is_system_ns: {}", is_system_ns);
                 let (module, item) = Self::parse_use_path(&rest, is_system_ns);
+                eprintln!("[DEBUG parse_use] parsed: module={:?}, item={:?}", module, item);
 
                 // Step 5: Validate and create UseStmt
                 if let Some(use_stmt) = Self::build_use_stmt(namespace, module, item, alias) {
@@ -493,6 +529,11 @@ impl NamespaceRegistry {
     fn parse_use_path(path: &str, is_system_ns: bool) -> (Option<String>, Option<String>) {
         if path.is_empty() {
             return (None, None);
+        }
+
+        // Check for bare wildcard: * (import all from namespace)
+        if path == "*" {
+            return (None, Some("*".to_string()));
         }
 
         // Check for wildcard: module.*
@@ -536,11 +577,16 @@ impl NamespaceRegistry {
         item: Option<String>,
         alias: Option<String>,
     ) -> Option<UseStmt> {
+        // Debug: print inputs
+        eprintln!("[DEBUG build_use_stmt] namespace={:?}, module={:?}, item={:?}, alias={:?}", namespace, module, item, alias);
+        
         // Validate: must have at least something
         if namespace.is_none() && module.is_none() && item.is_none() {
+            eprintln!("[DEBUG build_use_stmt] returning None: all fields are None");
             return None;
         }
 
+        eprintln!("[DEBUG build_use_stmt] returning Some");
         Some(UseStmt {
             namespace,
             module,
