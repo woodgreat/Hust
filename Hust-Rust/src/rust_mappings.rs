@@ -52,7 +52,324 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
             "Vec", "vec",
         ],
     },
-    // Standard I/O
+    // Standard I/O (2026-10-06: new system library path, no namespace)
+    RustMapping {
+        hust_path: "RUST.IO",
+        rust_path: "std::io",
+        items: &[
+            "stdin", "stdout", "stderr",
+            "Read", "Write", "BufRead", "BufReader", "BufWriter",
+            "Error", "ErrorKind", "Result",
+        ],
+    },
+    // Result type (new path)
+    RustMapping {
+        hust_path: "RUST.RESULT",
+        rust_path: "std::result",
+        items: &[
+            "Result", "Ok", "Err",
+        ],
+    },
+    // Option type (new path)
+    RustMapping {
+        hust_path: "RUST.OPTION",
+        rust_path: "std::option",
+        items: &[
+            "Option", "Some", "None",
+        ],
+    },
+    // String type (new path)
+    RustMapping {
+        hust_path: "RUST.STRING",
+        rust_path: "std::string",
+        items: &[
+            "String", "FromUtf8Error", "FromUtf16Error",
+        ],
+    },
+    // str type (new path)
+    RustMapping {
+        hust_path: "RUST.STR",
+        rust_path: "std::str",
+        items: &[
+            "from_utf8", "from_utf16", "Chars", "Bytes", "Lines",
+        ],
+    },
+    // Char type (new path)
+    RustMapping {
+        hust_path: "RUST.CHAR",
+        rust_path: "std::char",
+        items: &[
+            "from_u32", "from_digit", "is_alphabetic", "is_numeric",
+            "is_alphanumeric", "is_whitespace", "is_control",
+            "to_uppercase", "to_lowercase",
+        ],
+    },
+    // Path handling (new path)
+    RustMapping {
+        hust_path: "RUST.PATH",
+        rust_path: "std::path",
+        items: &[
+            "Path", "PathBuf", "Component", "Components",
+            "Iter", "Ancestors",
+        ],
+    },
+    // Networking (new path)
+    RustMapping {
+        hust_path: "RUST.NET",
+        rust_path: "std::net",
+        items: &[
+            "TcpStream", "TcpListener", "UdpSocket",
+            "IpAddr", "Ipv4Addr", "Ipv6Addr", "SocketAddr",
+        ],
+    },
+    // Threading (new path)
+    RustMapping {
+        hust_path: "RUST.THREAD",
+        rust_path: "std::thread",
+        items: &[
+            "spawn", "sleep", "yield_now", "current",
+            "JoinHandle", "Thread",
+        ],
+    },
+    // Synchronization (new path)
+    RustMapping {
+        hust_path: "RUST.SYNC",
+        rust_path: "std::sync",
+        items: &[
+            "Mutex", "RwLock", "Arc", "Barrier",
+            "Condvar", "mpsc",
+        ],
+    },
+    // Collections (new path)
+    RustMapping {
+        hust_path: "RUST.COLLECTIONS",
+        rust_path: "std::collections",
+        items: &[
+            "HashMap", "HashSet", "BTreeMap", "BTreeSet",
+            "VecDeque", "LinkedList", "BinaryHeap",
+        ],
+    },
+    // Time (new path)
+    RustMapping {
+        hust_path: "RUST.TIME",
+        rust_path: "std::time",
+        items: &[
+            "Duration", "Instant", "SystemTime", "SystemTimeError",
+        ],
+    },
+    // File system (new path)
+    RustMapping {
+        hust_path: "RUST.FS",
+        rust_path: "std::fs",
+        items: &[
+            "File", "OpenOptions", "DirEntry", "ReadDir",
+            "create_dir", "create_dir_all", "remove_dir", "remove_dir_all",
+            "remove_file", "rename", "copy", "hard_link", "soft_link",
+            "metadata", "read", "read_to_string", "read_link", "write",
+        ],
+    },
+    // Environment (new path)
+    RustMapping {
+        hust_path: "RUST.ENV",
+        rust_path: "std::env",
+        items: &[
+            "args", "args_os", "var", "var_os", "set_var", "remove_var",
+            "current_dir", "current_exe", "home_dir", "temp_dir",
+        ],
+    },
+    // Process (new path)
+    RustMapping {
+        hust_path: "RUST.PROCESS",
+        rust_path: "std::process",
+        items: &[
+            "Command", "Child", "ChildStdin", "ChildStdout", "ChildStderr",
+            "Output", "ExitStatus", "ExitCode", "Stdio",
+            "abort", "exit", "id",
+        ],
+    },
+    // Formatting (new path)
+    RustMapping {
+        hust_path: "RUST.FMT",
+        rust_path: "std::fmt",
+        items: &[
+            "Display", "Debug", "Formatter", "Result", "Error",
+            "Write", "format", "format_args",
+        ],
+    },
+    // Macros (new path)
+    RustMapping {
+        hust_path: "RUST.MACROS",
+        rust_path: "std::macros",
+        items: &[
+            "println", "print", "eprintln", "eprint", "format",
+            "vec", "assert", "assert_eq", "assert_ne",
+            "debug_assert", "debug_assert_eq", "debug_assert_ne",
+            "panic", "unimplemented", "unreachable", "todo",
+        ],
+    },
+    // Memory (new path, from core::mem)
+    RustMapping {
+        hust_path: "RUST.MEM",
+        rust_path: "core::mem",
+        items: &[
+            "size_of", "align_of", "size_of_val", "align_of_val",
+            "drop", "forget", "replace", "swap", "take",
+            "zeroed", "uninitialized", "transmute",
+        ],
+    },
+    // Error trait (new path)
+    RustMapping {
+        hust_path: "RUST.ERROR",
+        rust_path: "std::error",
+        items: &[
+            "Error", "ErrorKind",
+        ],
+    },
+    // Conversion traits (new path)
+    RustMapping {
+        hust_path: "RUST.CONVERT",
+        rust_path: "std::convert",
+        items: &[
+            "From", "Into", "TryFrom", "TryInto", "AsRef", "AsMut", "FromStr",
+        ],
+    },
+    // Iterator trait (new path)
+    RustMapping {
+        hust_path: "RUST.ITER",
+        rust_path: "std::iter",
+        items: &[
+            "Iterator", "IntoIterator", "FromIterator", "DoubleEndedIterator",
+            "ExactSizeIterator", "Extend", "Sum", "Product",
+            "once", "repeat", "empty", "from_fn", "successors",
+        ],
+    },
+    // Operator traits (new path)
+    RustMapping {
+        hust_path: "RUST.OPS",
+        rust_path: "std::ops",
+        items: &[
+            "Add", "Sub", "Mul", "Div", "Rem", "Neg", "Not",
+            "BitAnd", "BitOr", "BitXor", "Shl", "Shr",
+            "AddAssign", "SubAssign", "MulAssign", "DivAssign", "RemAssign",
+            "BitAndAssign", "BitOrAssign", "BitXorAssign", "ShlAssign", "ShrAssign",
+            "Deref", "DerefMut", "Drop", "Fn", "FnMut", "FnOnce", "Index", "IndexMut",
+            "Range", "RangeFrom", "RangeFull", "RangeInclusive", "RangeTo", "RangeToInclusive",
+        ],
+    },
+    // Comparison traits (new path)
+    RustMapping {
+        hust_path: "RUST.CMP",
+        rust_path: "std::cmp",
+        items: &[
+            "Ord", "Eq", "PartialOrd", "PartialEq", "Ordering", "Reverse",
+            "max", "min", "max_by", "min_by", "max_by_key", "min_by_key",
+        ],
+    },
+    // Clone trait (new path)
+    RustMapping {
+        hust_path: "RUST.CLONE",
+        rust_path: "std::clone",
+        items: &[
+            "Clone",
+        ],
+    },
+    // Default trait (new path)
+    RustMapping {
+        hust_path: "RUST.DEFAULT",
+        rust_path: "std::default",
+        items: &[
+            "Default",
+        ],
+    },
+    // Borrow trait (new path)
+    RustMapping {
+        hust_path: "RUST.BORROW",
+        rust_path: "std::borrow",
+        items: &[
+            "Borrow", "BorrowMut", "Cow", "ToOwned",
+        ],
+    },
+    // Any trait (new path)
+    RustMapping {
+        hust_path: "RUST.ANY",
+        rust_path: "std::any",
+        items: &[
+            "Any", "TypeId", "type_name", "type_name_of_val",
+        ],
+    },
+    // Marker traits (new path)
+    RustMapping {
+        hust_path: "RUST.MARKER",
+        rust_path: "std::marker",
+        items: &[
+            "Send", "Sync", "Copy", "Sized", "Unpin", "PhantomData", "PhantomPinned",
+        ],
+    },
+    // Pin (new path)
+    RustMapping {
+        hust_path: "RUST.PIN",
+        rust_path: "std::pin",
+        items: &[
+            "Pin", "pin",
+        ],
+    },
+    // Future trait (new path)
+    RustMapping {
+        hust_path: "RUST.FUTURE",
+        rust_path: "std::future",
+        items: &[
+            "Future", "poll_fn", "ready", "pending", "join", "select",
+        ],
+    },
+    // Task module (new path)
+    RustMapping {
+        hust_path: "RUST.TASK",
+        rust_path: "std::task",
+        items: &[
+            "Context", "Poll", "RawWaker", "RawWakerVTable", "Waker", "Wake",
+        ],
+    },
+    // Arc (new path)
+    RustMapping {
+        hust_path: "RUST.ARC",
+        rust_path: "std::sync",
+        items: &[
+            "Arc", "Weak",
+        ],
+    },
+    // Rc (new path)
+    RustMapping {
+        hust_path: "RUST.RC",
+        rust_path: "std::rc",
+        items: &[
+            "Rc", "Weak",
+        ],
+    },
+    // Cell (new path)
+    RustMapping {
+        hust_path: "RUST.CELL",
+        rust_path: "std::cell",
+        items: &[
+            "Cell", "RefCell", "Ref", "RefMut", "OnceCell",
+        ],
+    },
+    // Box (new path)
+    RustMapping {
+        hust_path: "RUST.BOX",
+        rust_path: "std::boxed",
+        items: &[
+            "Box",
+        ],
+    },
+    // Vec (new path)
+    RustMapping {
+        hust_path: "RUST.VEC",
+        rust_path: "std::vec",
+        items: &[
+            "Vec",
+        ],
+    },
+    // Standard I/O (legacy path, kept for compatibility)
     RustMapping {
         hust_path: "RUST.STD.IO",
         rust_path: "std::io",

@@ -424,9 +424,7 @@ impl NamespaceRegistry {
         for line in source.lines() {
             let trimmed = line.trim();
             // Debug: print each line being checked
-            eprintln!("[DEBUG parse_use] checking line: '{}'", trimmed);
             if trimmed.starts_with("use ") && trimmed.ends_with(';') {
-                eprintln!("[DEBUG parse_use] found use statement: '{}'", trimmed);
                 // Parse: use ... ;
                 let stmt = &trimmed[4..trimmed.len() - 1];
 
@@ -438,25 +436,111 @@ impl NamespaceRegistry {
                 };
 
                 let path_part = path_part.trim();
-                eprintln!("[DEBUG parse_use] path_part: '{}'", path_part);
+
+                // Step 1.5: Forbidden patterns (2026-10-06 rules)
+                // Rule 1: Forbidden - only namespace, no module (e.g., use Zoo;)
+                // Rule 2: Forbidden - namespace wildcard without module (e.g., use Zoo-*;)
+                // Rule 3: Forbidden - import all modules (e.g., use *;)
+                if path_part == "*" {
+                    self.warnings.push(format!(
+                        "forbidden use pattern: `use *;` - ambiguous import all modules\n\
+                         Please specify a module: `use module;` or `use module.*;`"
+                    ));
+                    let line_to_remove = format!("{}\n", trimmed);
+                    remaining = remaining.replacen(&line_to_remove, "", 1);
+                    continue;
+                }
+                if let Some(dash_pos) = path_part.find('-') {
+                    let right = path_part[dash_pos + 1..].trim();
+                    if right == "*" {
+                        self.warnings.push(format!(
+                            "forbidden use pattern: `use {}-*;` - wildcard without specific module\n\
+                             Please specify a module: `use {}-Module;` or `use {}-Module.*;`",
+                            &path_part[..dash_pos], &path_part[..dash_pos], &path_part[..dash_pos]
+                        ));
+                        let line_to_remove = format!("{}\n", trimmed);
+                        remaining = remaining.replacen(&line_to_remove, "", 1);
+                        continue;
+                    }
+                }
 
                 // Step 2: Detect namespace (check for '-')
                 let (namespace, rest) = if let Some(dash_pos) = path_part.find('-') {
-                    // Has namespace: Zoo-... or RUST.STD.IO-...
+                    // Has namespace: Zoo-Animal (user namespace)
                     let ns = path_part[..dash_pos].trim().to_string();
                     let rest = path_part[dash_pos + 1..].trim().to_string();
-                    eprintln!("[DEBUG parse_use] found dash: ns='{}', rest='{}'", ns, rest);
                     (Some(ns), rest)
+                } else if path_part.starts_with("RUST.") || path_part.starts_with("HUST.") {
+                    // System library path (no namespace, use . path)
+                    // e.g., RUST.IO or RUST.IO.*
+                    (None, path_part.to_string())
                 } else {
-                    // No namespace
-                    eprintln!("[DEBUG parse_use] no dash found");
+                    // No namespace, user module or class
                     (None, path_part.to_string())
                 };
+
+                // Step 2.5: Handle system library imports (RUST.IO, RUST.IO.*, etc.)
+                if namespace.is_none() && (rest.starts_with("RUST.") || rest.starts_with("HUST.")) {
+                    // Parse system library path: RUST.IO or RUST.IO.*
+                    let sys_path = rest.trim();
+                    let (hust_path, item) = if sys_path.ends_with(".*") {
+                        // Wildcard: RUST.IO.*
+                        let path = sys_path[..sys_path.len() - 2].trim().to_string();
+                        (path, "*".to_string())
+                    } else {
+                        // Check if this is a known system library path (RUST.IO) or an item (RUST.IO.stdin)
+                        let path = sys_path.to_string();
+                        if crate::rust_mappings::is_rust_namespace(&path) {
+                            // Whole module: RUST.IO
+                            (path, "".to_string())
+                        } else if let Some(dot_pos) = sys_path.rfind('.') {
+                            // Specific item: RUST.IO.stdin
+                            let path = sys_path[..dot_pos].trim().to_string();
+                            let item = sys_path[dot_pos + 1..].trim().to_string();
+                            (path, item)
+                        } else {
+                            // Whole module: RUST.IO (fallback)
+                            (path, "".to_string())
+                        }
+                    };
+                    
+                    // Validate system namespace
+                    if crate::rust_mappings::is_rust_namespace(&hust_path) {
+                        rust_imports.push(RustImport {
+                            hust_path,
+                            item,
+                            alias: alias.clone(),
+                        });
+                        let line_to_remove = format!("{}\n", trimmed);
+                        remaining = remaining.replacen(&line_to_remove, "", 1);
+                        if remaining.contains(trimmed) {
+                            remaining = remaining.replacen(trimmed, "", 1);
+                        }
+                        continue;
+                    } else {
+                        // Invalid system namespace
+                        let available = crate::rust_mappings::get_supported_namespaces();
+                        self.warnings.push(format!(
+                            "unrecognized system library: `{}`\n\n\
+                             Supported system libraries:\n{}\n\n\
+                             Examples:\n\
+                             - use RUST.IO;\n\
+                             - use RUST.IO.*;\n\
+                             - use HUST.MATH;",
+                            hust_path, available.join(", ")
+                        ));
+                        let line_to_remove = format!("{}\n", trimmed);
+                        remaining = remaining.replacen(&line_to_remove, "", 1);
+                        if remaining.contains(trimmed) {
+                            remaining = remaining.replacen(trimmed, "", 1);
+                        }
+                        continue;
+                    }
+                }
 
                 // Step 3: Check if this is a RUST system namespace import
                 if let Some(ref ns) = namespace {
                     let is_rust = crate::rust_mappings::is_rust_namespace(ns);
-                    eprintln!("[DEBUG parse_use] is_rust_namespace('{}') = {}", ns, is_rust);
                     if is_rust {
                         // This is a RUST system namespace import - collect it separately
                         let item = rest.trim().to_string();
@@ -500,10 +584,10 @@ impl NamespaceRegistry {
 
                 // Step 4: Parse rest (module.item / module / Class / Outer.Inner)
                 // Pass namespace context for system namespace detection
+                // 2026-10-06: If namespace exists (user namespace like Zoo-), treat uppercase as module too
                 let is_system_ns = namespace.as_ref().map_or(false, |ns| Self::is_reserved_namespace(ns));
-                eprintln!("[DEBUG parse_use] is_system_ns: {}", is_system_ns);
-                let (module, item) = Self::parse_use_path(&rest, is_system_ns);
-                eprintln!("[DEBUG parse_use] parsed: module={:?}, item={:?}", module, item);
+                let has_namespace = namespace.is_some();
+                let (module, item) = Self::parse_use_path_with_context(&rest, is_system_ns, has_namespace);
 
                 // Step 5: Validate and create UseStmt
                 if let Some(use_stmt) = Self::build_use_stmt(namespace, module, item, alias) {
@@ -570,6 +654,60 @@ impl NamespaceRegistry {
         }
     }
 
+    /// Parse use path with namespace context
+    /// has_namespace: if true, treat uppercase identifiers as modules (user namespace context)
+    fn parse_use_path_with_context(
+        path: &str,
+        is_system_ns: bool,
+        has_namespace: bool,
+    ) -> (Option<String>, Option<String>) {
+        if path.is_empty() {
+            return (None, None);
+        }
+
+        // Check for bare wildcard: * (import all from namespace)
+        if path == "*" {
+            return (None, Some("*".to_string()));
+        }
+
+        // Check for wildcard: module.*
+        if path.ends_with(".*") {
+            let module = path[..path.len() - 2].trim().to_string();
+            return (Some(module), Some("*".to_string()));
+        }
+
+        // Check for dot: module.item or Outer.Inner or Module.Item
+        if let Some(dot_pos) = path.rfind('.') {
+            let first = path[..dot_pos].trim().to_string();
+            let second = path[dot_pos + 1..].trim().to_string();
+
+            // Check if first part is module (lowercase) or Module (uppercase with namespace)
+            if first.chars().next().map_or(false, |c| c.is_ascii_lowercase()) {
+                // module.item (lowercase module)
+                return (Some(first), Some(second));
+            } else if has_namespace {
+                // Module.Item (uppercase module with user namespace)
+                return (Some(first), Some(second));
+            } else {
+                // Outer.Inner (nested class, no namespace)
+                return (None, Some(path.to_string()));
+            }
+        }
+
+        // Single identifier: module or Class
+        if path.chars().next().map_or(false, |c| c.is_ascii_lowercase()) {
+            // module (lowercase)
+            (Some(path.to_string()), None)
+        } else if is_system_ns || has_namespace {
+            // System namespace or user namespace context: uppercase = module
+            // 2026-10-06: In Hust, after `-` must be a module, Class is just an item in module
+            (Some(path.to_string()), None)
+        } else {
+            // Class (uppercase, no namespace context)
+            (None, Some(path.to_string()))
+        }
+    }
+
     /// Build UseStmt from parsed components
     fn build_use_stmt(
         namespace: Option<String>,
@@ -578,15 +716,12 @@ impl NamespaceRegistry {
         alias: Option<String>,
     ) -> Option<UseStmt> {
         // Debug: print inputs
-        eprintln!("[DEBUG build_use_stmt] namespace={:?}, module={:?}, item={:?}, alias={:?}", namespace, module, item, alias);
         
         // Validate: must have at least something
         if namespace.is_none() && module.is_none() && item.is_none() {
-            eprintln!("[DEBUG build_use_stmt] returning None: all fields are None");
             return None;
         }
 
-        eprintln!("[DEBUG build_use_stmt] returning Some");
         Some(UseStmt {
             namespace,
             module,
@@ -627,9 +762,11 @@ impl NamespaceRegistry {
         if let Some(uses) = self.use_statements.get(current_file) {
             for use_stmt in uses {
                 // Check if this use imports the function
+                // 2026-10-06: Distinguish None (need prefix) vs Some("*") (no prefix)
                 let matches = match &use_stmt.item {
-                    None => true,  // use ns; - imports all
-                    Some(item) => item == name,  // use ns.item;
+                    None => true,           // use mod; - imports all, need prefix
+                    Some(item) if item == "*" => true,  // use mod.*; - imports all, no prefix
+                    Some(item) => item == name,  // use mod.item; - specific item
                 };
 
 
@@ -703,8 +840,8 @@ namespace MATH;
     fn test_use_system_namespace() {
         let mut registry = NamespaceRegistry::new();
         let source = r#"
-use RUST.STD.IO-*;
-use HUST-MATH;
+use RUST.STD.IO.*;
+use RUST.COLLECTIONS.*;
 "#;
 
         let (uses, _) = registry.parse_use_statements(source, "test.hust");
@@ -714,8 +851,8 @@ use HUST-MATH;
         assert_eq!(rust_imports.len(), 2);
         assert_eq!(rust_imports[0].hust_path, "RUST.STD.IO");
         assert_eq!(rust_imports[0].item, "*");
-        assert_eq!(rust_imports[1].hust_path, "HUST");
-        assert_eq!(rust_imports[1].item, "MATH");
+        assert_eq!(rust_imports[1].hust_path, "RUST.COLLECTIONS");
+        assert_eq!(rust_imports[1].item, "*");
         
         // uses should be empty (all imports went to rust_imports)
         assert_eq!(uses.len(), 0);
@@ -904,8 +1041,9 @@ use Zoo-Animal;
         let (uses, _) = registry.parse_use_statements(source, "test.hust");
         assert_eq!(uses.len(), 1);
         assert_eq!(uses[0].namespace, Some("Zoo".to_string()));
-        assert_eq!(uses[0].module, None);
-        assert_eq!(uses[0].item, Some("Animal".to_string()));
+        // 2026-10-06: After `-` must be a module, Class is just an item in module
+        assert_eq!(uses[0].module, Some("Animal".to_string()));
+        assert_eq!(uses[0].item, None);
     }
 
     #[test]
@@ -972,10 +1110,10 @@ use Zoo-*;
 "#;
 
         let (uses, _) = registry.parse_use_statements(source, "test.hust");
-        assert_eq!(uses.len(), 1);
-        assert_eq!(uses[0].namespace, Some("Zoo".to_string()));
-        assert_eq!(uses[0].module, None);
-        assert_eq!(uses[0].item, Some("*".to_string()));
+        // 2026-10-06: Zoo-* is now a forbidden pattern (rule 2: namespace-* without module)
+        assert_eq!(uses.len(), 0);
+        assert!(!registry.warnings.is_empty());
+        assert!(registry.warnings[0].contains("forbidden use pattern"));
     }
 
     #[test]
@@ -991,5 +1129,203 @@ use Zoo-animal as za;
         assert_eq!(uses[0].module, Some("animal".to_string()));
         assert_eq!(uses[0].item, None);
         assert_eq!(uses[0].alias, Some("za".to_string()));
+    }
+
+    // 2026-10-06: System library tests (no namespace, use . path)
+    #[test]
+    fn test_parse_use_system_lib_module() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.IO;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        // System library imports are collected in rust_imports, not uses
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.IO");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "");
+    }
+
+    #[test]
+    fn test_parse_use_system_lib_wildcard() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.IO.*;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.IO");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "*");
+    }
+
+    #[test]
+    fn test_parse_use_system_lib_item() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.IO.stdin;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.IO");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "stdin");
+    }
+
+    // 2026-10-06: Forbidden patterns tests
+    #[test]
+    fn test_forbidden_use_star() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use *;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert!(!registry.warnings.is_empty());
+        assert!(registry.warnings[0].contains("forbidden use pattern"));
+    }
+
+    #[test]
+    fn test_forbidden_use_namespace_wildcard() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use Zoo-*;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert!(!registry.warnings.is_empty());
+        assert!(registry.warnings[0].contains("forbidden use pattern"));
+    }
+
+    // 2026-10-06: Comprehensive use syntax tests
+    #[test]
+    fn test_use_system_lib_legacy_path() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.STD.IO;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.STD.IO");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "");
+    }
+
+    #[test]
+    fn test_use_user_namespace_module() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use Zoo-Animal;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].namespace, Some("Zoo".to_string()));
+        assert_eq!(uses[0].module, Some("Animal".to_string()));
+        assert_eq!(uses[0].item, None);
+    }
+
+    #[test]
+    fn test_use_user_namespace_module_item() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use Zoo-Animal.Dog;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].namespace, Some("Zoo".to_string()));
+        assert_eq!(uses[0].module, Some("Animal".to_string()));
+        assert_eq!(uses[0].item, Some("Dog".to_string()));
+    }
+
+    #[test]
+    fn test_use_user_namespace_wildcard() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use Zoo-Animal.*;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].namespace, Some("Zoo".to_string()));
+        assert_eq!(uses[0].module, Some("Animal".to_string()));
+        assert_eq!(uses[0].item, Some("*".to_string()));
+    }
+
+    #[test]
+    fn test_use_default_namespace_module() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use animal;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].namespace, None);
+        assert_eq!(uses[0].module, Some("animal".to_string()));
+        assert_eq!(uses[0].item, None);
+    }
+
+    #[test]
+    fn test_use_default_namespace_item() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use animal.Dog;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].namespace, None);
+        assert_eq!(uses[0].module, Some("animal".to_string()));
+        assert_eq!(uses[0].item, Some("Dog".to_string()));
+    }
+
+    #[test]
+    fn test_use_default_namespace_wildcard() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use animal.*;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].namespace, None);
+        assert_eq!(uses[0].module, Some("animal".to_string()));
+        assert_eq!(uses[0].item, Some("*".to_string()));
+    }
+
+    #[test]
+    fn test_use_with_alias() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use Zoo-Animal as Za;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].namespace, Some("Zoo".to_string()));
+        assert_eq!(uses[0].module, Some("Animal".to_string()));
+        assert_eq!(uses[0].alias, Some("Za".to_string()));
+    }
+
+    #[test]
+    fn test_use_system_lib_with_alias() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.IO as IO;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.IO");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].alias, Some("IO".to_string()));
     }
 }
