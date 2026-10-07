@@ -1,0 +1,23 @@
+pub i32 char_to_int(char c) {
+    return (i32)c;
+}
+
+pub char int_to_char(i32 x) {
+    i32 code = (i32)'A' + x;
+    return (char)code;
+}
+
+pub String make_coord(char col, i32 row) {
+    return format!("{}{}", col, row);
+}
+
+pub char first_char(String s) {
+    return s.chars().nth(0).unwrap();
+}
+
+pub u8 first_byte(String s) {
+    return s.as_bytes()[0];
+}
+
+fn main() {
+}
