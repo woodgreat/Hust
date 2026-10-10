@@ -1,0 +1,23 @@
+// B5: 正确的形状接口写法（去掉 public）
+interface MoveGenerator {
+    public genmove(board, color);
+}
+
+class Board {
+    i32 size;
+    public Board() { self.size = 19; }
+}
+
+class Level1 implements MoveGenerator {
+    public genmove(board, color) {
+        board.size = 99;
+        return board;
+    }
+}
+
+void main() {
+    Board b = new Board();
+    MoveGenerator g = new Level1();
+    b = g.genmove(b, 1);
+    println!("size = {}", b.size);
+}

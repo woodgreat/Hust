@@ -1,0 +1,24 @@
+// B5: 形状接口 + class 传参（zulu 说 wood 手把手教的）
+// Fix: public interface support + shape interface (no concrete types)
+public interface MoveGenerator {
+    public genmove(board, color);
+}
+
+class Board {
+    i32 size;
+    public Board() { self.size = 19; }
+}
+
+class Level1 implements MoveGenerator {
+    public Board genmove(Board board, i32 color) {
+        board.size = 99;  // 修改 board
+        return board;
+    }
+}
+
+void main() {
+    Board b = new Board();
+    MoveGenerator g = new Level1();
+    b = g.genmove(b, 1);  // 所有权往返（默认 clone）
+    println!("size = {}", b.size);  // 期望 99
+}

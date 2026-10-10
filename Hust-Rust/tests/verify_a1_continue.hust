@@ -1,0 +1,11 @@
+// A1: for + continue 死循环验证
+void main() {
+    i32 count = 0;
+    for (i32 i = 0; i < 5; i++) {
+        if (i == 2) {
+            continue;
+        }
+        count = count + 1;
+    }
+    println!("count = {}", count);  // 期望 4，实际死循环
+}

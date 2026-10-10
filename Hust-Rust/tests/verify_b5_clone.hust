@@ -1,0 +1,12 @@
+class Board {
+    i32 size;
+    public Board() { self.size = 19; }
+}
+
+void main() {
+    Board b = new Board();
+    Board b2 = b.clone();   // 显式 clone
+    b.size = 99;            // 修改 b
+    println!("b.size = {}", b.size);   // 99
+    println!("b2.size = {}", b2.size); // 19（clone 时的值）
+}

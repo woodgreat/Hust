@@ -1,0 +1,15 @@
+class Board {
+    i32 size;
+    public Board() { self.size = 19; }
+}
+
+// B2: class as return type
+Board make_board() {
+    Board b = new Board();
+    return b;
+}
+
+void main() {
+    Board b = make_board();
+    println!("size = {}", b.size);
+}

@@ -1,0 +1,25 @@
+// B3: array as function parameter
+public i32 sum(i32[5] arr) {
+    i32 total = 0;
+    for (i32 i = 0; i < 5; i++) {
+        total = total + arr[i];
+    }
+    return total;
+}
+
+// B3: dynamic array as parameter
+public i32 sum_dyn(i32[] arr) {
+    i32 total = 0;
+    for (i32 i = 0; i < arr.len(); i++) {
+        total = total + arr[i];
+    }
+    return total;
+}
+
+void main() {
+    i32[5] a = {1, 2, 3, 4, 5};
+    println!("sum = {}", sum(a));
+    
+    i32[] b = {10, 20, 30};
+    println!("sum_dyn = {}", sum_dyn(b));
+}

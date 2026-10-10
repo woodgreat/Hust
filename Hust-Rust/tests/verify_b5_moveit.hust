@@ -1,0 +1,12 @@
+class Board {
+    i32 size;
+    public Board() { self.size = 19; }
+}
+
+void main() {
+    Board b = new Board();
+    Board b2 = b.moveit();   // 显式 move
+    b2.size = 99;            // 修改 b2
+    println!("b2.size = {}", b2.size); // 99
+    // b 不能再使用了（被 move）
+}

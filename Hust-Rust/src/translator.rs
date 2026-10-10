@@ -456,11 +456,17 @@ impl Translator {
     fn transform_method_calls(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
+        // Fix B5: .moveit() -> move semantics (remove .moveit(), keep the value)
+        // Hust: Board b2 = b.moveit();  →  Rust: let b2 = b;
+        let moveit_re = Regex::new(r"\.moveit\(\)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let source = moveit_re.replace_all(source, "").to_string();
+
         // Pattern: .methodName( -> .method_name(
         let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let result = re.replace_all(source, |caps: &regex::Captures| {
+        let result = re.replace_all(&source, |caps: &regex::Captures| {
             let method_name = &caps[1];
             let rust_method = self.to_snake_case(method_name);
             format!(".{}(", rust_method)
@@ -947,7 +953,7 @@ impl Translator {
                 }
 
                 // Transform to Rust struct instantiation with default values
-                // For now, use Default::default() - requires #[derive(Default)]
+                // For now, use Default::default() - requires #[derive(Default, Clone)]
                 // Convert nested class name to Rust format: Outer.Inner -> Outer_Inner
                 let rust_type = class_name.replace('.', "_");
                 var_names
@@ -1568,7 +1574,8 @@ impl Translator {
         // NOTE: a `;` inside a string literal in the initializer would
         // truncate the capture — not seen in practice, recorded as a limit.
         // 2026-09-28: Added custom type support (enum, class) - [A-Z]\w*
-        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
+        // Fix B3: support dynamic array type i32[] in variable declarations
+        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*|i8\[\]|i16\[\]|i32\[\]|i64\[\]|u8\[\]|u16\[\]|u32\[\]|u64\[\]|f32\[\]|f64\[\]|bool\[\])\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
@@ -1628,6 +1635,17 @@ impl Translator {
             } else if type_name == "String" && value.starts_with('"') {
                 // r3: String declaration with literal -> owned String
                 format!("let mut {}: String = {}.to_string();", var_name, value)
+            } else if type_name.ends_with("[]") {
+                // Fix B3: dynamic array declaration i32[] -> Vec<i32>
+                // Array literal {a,b,c} or [a,b,c] -> vec![a, b, c]
+                let elem_type = type_name.trim_end_matches("[]");
+                let vec_value = if (value.starts_with('{') && value.ends_with('}')) || (value.starts_with('[') && value.ends_with(']')) {
+                    let inner = &value[1..value.len()-1];
+                    format!("vec![{}]", inner)
+                } else {
+                    value.to_string()
+                };
+                format!("let mut {}: Vec<{}> = {};", var_name, elem_type, vec_value)
             } else {
                 // regular variable: mutable in Rust ("let mut")
                 format!("let mut {}: {} = {};", var_name, type_name, value)
@@ -2469,7 +2487,8 @@ impl Translator {
         // Note: Must NOT match variable declarations like "i32 i = 0;" or "i32 i();"
         // So we require that the name is followed by (params) directly without = in between
         // 2026.09.25: Support both "pub" and "public" keywords (owner decision: use public)
-        let re = Regex::new(r"(?m)^\s*((?:pub|public)\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
+        // Fix B2: support class types (Capitalized identifiers) as return type
+        let re = Regex::new(r"(?m)^\s*((?:pub|public)\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
@@ -2513,12 +2532,31 @@ impl Translator {
                 continue;
             }
 
+            // Fix B3: support array type parameters
+            // i32[169] cells -> cells: [i32; 169]
+            // i32[] cells -> cells: Vec<i32>
+            let array_re = regex::Regex::new(r"^(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[(\d*)\]\s+([a-zA-Z_][a-zA-Z0-9_]*)$").unwrap();
+            if let Some(caps) = array_re.captures(param) {
+                let elem_type = &caps[1];
+                let size_str = &caps[2];
+                let var_name = &caps[3];
+                if size_str.is_empty() {
+                    // Dynamic array: i32[] cells -> cells: Vec<i32>
+                    result.push(format!("{}: Vec<{ }>", var_name, elem_type));
+                } else {
+                    // Fixed array: i32[169] cells -> cells: [i32; 169]
+                    result.push(format!("{}: [{}; {}]", var_name, elem_type, size_str));
+                }
+                continue;
+            }
+
             // Parse "type name"
             let parts: Vec<&str> = param.split_whitespace().collect();
             if parts.len() == 2 {
                 let type_name = parts[0];
                 let var_name = parts[1];
-                result.push(format!("{}: {}", var_name, type_name));
+                // Fix: Hust default mut for parameters (2026-10-10)
+                result.push(format!("mut {}: {}", var_name, type_name));
             } else {
                 // Keep as-is if can't parse
                 result.push(param.to_string());
@@ -2811,10 +2849,20 @@ impl Translator {
             // Anchored match — compound conditions are left for rustc to report
             let transformed_condition = Self::transform_len_comparison(condition);
 
+            // Fix A1: for + continue infinite loop
+            // If body contains `continue;`, replace it with `{ update_stmt; continue; }`
+            // so that the loop variable is updated before continuing (C semantics).
+            let fixed_body = if body.contains("continue;") {
+                let update_stmt_trimmed = update_stmt.trim().trim_end_matches(';');
+                body.replace("continue;", &format!("{{ {}; continue; }}", update_stmt_trimmed))
+            } else {
+                body.clone()
+            };
+
             // Typed header: the loop variable is declared here (`let mut`)
             let rust_while = format!(
                 "let mut {}: {} = {}; while {} {{{}\n{}}}",
-                var_name, var_type, init_value, transformed_condition, body, update_stmt
+                var_name, var_type, init_value, transformed_condition, fixed_body, update_stmt
             );
 
             result = format!(
@@ -2860,11 +2908,19 @@ impl Translator {
             let update_stmt = self.build_update_stmt(update, var_name);
             let transformed_condition = Self::transform_len_comparison(condition);
 
+            // Fix A1: for + continue infinite loop (untyped variant)
+            let fixed_body = if body.contains("continue;") {
+                let update_stmt_trimmed = update_stmt.trim().trim_end_matches(';');
+                body.replace("continue;", &format!("{{ {}; continue; }}", update_stmt_trimmed))
+            } else {
+                body.clone()
+            };
+
             // Untyped header: NO `let` — assignment into the pre-declared
             // loop variable (first assignment completes its delayed init)
             let rust_while = format!(
                 "{} = {}; while {} {{{}\n{}}}",
-                var_name, init_value, transformed_condition, body, update_stmt
+                var_name, init_value, transformed_condition, fixed_body, update_stmt
             );
 
             result = format!(
@@ -3807,7 +3863,8 @@ impl Translator {
             // bogus AmbiguousCall (printer_shape_test regression).
             let masked_src = mask_class_bodies(&remaining);
 
-            let func_re = Regex::new(r"(?m)^\s*(public\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
+            // Fix B2: support class types (Capitalized identifiers) as return type
+            let func_re = Regex::new(r"(?m)^\s*(public\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
             
@@ -4097,8 +4154,9 @@ impl Translator {
         use regex::Regex;
 
         // Match interface definition
-        // interface Name { method declarations }
-        let re = Regex::new(r"(?m)^\s*interface\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{([^}]+)\}")
+        // [public] interface Name { method declarations }
+        // Fix: support public interface (2026-10-10)
+        let re = Regex::new(r"(?m)^\s*(?:public\s+)?interface\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{([^}]+)\}")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         // Manual build (not replace_all) so r44 teaching errors propagate.
@@ -4147,7 +4205,8 @@ impl Translator {
             return Ok(source.to_string());
         }
 
-        let decl_re = Regex::new(r"\b([A-Z]\w*)\s*\(([^)]*)\)\s+([a-zA-Z_]\w*)\s*=\s*new\s+([A-Z]\w*)\s*\(([^)]*)\)\s*;")
+        // Fix: support both `Iface(T) var = new Impl();` and `Iface var = new Impl();`
+        let decl_re = Regex::new(r"\b([A-Z]\w*)\s*(?:\(([^)]*)\))?\s+([a-zA-Z_]\w*)\s*=\s*new\s+([A-Z]\w*)\s*\(([^)]*)\)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         // r45 phase 2: functions returning an interface
@@ -4197,11 +4256,14 @@ impl Translator {
                 continue;
             }
 
-            let declared: Vec<String> = caps[2]
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+            let declared: Vec<String> = match caps.get(2) {
+                Some(m) => m.as_str()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+                None => Vec::new(),
+            };
             let var_name = caps[3].to_string();
             let impl_class = caps[4].to_string();
             let ctor_args = caps[5].to_string();
@@ -4229,7 +4291,20 @@ impl Translator {
             }
 
             // Blank match: declared list vs implementor's inferred fill.
+            // Fix: if declared is empty, infer from implementor's method signatures in Hust source.
             let assoc_list = &shapes[&iface_name];
+            let declared = if declared.is_empty() {
+                // Infer blanks from implementor's class methods in Hust source
+                let methods = self.extract_class_methods_by_name(&impl_class, source);
+                let fills = self.infer_assoc_fills(&iface_name, &methods, source);
+                if fills.len() == assoc_list.len() {
+                    fills.iter().map(|(_, ty)| ty.clone()).collect()
+                } else {
+                    declared.clone()
+                }
+            } else {
+                declared.clone()
+            };
             if declared.len() != assoc_list.len() {
                 return Err(TranspileError::TransformError(format!(
                     "interface `{}` has {} blank(s) ({}), but `{}` declares {} type(s) (r45)",
@@ -4840,7 +4915,7 @@ impl Translator {
         let (fields, methods) = self.parse_class_body(body);
         
         // Generate struct
-        let mut result = format!("#[derive(Default)]\nstruct {} {{", flat_name);
+        let mut result = format!("#[derive(Default, Clone)]\nstruct {} {{", flat_name);
         for field in &fields {
             let rust_field = self.to_snake_case(&field.name);
             result.push_str(format!("\n    {}: {},", rust_field, field.type_name).as_str());
@@ -5156,7 +5231,7 @@ impl Translator {
     ) -> String {
         // Add derive macros for Default
         let visibility = if is_public { "pub " } else { "" };
-        let mut result = format!("#[derive(Default)]\n{}struct {} {{", visibility, class_name);
+        let mut result = format!("#[derive(Default, Clone)]\n{}struct {} {{", visibility, class_name);
 
         // If has parent, include parent as field
         // Field name preserves the class name as written (case-sensitive,
@@ -5787,10 +5862,14 @@ impl Translator {
                 
                 // For constructor, we need to collect field assignments and generate Self { ... }
                 let mut field_assignments = Vec::new();
+                let mut other_statements = Vec::new();
                 if let Some(ref body) = method.body {
                     let body_content = body.trim_start_matches('{').trim_end_matches('}');
                     // Extract field assignments: self.field = value; or this.field = value;
                     let assign_re = regex::Regex::new(r"(?:self|this)\.(\w+)\s*=\s*([^;]+);").unwrap();
+                    
+                    // Split body into statements by semicolons, keeping track of which are field assignments
+                    let mut last_end = 0;
                     for cap in assign_re.captures_iter(body_content) {
                         let field_name = &cap[1];
                         let mut value = cap[2].trim().to_string();
@@ -5805,6 +5884,23 @@ impl Translator {
                             value = format!("{}.to_string()", value);
                         }
                         field_assignments.push(format!("{}: {}", field_name, value));
+                        
+                        // Track non-assignment statements
+                        let match_start = cap.get(0).unwrap().start();
+                        if match_start > last_end {
+                            let stmt = body_content[last_end..match_start].trim();
+                            if !stmt.is_empty() && stmt != ";" {
+                                other_statements.push(stmt.to_string());
+                            }
+                        }
+                        last_end = cap.get(0).unwrap().end();
+                    }
+                    // Add any remaining statements after the last assignment
+                    if last_end < body_content.len() {
+                        let stmt = body_content[last_end..].trim();
+                        if !stmt.is_empty() && stmt != ";" {
+                            other_statements.push(stmt.to_string());
+                        }
                     }
                 }
                 
@@ -5827,36 +5923,53 @@ impl Translator {
                 // `super("lit")` reaches rustc as &str vs String.
                 let super_args = self.convert_string_literal_args(&super_args);
                 
+                // Fix A2: constructor silent statement drop (2026-10-10, wood's design)
+                // Treat ctor as a plain function: bind Self to `obj`, run other statements, return obj.
+                // This decouples ctor body from Rust's struct-literal syntax缝隙.
+                let has_other = !other_statements.is_empty();
+                
+                if has_other {
+                    // Bind Self { ... } to a mutable `obj` so subsequent statements can use it
+                    result.push_str("\n        let mut obj = ");
+                }
+                
                 if field_assignments.is_empty() && super_args.is_empty() {
-                    result.push_str("\n        Self::default()");
+                    result.push_str("Self::default()");
                 } else {
                     // Use inheritance table to build proper nested initialization
-                    // For class C extends B extends A:
-                    // Self { B: B::new(args), own_field: val, ..Default::default() }
                     if let Some(parent) = parent_from_table {
                         if super_args.is_empty() {
-                            // No super() call, use parent Default
                             if field_assignments.is_empty() {
-                                result.push_str("\n        Self::default()");
+                                result.push_str("Self::default()");
                             } else {
-                                result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                                result.push_str(&format!("Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
                             }
                         } else {
-                            // Call parent constructor with super() args
                             let fields_part = if field_assignments.is_empty() {
                                 String::new()
                             } else {
                                 format!("{},", field_assignments.join(",\n            "))
                             };
-                            result.push_str(&format!("\n        Self {{\n            {}: {}::new({}),\n            {}\n            ..Default::default()\n        }}", 
+                            result.push_str(&format!("Self {{\n            {}: {}::new({}),\n            {}\n            ..Default::default()\n        }}", 
                                 parent, parent, super_args, fields_part
                             ));
                         }
                     } else if !field_assignments.is_empty() {
-                        result.push_str(&format!("\n        Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
+                        result.push_str(&format!("Self {{ {}, ..Default::default() }}", field_assignments.join(", ")));
                     } else {
-                        result.push_str("\n        Self::default()");
+                        result.push_str("Self::default()");
                     }
+                }
+                
+                // Fix A2: emit other statements with `self.` rewritten to `obj.`, then return obj
+                if has_other {
+                    result.push_str(";");
+                    for stmt in &other_statements {
+                        // Rewrite self.xxx / this.xxx → obj.xxx so the statements operate on the bound instance
+                        let rewritten = stmt.replace("self.", "obj.").replace("this.", "obj.");
+                        result.push_str(&format!("\n        {}", rewritten));
+                    }
+                    result.push_str("\n        obj");
                 }
                 
                 result.push_str("\n    }");

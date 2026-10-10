@@ -1,0 +1,18 @@
+// A2: 构造函数静默丢语句验证
+class Board {
+    i32 size;
+    
+    public Board() {
+        self.size = 19;
+        self.init();
+    }
+    
+    void init() {
+        self.size = 13;
+    }
+}
+
+void main() {
+    Board b = new Board();
+    println!("size = {}", b.size);  // 期望 13，实际 19（init 被吞）
+}
