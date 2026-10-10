@@ -1750,9 +1750,12 @@ impl Translator {
 
     /// r45 phase 2 helper: extract assoc-type names (declaration order) per
     /// trait from post-Rule-1 source (`type X;` lines inside `trait N { .. }`).
+    /// Fix B12 (2026-10-10): also extract from pre-Rule-1 `interface` form.
     fn extract_trait_assocs(&self, source: &str) -> HashMap<String, Vec<String>> {
         use regex::Regex;
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        
+        // 1. Extract from trait definitions (post-Rule-1)
         let head_re = Regex::new(r"(?m)^\s*trait\s+([A-Za-z_]\w*)[^{;]*\{").unwrap();
         let type_re = Regex::new(r"(?m)type\s+([A-Za-z_]\w*)\s*;").unwrap();
         let bytes = source.as_bytes();
@@ -1784,6 +1787,24 @@ impl Translator {
                 map.insert(name, assocs);
             }
         }
+        
+        // 2. Fix B12: Extract from interface definitions (pre-Rule-1)
+        // Parse interface shape to get assoc names
+        let iface_re = Regex::new(r"(?s)interface\s+(\w+)\s*\{(.*?)\}").unwrap();
+        for caps in iface_re.captures_iter(source) {
+            let iface_name = caps[1].to_string();
+            // Skip if already found in trait form
+            if map.contains_key(&iface_name) {
+                continue;
+            }
+            // Parse the interface shape to get assoc names
+            if let Ok(shape) = self.parse_interface_shape(&iface_name, &caps[2], source) {
+                if !shape.assoc_names.is_empty() {
+                    map.insert(iface_name, shape.assoc_names);
+                }
+            }
+        }
+        
         map
     }
 
@@ -4417,7 +4438,8 @@ impl Translator {
         // function call: `Printer(String) p = makePrinter();`
         if !iface_returning_funcs.is_empty() {
             // Fix B12 (2026-10-10): support both `Iface(Type) var = func();` and `Iface var = func();`
-            let call_decl_re = Regex::new(r"\b([A-Z]\w*)\s*(?:\(([^)]*)\))?\s+([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*;")
+            // Also support `obj.method()` form: `Iface var = obj.method();`
+            let call_decl_re = Regex::new(r"\b([A-Z]\w*)\s*(?:\(([^)]*)\))?\s+([a-zA-Z_]\w*)\s*=\s*(?:([a-zA-Z_]\w*)\s*\.\s*)?([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*;")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
             let src1 = result;
             let mut out1 = String::with_capacity(src1.len());
@@ -4440,8 +4462,10 @@ impl Translator {
                     }
                 };
                 let var_name = caps[3].to_string();
-                let func_name = caps[4].to_string();
-                let call_args = caps[5].to_string();
+                // Fix B12: capture optional obj prefix (e.g., factory.create_ai)
+                let obj_prefix = caps.get(4).map(|m| m.as_str().to_string());
+                let func_name = caps[5].to_string();
+                let call_args = caps[6].to_string();
                 let Some((ret_iface, ret_blanks)) = iface_returning_funcs.get(&func_name) else {
                     continue;
                 };
@@ -4468,9 +4492,14 @@ impl Translator {
                     .enumerate()
                     .map(|(i, a)| format!("{} = {}", a, declared[i]))
                     .collect();
+                // Fix B12: support obj.method() call form
+                let call_expr = match &obj_prefix {
+                    Some(obj) => format!("{}.{}({})", obj, func_name, call_args),
+                    None => format!("{}({})", func_name, call_args),
+                };
                 out1.push_str(&format!(
-                    "let mut {}: Box<dyn {}<{}>> = {}({});",
-                    var_name, iface_name, binds.join(", "), func_name, call_args
+                    "let mut {}: Box<dyn {}<{}>> = {};",
+                    var_name, iface_name, binds.join(", "), call_expr
                 ));
                 iface_vars.insert(var_name.clone(), (iface_name, declared));
             }
