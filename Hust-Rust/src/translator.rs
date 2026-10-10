@@ -139,6 +139,11 @@ impl Translator {
         // Rule 3: Remove use statements (they're handled at module level)
         output = self.remove_use_statements(&output)?;
 
+        // Fix B13 (2026-10-10): Transform class variable assignment BEFORE function definitions
+        // ClassName var = otherVar; -> let mut var: ClassName = otherVar.clone();
+        // Must run before transform_function_definitions to catch assignments inside main()
+        output = self.transform_class_var_assignment(&output)?;
+        
         // Rule 4: Function definition transform with visibility
         // public void func() -> pub fn func()
         output = self.transform_function_definitions(&output)?;
@@ -887,6 +892,32 @@ impl Translator {
     /// 对未初始化绑定逐字段赋值(E0381)，无默认值则逐字段写法无法编译。将来
     /// 语言核不承诺默认值：声明后无任何写入时转译器会提醒（见
     /// remind_init_before_use），提醒先行，报错留给语言核。)
+    /// Fix B13 (2026-10-10): Transform class variable assignment
+    /// ClassName var = otherVar; -> let mut var: ClassName = otherVar.clone();
+    /// Must run BEFORE transform_function_definitions to catch assignments inside main()
+    fn transform_class_var_assignment(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        
+        // Pattern: ClassName var = otherVar;  (assignment from same-type variable)
+        // Transform to: let mut var: ClassName = otherVar.clone();  (B5: default clone)
+        // Hust: Board b2 = b1;  →  Rust: let mut b2: Board = b1.clone();
+        let re_assign = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*([a-z_][a-zA-Z0-9_]*)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        
+        let result = re_assign
+            .replace_all(source, |caps: &regex::Captures| {
+                let var_type = &caps[1];
+                let var_name = &caps[2];
+                let src_var = &caps[3];
+                
+                // Generate clone for B5 default clone semantics
+                format!("let mut {}: {} = {}.clone();", var_name, var_type, src_var)
+            })
+            .to_string();
+        
+        Ok(result)
+    }
+    
     fn transform_class_instantiation(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
@@ -925,6 +956,26 @@ impl Translator {
             })
             .to_string();
 
+        // Pattern 3 (Fix B13, 2026-10-10): ClassName var = otherVar;  (assignment from same-type variable)
+        // Transform to: let mut var: ClassName = otherVar.clone();  (B5: default clone)
+        // Hust: Board b2 = b1;  →  Rust: let mut b2: Board = b1.clone();
+        let re_assign = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*([a-z_][a-zA-Z0-9_]*)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        
+        result = re_assign
+            .replace_all(&result, |caps: &regex::Captures| {
+                let var_type = &caps[1];
+                let var_name = &caps[2];
+                let src_var = &caps[3];
+                
+                // Debug: print when Pattern 3 matches
+                eprintln!("[B13 Debug] Pattern 3 matched: {} {} = {};", var_type, var_name, src_var);
+                
+                // Generate clone for B5 default clone semantics
+                format!("let mut {}: {} = {}.clone();", var_name, var_type, src_var)
+            })
+            .to_string();
+        
         // Pattern 2: ClassName var;  /  ClassName a, b, c;  (comma list,
         // 2026.09.09 — same shape as scalar no-init declarations)
         // Supports nested classes: Outer.Inner var;

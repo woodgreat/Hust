@@ -1,0 +1,29 @@
+// B12: Interface as function return type - using @iface-return mark
+interface MoveGenerator {
+    public backString generate();
+}
+
+class Level1 implements MoveGenerator {
+    public String generate() { return "L1"; }
+}
+
+class Level3 implements MoveGenerator {
+    public String generate() { return "L3"; }
+}
+
+// Factory class with marked method returning interface
+class AIFactory {
+    // @iface-return MoveGenerator
+    public MoveGenerator create_ai(i32 level) {
+        if (level == 1) {
+            return new Level1();
+        }
+        return new Level3();
+    }
+}
+
+void main() {
+    AIFactory factory = new AIFactory();
+    MoveGenerator ai = factory.create_ai(1);
+    println!("ai = {}", ai.generate());
+}
