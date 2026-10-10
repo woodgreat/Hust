@@ -6052,6 +6052,25 @@ impl Translator {
                     for cap in assign_re.captures_iter(body_content) {
                         let field_name = &cap[1];
                         let mut value = cap[2].trim().to_string();
+                        
+                        // Fix B11 (2026-10-10): if value contains self./this. method call,
+                        // move to other_statements so it runs after obj is bound.
+                        // Struct literal Self { field: self.method() } is invalid Rust.
+                        if value.contains("self.") || value.contains("this.") {
+                            let full_stmt = cap.get(0).unwrap().as_str();
+                            // Track any statements before this one
+                            let match_start = cap.get(0).unwrap().start();
+                            if match_start > last_end {
+                                let stmt = body_content[last_end..match_start].trim();
+                                if !stmt.is_empty() && stmt != ";" {
+                                    other_statements.push(stmt.to_string());
+                                }
+                            }
+                            other_statements.push(full_stmt.to_string());
+                            last_end = cap.get(0).unwrap().end();
+                            continue;  // Skip adding to field_assignments
+                        }
+                        
                         // Convert Hust array literal {a, b, c} to Rust [a, b, c]
                         if value.starts_with('{') && value.ends_with('}') {
                             value = format!("[{}]", &value[1..value.len()-1]);
