@@ -1,0 +1,22 @@
+// Step 3b: 2 impl classes with matching param names
+interface Shape3b {
+    public areaSize area(width, height);
+}
+
+class Rect3b implements Shape3b {
+    public f64 area(f64 width, f64 height) { return width * height; }
+}
+
+class Circle3b implements Shape3b {
+    // Param names must match interface: width, height
+    // Semantically: width=radius, height=pi
+    public f64 area(f64 width, f64 height) { return height * width * width; }
+}
+
+void main() {
+    Shape3b s = new Rect3b();
+    println!("rect area = {}", s.area(3.0, 4.0));
+    
+    Shape3b c = new Circle3b();
+    println!("circle area = {}", c.area(2.0, 3.14159));
+}
