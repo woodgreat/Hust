@@ -400,7 +400,7 @@ impl Translator {
         // ---- 收集无初始化器声明（与 Rule 6/9/13 的声明形式同形）----
         let mut candidates: Vec<(usize, String)> = Vec::new();
         let scalar_re = Regex::new(
-            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;",
+            r"\b(?:i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;",
         )
         .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let array_re = Regex::new(
@@ -1459,7 +1459,7 @@ impl Translator {
     fn reject_const_no_init(source: &str) -> Result<(), TranspileError> {
         use regex::Regex;
         let re = Regex::new(
-            r"\bconst\s+(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String)\s+[a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*\s*;",
+            r"\bconst\s+(?:i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String)\s+[a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*\s*;",
         )
         .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
@@ -1575,7 +1575,7 @@ impl Translator {
         // truncate the capture — not seen in practice, recorded as a limit.
         // 2026-09-28: Added custom type support (enum, class) - [A-Z]\w*
         // Fix B3: support dynamic array type i32[] in variable declarations
-        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*|i8\[\]|i16\[\]|i32\[\]|i64\[\]|u8\[\]|u16\[\]|u32\[\]|u64\[\]|f32\[\]|f64\[\]|bool\[\])\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
+        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z]\w*|i8\[\]|i16\[\]|i32\[\]|i64\[\]|u8\[\]|u16\[\]|u32\[\]|u64\[\]|f32\[\]|f64\[\]|bool\[\])\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
@@ -1662,7 +1662,7 @@ impl Translator {
         // the type group must accept dotted nested names (`Outer.Inner inner;`),
         // else `[A-Z]\w*` matches only the tail (`Inner inner;`) and leaves
         // `Outer.` dangling -> `Outer.let mut inner: Inner;` (invalid Rust).
-        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;")
+        let re_no_init = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*(?:\.[A-Z][a-zA-Z0-9_]*)*)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)\s*;")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re_no_init.replace_all(&result, |caps: &regex::Captures| {
@@ -1791,7 +1791,7 @@ impl Translator {
 
         // Param group allows one level of nesting (interface blanks like
         // `Printer(String)` inside the parameter list).
-        let re = Regex::new(r"(?m)^[ \t]*((?:pub|public)[ \t]+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{")
+        let re = Regex::new(r"(?m)^[ \t]*((?:pub|public)[ \t]+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let paren_re = Regex::new(r"^([A-Z]\w*)\s*\(([^)]*)\)$").unwrap();
@@ -1844,7 +1844,7 @@ impl Translator {
         }
         let _ = &mut class_spans;
         let meth_re = Regex::new(
-            r"(?m)^[ \t]*(public[ \t]+)?(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+(\w+)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{",
+            r"(?m)^[ \t]*(public[ \t]+)?(void|i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+(\w+)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{",
         )
         .unwrap();
         let mut iface_method_params: HashMap<String, Vec<Option<(String, Vec<String>)>>> =
@@ -2488,7 +2488,7 @@ impl Translator {
         // So we require that the name is followed by (params) directly without = in between
         // 2026.09.25: Support both "pub" and "public" keywords (owner decision: use public)
         // Fix B2: support class types (Capitalized identifiers) as return type
-        let re = Regex::new(r"(?m)^\s*((?:pub|public)\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
+        let re = Regex::new(r"(?m)^\s*((?:pub|public)\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
@@ -3430,7 +3430,7 @@ impl Translator {
 
         // method signature inside a class body (Hust form)
         let meth_re = Regex::new(
-            r"(?m)^[ \t]*(public[ \t]+)?(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+(\w+)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{",
+            r"(?m)^[ \t]*(public[ \t]+)?(void|i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+(\w+)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{",
         )
         .unwrap();
         let param_word_re = Regex::new(r"^([A-Z]\w*)\s*\(([^)]*)\)$").unwrap();
@@ -3870,7 +3870,7 @@ impl Translator {
             let masked_src = mask_class_bodies(&remaining);
 
             // Fix B2: support class types (Capitalized identifiers) as return type
-            let func_re = Regex::new(r"(?m)^\s*(public\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
+            let func_re = Regex::new(r"(?m)^\s*(public\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
             
