@@ -1074,6 +1074,7 @@ impl Translator {
     }
     
     /// Check if a type name is a primitive type
+    /// Check if a name is a built-in primitive type
     fn is_primitive_type(&self, type_name: &str) -> bool {
         matches!(
             type_name,
@@ -1084,12 +1085,59 @@ impl Translator {
                 | "u16"
                 | "u32"
                 | "u64"
+                | "usize"
                 | "f32"
                 | "f64"
                 | "bool"
                 | "char"
                 | "String"
+                | "void"
         )
+    }
+    
+    /// Check if a name is a reserved keyword (cannot be used as variable name)
+    fn is_reserved_keyword(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "if" | "else" | "for" | "while" | "loop" | "return" | "break" | "continue"
+            | "class" | "interface" | "shape" | "implements" | "extends"
+            | "use" | "mod" | "pub" | "public" | "private" | "mut" | "let" 
+            | "const" | "static" | "fn" | "new" | "self" | "this" | "super"
+        )
+    }
+    
+    /// Check if a name is a user-defined type (class, interface, alias)
+    /// This requires parsing the source to collect type names
+    fn is_user_defined_type(&self, name: &str, source: &str) -> bool {
+        use regex::Regex;
+        
+        // Check class definitions
+        let class_re = Regex::new(&format!(r"\bclass\s+{}", regex::escape(name))).unwrap();
+        if class_re.is_match(source) {
+            return true;
+        }
+        
+        // Check interface definitions
+        let iface_re = Regex::new(&format!(r"\binterface\s+{}", regex::escape(name))).unwrap();
+        if iface_re.is_match(source) {
+            return true;
+        }
+        
+        // Check type aliases: type Name = ...;
+        let alias_re = Regex::new(&format!(r"\btype\s+{}\s*=", regex::escape(name))).unwrap();
+        if alias_re.is_match(source) {
+            return true;
+        }
+        
+        false
+    }
+    
+    /// Check if a name is a type (builtin, reserved, or user-defined)
+    /// Used to distinguish types from variable names in shape interfaces
+    fn is_type_name(&self, name: &str, source: &str) -> bool {
+        self.is_primitive_type(name) 
+            || self.is_reserved_keyword(name)
+            || self.is_user_defined_type(name, source)
     }
 
     /// V0.5: Remove use statements (handled at module level)
@@ -4192,7 +4240,7 @@ impl Translator {
 
             // Parse shape first: concrete types inside an interface are a
             // hard, teaching-oriented error (r44 core classification law).
-            let shape = self.parse_interface_shape(interface_name, body)?;
+            let shape = self.parse_interface_shape(interface_name, body, source)?;
             let trait_body = self.shape_to_trait(&shape);
 
             out.push_str(&format!("trait {} {{{}}}\n", interface_name, trait_body));
@@ -4220,7 +4268,7 @@ impl Translator {
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let mut shapes: HashMap<String, Vec<String>> = HashMap::new();
         for caps in iface_re.captures_iter(source) {
-            let shape = self.parse_interface_shape(&caps[1], &caps[2])?;
+            let shape = self.parse_interface_shape(&caps[1], &caps[2], source)?;
             shapes.insert(caps[1].to_string(), shape.assoc_names);
         }
         if shapes.is_empty() {
@@ -4234,18 +4282,27 @@ impl Translator {
         // r45 phase 2: functions returning an interface
         // (`Printer(String) makePrinter() {`) — calls to them may be
         // assigned to interface variables without `new`.
-        let ret_iface_re = Regex::new(r"(?m)^\s*(?:pub|public\s+)?([A-Z]\w*)\s*\(([^)]*)\)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{")
+        // Fix B12 (2026-10-10): support both `Iface(Type) func(..)` and `Iface func(..)`
+        // (bare interface name without type parameters).
+        let ret_iface_re = Regex::new(r"(?m)^\s*(?:pub|public\s+)?([A-Z]\w*)\s*(?:\(([^)]*)\))?\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let mut iface_returning_funcs: HashMap<String, (String, Vec<String>)> = HashMap::new();
         for caps in ret_iface_re.captures_iter(source) {
             if !shapes.contains_key(&caps[1]) {
                 continue;
             }
-            let blanks: Vec<String> = caps[2]
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+            // Fix B12 (2026-10-10): handle optional (Type) — when absent, infer from interface
+            let blanks: Vec<String> = match caps.get(2) {
+                Some(m) => m.as_str()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+                None => {
+                    // No explicit (Type) — use interface's assoc names as defaults
+                    shapes[&caps[1]].clone()
+                }
+            };
             let assoc_list = &shapes[&caps[1]];
             if blanks.len() != assoc_list.len() {
                 return Err(TranspileError::TransformError(format!(
@@ -4366,7 +4423,8 @@ impl Translator {
         // Pass 1b: interface variable assigned from an interface-returning
         // function call: `Printer(String) p = makePrinter();`
         if !iface_returning_funcs.is_empty() {
-            let call_decl_re = Regex::new(r"\b([A-Z]\w*)\s*\(([^)]*)\)\s+([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*;")
+            // Fix B12 (2026-10-10): support both `Iface(Type) var = func();` and `Iface var = func();`
+            let call_decl_re = Regex::new(r"\b([A-Z]\w*)\s*(?:\(([^)]*)\))?\s+([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*;")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
             let src1 = result;
             let mut out1 = String::with_capacity(src1.len());
@@ -4376,16 +4434,29 @@ impl Translator {
                 if !shapes.contains_key(&iface_name) {
                     continue;
                 }
-                let declared: Vec<String> = caps[2]
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
+                // Fix B12 (2026-10-10): handle optional (Type) — when absent, inherit from function return
+                let declared: Vec<String> = match caps.get(2) {
+                    Some(m) => m.as_str()
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
+                    None => {
+                        // No explicit (Type) — will inherit from function return below
+                        Vec::new()
+                    }
+                };
                 let var_name = caps[3].to_string();
                 let func_name = caps[4].to_string();
                 let call_args = caps[5].to_string();
                 let Some((ret_iface, ret_blanks)) = iface_returning_funcs.get(&func_name) else {
                     continue;
+                };
+                // Fix B12: if declared is empty (no explicit Type), inherit from function return
+                let declared = if declared.is_empty() {
+                    ret_blanks.clone()
+                } else {
+                    declared
                 };
                 // Blank match: declaration vs the function's return blanks.
                 if declared != *ret_blanks {
@@ -4565,6 +4636,7 @@ impl Translator {
         &self,
         interface_name: &str,
         body: &str,
+        source: &str,  // Fix B12 (2026-10-10): add source for user-defined type checking
     ) -> Result<InterfaceShape, TranspileError> {
         use regex::Regex;
 
@@ -4599,20 +4671,29 @@ impl Translator {
                     ShapeRet::Blank(assoc)
                 }
                 Some("void") => ShapeRet::Void,
-                Some(other) => {
-                    let paren = if params_raw.is_empty() {
-                        "()".to_string()
+                Some(name) => {
+                    // Fix B12 (2026-10-10): use keyword table to distinguish type vs variable name.
+                    // is_type_name checks: builtin types, reserved keywords, user-defined types.
+                    if self.is_type_name(name, source) {
+                        // Concrete type (r44 error)
+                        let paren = if params_raw.is_empty() {
+                            "()".to_string()
+                        } else {
+                            format!("({})", params_raw)
+                        };
+                        return Err(TranspileError::TransformError(format!(
+                            "syntax error: interface `{}` method `{}` declares a concrete \
+                             return type `{}`. Shape interfaces must not contain concrete \
+                             types (r44): write `{} {};` (return variable name) or `{} {};` \
+                             (blank return) and let each implementing class fill it in. \
+                             Classes, not interfaces, own types.",
+                            interface_name, method_name, name, name, method_name, method_name, paren
+                        )));
                     } else {
-                        format!("({})", params_raw)
-                    };
-                    return Err(TranspileError::TransformError(format!(
-                        "syntax error: interface `{}` method `{}` declares a concrete \
-                         return type `{}`. Shape interfaces must not contain concrete \
-                         types (r44): write `{}{};` (blank return) and let each \
-                         implementing class fill it in. Classes, not interfaces, \
-                         own types.",
-                        interface_name, method_name, other, method_name, paren
-                    )));
+                        // Return variable name (blank return with custom assoc name)
+                        let assoc = reg_assoc(name, &mut assoc_names, &mut seen);
+                        ShapeRet::Blank(assoc)
+                    }
                 }
             };
 
@@ -5868,7 +5949,7 @@ impl Translator {
                 let Some(c) = iface_re.captures(source) else {
                     return Vec::new();
                 };
-                let Ok(shape) = self.parse_interface_shape(interface_name, &c[1]) else {
+                let Ok(shape) = self.parse_interface_shape(interface_name, &c[1], source) else {
                     return Vec::new();
                 };
                 let trait_src = format!(

@@ -1,0 +1,20 @@
+// Shape interface with return variable name and multiple params
+interface Shape {
+    public areaSize area(width, height);  // areaSize = return var, width/height = param vars
+}
+
+class Rect implements Shape {
+    public f64 area(f64 width, f64 height) { return width * height; }  // f64 fills all
+}
+
+class Circle implements Shape {
+    public f64 area(f64 radius, f64 pi) { return pi * radius * radius; }  // f64 fills all
+}
+
+void main() {
+    Shape s = new Rect();
+    println!("rect area = {}", s.area(3.0, 4.0));
+    
+    Shape c = new Circle();
+    println!("circle area = {}", c.area(2.0, 3.14159));
+}
