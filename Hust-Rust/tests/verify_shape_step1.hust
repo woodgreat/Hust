@@ -1,0 +1,13 @@
+// Step 1: Simple interface with 1 param, no return var
+interface Shape1 {
+    public area(width);  // 1 blank: Width
+}
+
+class Rect1 implements Shape1 {
+    public f64 area(f64 width) { return width * width; }
+}
+
+void main() {
+    Shape1 s = new Rect1();
+    println!("area = {}", s.area(2.0));
+}
