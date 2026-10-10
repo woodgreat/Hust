@@ -614,6 +614,9 @@ pub fn get_rust_use(hust_path: &str, item: &str) -> Option<String> {
             .map(|i| format!("{}", i))
             .collect();
         Some(format!("use {}::{{{}}};", mapping.rust_path, items.join(", ")))
+    } else if item.is_empty() {
+        // Fix B1: whole module import (e.g., use RUST.IO; -> use std::io;)
+        Some(format!("use {};", mapping.rust_path))
     } else {
         // Single item: check if supported
         if mapping.items.contains(&item) {

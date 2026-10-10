@@ -423,6 +423,7 @@ impl NamespaceRegistry {
 
         for line in source.lines() {
             let trimmed = line.trim();
+            eprintln!("[DEBUG B1] line = '{}'", trimmed);
             // Debug: print each line being checked
             if trimmed.starts_with("use ") && trimmed.ends_with(';') {
                 // Parse: use ... ;
@@ -465,6 +466,7 @@ impl NamespaceRegistry {
                 }
 
                 // Step 2: Detect namespace (check for '-')
+                eprintln!("[DEBUG B1] path_part = '{}'", path_part);
                 let (namespace, rest) = if let Some(dash_pos) = path_part.find('-') {
                     // Has namespace: Zoo-Animal (user namespace)
                     let ns = path_part[..dash_pos].trim().to_string();
@@ -483,6 +485,7 @@ impl NamespaceRegistry {
                 if namespace.is_none() && (rest.starts_with("RUST.") || rest.starts_with("HUST.")) {
                     // Parse system library path: RUST.IO or RUST.IO.*
                     let sys_path = rest.trim();
+                    eprintln!("[DEBUG B1] sys_path = '{}'", sys_path);
                     let (hust_path, item) = if sys_path.ends_with(".*") {
                         // Wildcard: RUST.IO.*
                         let path = sys_path[..sys_path.len() - 2].trim().to_string();
@@ -505,7 +508,10 @@ impl NamespaceRegistry {
                     };
                     
                     // Validate system namespace
-                    if crate::rust_mappings::is_rust_namespace(&hust_path) {
+                    eprintln!("[DEBUG B1] checking is_rust_namespace for '{}'", hust_path);
+                    let check_result = crate::rust_mappings::is_rust_namespace(&hust_path);
+                    eprintln!("[DEBUG B1] is_rust_namespace('{}') = {}", hust_path, check_result);
+                    if check_result {
                         rust_imports.push(RustImport {
                             hust_path,
                             item,

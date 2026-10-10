@@ -222,6 +222,10 @@ impl Module {
                     if stmt.contains('-') {
                         continue;
                     }
+                    // Fix B1: skip system library paths (RUST.*, HUST.*)
+                    if stmt.starts_with("RUST.") || stmt.starts_with("HUST.") {
+                        continue;
+                    }
                     
                     // Check for alias: "use math_ops as mo;" -> extract "math_ops"
                     if let Some(pos) = stmt.find(" as ") {
@@ -323,6 +327,10 @@ impl ModuleResolver {
 
         // Load each imported module
         for import_name in &module.imports {
+            // Fix B1: skip system library imports (RUST.*, HUST.*)
+            if import_name.starts_with("RUST.") || import_name.starts_with("HUST.") {
+                continue;
+            }
             if self.loaded_modules.contains_key(import_name) {
                 continue;
             }

@@ -3826,6 +3826,7 @@ impl Translator {
 
         let mut registry = NamespaceRegistry::new();
         let mut module_sources: Vec<(String, String, String)> = Vec::new(); // (name, source, file_path)
+        let mut all_rust_use_statements: Vec<String> = Vec::new(); // Fix B1: collect use statements across all modules
 
         // Phase 1: Parse all namespace declarations and build registry
         for module in modules {
@@ -3844,11 +3845,16 @@ impl Translator {
             // 2026.10.06: Generate Rust use statements from parsed RUST system namespace imports
             // This must happen AFTER parse_use_statements (which collects rust_imports)
             let rust_use_statements = self.generate_rust_use_statements_from_registry(&registry, &file_path)?;
-            let remaining = if rust_use_statements.is_empty() {
-                remaining
-            } else {
-                format!("{}\n{}", rust_use_statements, remaining)
-            };
+            // Fix B1: collect use statements, deduplicate later
+            if !rust_use_statements.is_empty() {
+                for stmt in rust_use_statements.lines() {
+                    let stmt = stmt.trim().to_string();
+                    if !stmt.is_empty() && !all_rust_use_statements.contains(&stmt) {
+                        all_rust_use_statements.push(stmt);
+                    }
+                }
+            }
+            let remaining = remaining; // no longer prepending use statements here
 
             // 2026.10.06: Display warnings from namespace parsing (e.g., unrecognized system namespaces)
             for warning in &registry.warnings {
@@ -4010,6 +4016,7 @@ impl Translator {
             .collect();
 
         // For each known function, replace bare calls with namespaced calls
+        // Fix B1: use statements are already in all_code from per-module prepending
         let mut result = all_code;
         for func_name in &known_funcs {
             // Skip main - it's the entry point
