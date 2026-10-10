@@ -1,0 +1,17 @@
+// B8: large array (>64 elements) Default implementation
+class Board {
+    i32[169] cells;
+    
+    public Board() {
+        self.cells[0] = 42;
+    }
+    
+    public i32 get_first() {
+        return self.cells[0];
+    }
+}
+
+void main() {
+    Board b = new Board();
+    println!("first = {}", b.get_first());
+}

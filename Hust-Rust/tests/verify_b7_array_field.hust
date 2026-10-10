@@ -1,0 +1,24 @@
+// B7: i32[] class field with initialization
+class Board {
+    i32 size;
+    i32[] history;
+    
+    public Board() {
+        self.size = 19;
+        self.history = new i32[0];
+    }
+    
+    public void add(i32 mv) {
+        self.history.push(mv);
+    }
+    
+    public i32 get_size() {
+        return self.size;
+    }
+}
+
+void main() {
+    Board b = new Board();
+    b.add(42);
+    println!("size = {}", b.get_size());
+}

@@ -1648,7 +1648,22 @@ impl Translator {
                 format!("let mut {}: Vec<{}> = {};", var_name, elem_type, vec_value)
             } else {
                 // regular variable: mutable in Rust ("let mut")
-                format!("let mut {}: {} = {};", var_name, type_name, value)
+                // Fix B9: module-level variables (outside functions) need "static" instead of "let mut"
+                // Rust doesn't allow mutable statics without unsafe, so we use const for literals
+                // or static for non-literal initial values
+                let is_module_level = !source[..start].contains("fn ");
+                if is_module_level {
+                    // Check if value is a literal (number or string)
+                    let is_literal = value.chars().all(|c| c.is_ascii_digit()) 
+                        || (value.starts_with('"') && value.ends_with('"'));
+                    if is_literal {
+                        format!("const {}: {} = {};", var_name, type_name, value)
+                    } else {
+                        format!("static {}: {} = {};", var_name, type_name, value)
+                    }
+                } else {
+                    format!("let mut {}: {} = {};", var_name, type_name, value)
+                }
             }
         });
 
@@ -4922,12 +4937,53 @@ impl Translator {
         let (fields, methods) = self.parse_class_body(body);
         
         // Generate struct
-        let mut result = format!("#[derive(Default, Clone)]\nstruct {} {{", flat_name);
+        // Fix B8: check for large arrays (>64 elements) that don't implement Default
+        let has_large_array = fields.iter().any(|f| {
+            let re = regex::Regex::new(r"\[(\d+)\]").unwrap();
+            if let Some(cap) = re.captures(&f.type_name) {
+                let size: usize = cap[1].parse().unwrap_or(0);
+                size > 64
+            } else {
+                false
+            }
+        });
+        
+        let mut result = if has_large_array {
+            // For large arrays, don't derive Default, implement it manually
+            format!("#[derive(Clone)]\nstruct {} {{", flat_name)
+        } else {
+            format!("#[derive(Default, Clone)]\nstruct {} {{", flat_name)
+        };
+        
         for field in &fields {
             let rust_field = self.to_snake_case(&field.name);
             result.push_str(format!("\n    {}: {},", rust_field, field.type_name).as_str());
         }
         result.push_str("\n}\n");
+        
+        // Fix B8: manually implement Default for structs with large arrays
+        if has_large_array {
+            result.push_str(format!("impl Default for {} {{", flat_name).as_str());
+            result.push_str("\n    fn default() -> Self {");
+            result.push_str("\n        Self {");
+            for field in &fields {
+                let rust_field = self.to_snake_case(&field.name);
+                // For array types like [i32; 169], generate [0; 169]
+                let re = regex::Regex::new(r"\[(\d+)\]").unwrap();
+                let default_value = if let Some(cap) = re.captures(&field.type_name) {
+                    let size = &cap[1];
+                    // Extract element type from [elem; size]
+                    let elem_type = field.type_name.trim_start_matches('[').split(';').next().unwrap_or("i32").trim();
+                    format!("[{}; {}]", elem_type, size)
+                } else {
+                    "Default::default()".to_string()
+                };
+                result.push_str(format!("\n            {}: {},", rust_field, default_value).as_str());
+            }
+            result.push_str("\n        }");
+            result.push_str("\n    }");
+            result.push_str("\n}\n");
+        }
         
         // Generate impl block
         result.push_str(format!("impl {} {{", flat_name).as_str());
@@ -4966,10 +5022,71 @@ impl Translator {
                         } else if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
                             // same convention as the top-level ctor path
                             value = format!("{}.to_string()", value);
+                        } else if value.starts_with("new ") && value.contains("[") {
+                            // Fix B7: new i32[0] -> Vec::new(), new i32[5] -> vec![0; 5]
+                            eprintln!("[B7 DEBUG] value = {}", value);
+                            let re = regex::Regex::new(r"new\s+(\w+)\[(\d*)\]").unwrap();
+                            if let Some(cap) = re.captures(&value) {
+                                let elem_type = cap[1].to_string();
+                                let size = cap[2].to_string();
+                                if size.is_empty() || size == "0" {
+                                    value = format!("Vec::<{}>::new()", elem_type);
+                                } else {
+                                    value = format!("vec![{}; {}]", elem_type, size);
+                                }
+                            }
                         }
                         field_assignments.push(format!("{}: {}", field_name, value));
                     }
                 }
+                // Fix B7: replace any remaining new i32[N] patterns in field assignments
+                let field_assignments: Vec<String> = field_assignments
+                    .iter()
+                    .map(|fa| {
+                        let re = regex::Regex::new(r"new\s+(\w+)\[(\d*)\]").unwrap();
+                        re.replace_all(fa, |caps: &regex::Captures| {
+                            let elem_type = &caps[1];
+                            let size = &caps[2];
+                            if size.is_empty() || size == "0" {
+                                format!("Vec::<{}>::new()", elem_type)
+                            } else {
+                                format!("vec![{}; {}]", elem_type, size)
+                            }
+                        }).to_string()
+                    })
+                    .collect();
+                // Fix B7: replace any remaining new i32[N] patterns in field assignments
+                let field_assignments: Vec<String> = field_assignments
+                    .iter()
+                    .map(|fa| {
+                        let re = regex::Regex::new(r"new\s+(\w+)\[(\d*)\]").unwrap();
+                        re.replace_all(fa, |caps: &regex::Captures| {
+                            let elem_type = &caps[1];
+                            let size = &caps[2];
+                            if size.is_empty() || size == "0" {
+                                format!("Vec::<{}>::new()", elem_type)
+                            } else {
+                                format!("vec![{}; {}]", elem_type, size)
+                            }
+                        }).to_string()
+                    })
+                    .collect();
+                // Fix B7: replace any remaining new i32[N] patterns in field assignments
+                let field_assignments: Vec<String> = field_assignments
+                    .iter()
+                    .map(|fa| {
+                        let re = regex::Regex::new(r"new\s+(\w+)\[(\d*)\]").unwrap();
+                        re.replace_all(fa, |caps: &regex::Captures| {
+                            let elem_type = &caps[1];
+                            let size = &caps[2];
+                            if size.is_empty() || size == "0" {
+                                format!("Vec::<{}>::new()", elem_type)
+                            } else {
+                                format!("vec![{}; {}]", elem_type, size)
+                            }
+                        }).to_string()
+                    })
+                    .collect();
                 if field_assignments.is_empty() {
                     result.push_str("\n        Self::default()");
                 } else {
@@ -5238,8 +5355,34 @@ impl Translator {
     ) -> String {
         // Add derive macros for Default
         let visibility = if is_public { "pub " } else { "" };
-        let mut result = format!("#[derive(Default, Clone)]\n{}struct {} {{", visibility, class_name);
+        // Fix B8: check for large arrays (>64 elements) that don't implement Default
+        // Supports both Hust format (i32[169]) and Rust format ([i32; 169])
+        let has_large_array = fields.iter().any(|f| {
+            // Try Rust format: [elem; size]
+            let re_rust = regex::Regex::new(r"\[\w+;\s*(\d+)\]").unwrap();
+            if let Some(cap) = re_rust.captures(&f.type_name) {
+                let size: usize = cap[1].parse().unwrap_or(0);
+                return size > 64;
+            }
+            // Try Hust format: type[size]
+            let re_hust = regex::Regex::new(r"\[(\d+)\]").unwrap();
+            if let Some(cap) = re_hust.captures(&f.type_name) {
+                let size: usize = cap[1].parse().unwrap_or(0);
+                return size > 64;
+            }
+            false
+        });
+        
+        let visibility = if is_public { "pub " } else { "" };
+        let mut result = if has_large_array {
+            format!("#[derive(Clone)]\n{}struct {} {{", visibility, class_name)
+        } else {
+            format!("#[derive(Default, Clone)]\n{}struct {} {{", visibility, class_name)
+        };
 
+        // Fix B8: manually implement Default for structs with large arrays
+        // This is added AFTER the struct declaration is complete
+        
         // If has parent, include parent as field
         // Field name preserves the class name as written (case-sensitive,
         // owner decision 2026.09.22: respect author's naming, no forced
@@ -5255,10 +5398,40 @@ impl Translator {
                 Visibility::Public => "pub ",
                 Visibility::Private => "",
             };
-            result.push_str(format!("\n    {}{}: {},", field_vis, rust_field, field.type_name).as_str());
+            // Fix B7: convert dynamic array types (i32[], etc.) to Vec<T>
+            let rust_type = if field.type_name.ends_with("[]") {
+                let elem_type = &field.type_name[..field.type_name.len() - 2];
+                format!("Vec<{}>", elem_type)
+            } else {
+                field.type_name.clone()
+            };
+            result.push_str(format!("\n    {}{}: {},", field_vis, rust_field, rust_type).as_str());
         }
 
         result.push_str("\n}\n");
+        
+        // Fix B8: manually implement Default for structs with large arrays
+        if has_large_array {
+            result.push_str(format!("impl Default for {} {{", class_name).as_str());
+            result.push_str("\n    fn default() -> Self {");
+            result.push_str("\n        Self {");
+            for field in fields {
+                let rust_field = self.to_snake_case(&field.name);
+                // For array types like [i32; 169], generate [0; 169] as value
+                let re = regex::Regex::new(r"\[(\w+);\s*(\d+)\]").unwrap();
+                let default_value = if let Some(cap) = re.captures(&field.type_name) {
+                    let size = &cap[2];
+                    format!("[0; {}]", size)
+                } else {
+                    "Default::default()".to_string()
+                };
+                result.push_str(format!("\n            {}: {},", rust_field, default_value).as_str());
+            }
+            result.push_str("\n        }");
+            result.push_str("\n    }");
+            result.push_str("\n}\n");
+        }
+        
         result
     }
 
@@ -5839,6 +6012,7 @@ impl Translator {
             // (the old "contains self. && contains =" misfired on
             //  `sum += self.scores[i]`, which only READS a field)
             // Constructors always need &mut self (they initialize fields)
+            // Fix B6: also detect method calls on self (self.method()) and array push
             let needs_mut = if method.ret_type == "Self" {
                 true
             } else {
@@ -5849,7 +6023,12 @@ impl Translator {
                         // Detect field writes: self.field = value or self.field += value
                         // Pattern: self.field or this.field followed by = or +=, -=, *=, /=
                         // Also support array element assignment: self.field[index] = value
-                        regex::Regex::new(r"(?:self|this)\.\w+(?:\[[^\]]+\])*\s*(?:[-+*/])?=").unwrap().is_match(b)
+                        let field_write = regex::Regex::new(r"(?:self|this)\.\w+(?:\[[^\]]+\])*\s*(?:[-+*/])?=").unwrap().is_match(b);
+                        // Fix B6: detect method calls on self: self.method(...) or this.method(...)
+                        let method_call = regex::Regex::new(r"(?:self|this)\.\w+\s*\(").unwrap().is_match(b);
+                        // Fix B6: detect array push on self: self.field.push(...)
+                        let array_push = regex::Regex::new(r"(?:self|this)\.\w+\.push\s*\(").unwrap().is_match(b);
+                        field_write || method_call || array_push
                     })
                     .unwrap_or(false)
             };
@@ -5910,6 +6089,23 @@ impl Translator {
                         }
                     }
                 }
+                
+                // Fix B7: replace any remaining new i32[N] patterns in field assignments
+                let field_assignments: Vec<String> = field_assignments
+                    .iter()
+                    .map(|fa| {
+                        let re = regex::Regex::new(r"new\s+(\w+)\[(\d*)\]").unwrap();
+                        re.replace_all(fa, |caps: &regex::Captures| {
+                            let elem_type = &caps[1];
+                            let size = &caps[2];
+                            if size.is_empty() || size == "0" {
+                                format!("Vec::<{}>::new()", elem_type)
+                            } else {
+                                format!("vec![{}; {}]", elem_type, size)
+                            }
+                        }).to_string()
+                    })
+                    .collect();
                 
                 // super-only ctor fix (2026-09-29, found by super_string_test):
                 // decide super BEFORE the empty-field shortcut — a ctor whose
