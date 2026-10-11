@@ -4,7 +4,7 @@ pub i32 char_to_int(char c) {
 
 pub char int_to_char(i32 x) {
     i32 code = (i32)'A' + x;
-    return (char)code;
+    return char::from_u32(code as u32).unwrap();  // Rust: u32 -> char
 }
 
 pub String make_coord(char col, i32 row) {
