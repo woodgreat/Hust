@@ -8,10 +8,15 @@ class Rect3 implements Shape3 {
 }
 
 class Circle3 implements Shape3 {
-    public f64 area(f64 radius, f64 pi) { return pi * radius * radius; }
+    // Param names must match interface: width, height
+    // Semantically: width=radius, height=pi
+    public f64 area(f64 width, f64 height) { return height * width * width; }
 }
 
 void main() {
-    Shape3 s = new Rect3();
+    Rect3 s = new Rect3();
     println!("rect area = {}", s.area(3.0, 4.0));
+    
+    Circle3 c = new Circle3();
+    println!("circle area = {}", c.area(2.0, 3.14159));
 }

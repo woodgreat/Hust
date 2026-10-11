@@ -8,13 +8,15 @@ class Rect implements Shape {
 }
 
 class Circle implements Shape {
-    public f64 area(f64 radius, f64 pi) { return pi * radius * radius; }  // f64 fills all
+    // Param names must match interface: width, height
+    // Semantically: width=radius, height=pi
+    public f64 area(f64 width, f64 height) { return height * width * width; }
 }
 
 void main() {
-    Shape s = new Rect();
+    Rect s = new Rect();
     println!("rect area = {}", s.area(3.0, 4.0));
     
-    Shape c = new Circle();
+    Circle c = new Circle();
     println!("circle area = {}", c.area(2.0, 3.14159));
 }

@@ -861,25 +861,45 @@ impl Translator {
     /// i32[] front = arr[0..3]; -> let front: &[i32] = &arr[0..3];
     fn transform_array_slices(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
-
-        // Pattern: type[] var_name = array[start..end];
-        let re = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*)\[(\d+)\.\.(\d+)\];")
-            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-
-        let result = re.replace_all(source, |caps: &regex::Captures| {
+        
+        // Fix 2026-10-11: Match both Hust form and Rust form
+        // Pattern 1: Hust form: i32[] var_name = array[start..end];
+        let re_hust = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)\[\]\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*)\[(\d+)\.\.(\d+)\];").unwrap();
+        
+        // Pattern 2: Rust form: let mut var: Vec<type> = array[start..end];
+        let re_rust = Regex::new(r"let\s+mut\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*Vec<(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool)>\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*)\[(\d+)\.\.(\d+)\];").unwrap();
+        
+        let mut result = source.to_string();
+        
+        // Apply Hust form transformation
+        result = re_hust.replace_all(&result, |caps: &regex::Captures| {
             let type_name = &caps[1];
             let var_name = &caps[2];
             let array_name = &caps[3];
             let start = &caps[4];
             let end = &caps[5];
-
+            
             format!(
-                "let {}: &[{}] = &{}[{}..{}];",
+                "let mut {}: Vec<{}> = {}[{}..{}].to_vec();",
                 var_name, type_name, array_name, start, end
             )
-        });
-
-        Ok(result.to_string())
+        }).to_string();
+        
+        // Apply Rust form transformation
+        result = re_rust.replace_all(&result, |caps: &regex::Captures| {
+            let var_name = &caps[1];
+            let type_name = &caps[2];
+            let array_name = &caps[3];
+            let start = &caps[4];
+            let end = &caps[5];
+            
+            format!(
+                "let mut {}: Vec<{}> = {}[{}..{}].to_vec();",
+                var_name, type_name, array_name, start, end
+            )
+        }).to_string();
+        
+        Ok(result)
     }
 
     /// V0.6: Transform class instantiation
@@ -6261,6 +6281,12 @@ impl Translator {
                             other_statements.push(stmt.to_string());
                         }
                     }
+                    
+                    // Fix super() handling (2026-10-11): remove super(...) from other_statements
+                    // super() is already used above to generate Self { Parent: Parent::new(...), ... }
+                    // Keeping it in other_statements causes transform_self_references to emit
+                    // "// super() call removed" which breaks compilation (E0433).
+                    other_statements.retain(|stmt| !stmt.contains("super("));
                 }
                 
                 // Fix B7: replace any remaining new i32[N] patterns in field assignments
