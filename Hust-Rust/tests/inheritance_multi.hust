@@ -24,7 +24,7 @@ class Puppy extends Dog {
 }
 
 void main() {
-    Puppy p;
+    Puppy p = new Puppy();  // ✅ 使用构造函数初始化
 
     // Explicit chains: every layer written out (r24 design philosophy)
     // Field names preserve class names as written (case-sensitive, owner 2026.09.22)
