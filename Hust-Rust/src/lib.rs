@@ -2,11 +2,13 @@
 //! Provides transpiler functionality and plugin system
 
 pub mod project;
+pub mod namespace;
 pub mod translator;
 pub mod plugins;
+pub mod rust_mappings;
 
 // Re-exports
-pub use project::{ProjectConfig, Module, ModuleResolver, ProjectError};
+pub use project::{ProjectConfig, PackageConfig, Module, ModuleResolver, ProjectError};
 pub use translator::{Translator, TranspileOptions, ModuleContext, TranspileError};
 pub use plugins::{Plugin, PluginError, PluginManager};
 

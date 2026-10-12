@@ -1,0 +1,20 @@
+// Step 7.3 Test: Non-exhaustive match warning
+// Hust shows [Hust Note] to help programmer, even though Rust will also error
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Color c = Color.Red;
+    
+    // Non-exhaustive: missing Color.Blue
+    // Hust Note: shows warning during transpilation
+    // Rust Error: will fail to compile (E0004)
+    match c {
+        Color.Red : println!("Red"),
+        Color.Green : println!("Green")
+    }
+}

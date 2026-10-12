@@ -1,0 +1,29 @@
+// Test: does needs_mut work with bool return type?
+// 2026-10-05: Verify self.grid[x][y] = value with bool return
+
+class Board {
+    i32[3][3] grid;
+    
+    public Board() {
+        for (i32 i = 0; i < 3; i = i + 1) {
+            for (i32 j = 0; j < 3; j = j + 1) {
+                self.grid[i][j] = 0;
+            }
+        }
+    }
+    
+    // Test: bool return type with array assignment
+    public bool place(i32 x, i32 y, i32 val) {
+        if (x < 0 || x >= 3) {
+            return false;
+        }
+        self.grid[x][y] = val;
+        return true;
+    }
+}
+
+void main() {
+    Board b = new Board();
+    bool ok = b.place(1, 1, 2);
+    println!("ok = {}", ok);
+}

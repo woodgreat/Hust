@@ -1,0 +1,8 @@
+// Test unrecognized use path teaching error
+// This should produce a Hust teaching error, not a rustc error
+
+use RUST.UNKNOWN.SOMETHING-*;
+
+void main() {
+    println!("test");
+}

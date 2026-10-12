@@ -1,0 +1,9 @@
+// End-to-end test for RUST system namespace imports
+// 2026.10.04: Verify use RUST.STD.IO-* generates correct Rust use statements
+
+use RUST.STD.IO-*;
+use RUST.STD.COLLECTIONS-*;
+
+void main() {
+    println!("Hello, Hust!");
+}

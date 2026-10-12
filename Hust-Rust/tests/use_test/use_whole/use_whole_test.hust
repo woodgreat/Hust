@@ -1,0 +1,12 @@
+// Use Statement Test 1: Whole namespace import
+use math_utils;
+
+void main() {
+    i32 f = factorial(5);      // Should resolve to math_utils.factorial
+    i32 s = add(3, 4);         // Should resolve to math_utils.add
+    i32 m = multiply(2, 6);    // Should resolve to math_utils.multiply
+    
+    println!("factorial(5) = {}", f);
+    println!("add(3, 4) = {}", s);
+    println!("multiply(2, 6) = {}", m);
+}

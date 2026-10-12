@@ -1,0 +1,26 @@
+// r44 shape interface test 1: single param blank, void return.
+// Two implementors fill the same slot with different types.
+interface Printer {
+    public void print(content);
+}
+
+class TextPrinter implements Printer {
+    public TextPrinter() {}
+    public void print(String content) {
+        println!("Text: {}", content);
+    }
+}
+
+class NumPrinter implements Printer {
+    public NumPrinter() {}
+    public void print(i32 content) {
+        println!("Num: {}", content);
+    }
+}
+
+void main() {
+    TextPrinter tp = new TextPrinter();
+    tp.print("hello");
+    NumPrinter np = new NumPrinter();
+    np.print(42);
+}

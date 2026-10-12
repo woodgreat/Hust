@@ -1,0 +1,25 @@
+// B11: Constructor calling self method
+class Level {
+    i32 level;
+    i32 budget;
+    
+    public Level(i32 lv) {
+        self.level = lv;
+        self.budget = self.budget_for_level(lv);
+    }
+    
+    public i32 budget_for_level(i32 lv) {
+        if (lv < 1) { return 1000; }
+        if (lv > 10) { return 500000; }
+        return lv * 10000;
+    }
+}
+
+void main() {
+    Level l1 = new Level(1);
+    Level l5 = new Level(5);
+    Level l10 = new Level(10);
+    println!("l1.budget = {}", l1.budget);
+    println!("l5.budget = {}", l5.budget);
+    println!("l10.budget = {}", l10.budget);
+}

@@ -1,0 +1,13 @@
+// Test: does Hust class support .clone() by default?
+class Foo {
+    i32 x;
+    public Foo() {
+        self.x = 42;
+    }
+}
+
+void main() {
+    Foo a = new Foo();
+    Foo b = a.clone();
+    println!("b.x = {}", b.x);
+}

@@ -1,0 +1,25 @@
+// B6: class method &mut self support
+class Board {
+    i32 size;
+    
+    public Board() {
+        self.size = 19;
+    }
+    
+    // Method that modifies state (should generate &mut self)
+    public void increment() {
+        self.size = self.size + 1;
+    }
+    
+    // Method that only reads (should generate &self)
+    public i32 get_size() {
+        return self.size;
+    }
+}
+
+void main() {
+    Board b = new Board();
+    b.increment();
+    b.increment();
+    println!("size = {}", b.get_size());
+}

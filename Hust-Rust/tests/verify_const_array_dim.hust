@@ -1,0 +1,7 @@
+// Test: const used as array dimension in same file
+void main() {
+    const i32 SIZE = 5;
+    i32[SIZE][SIZE] grid = {0};
+    grid[0][0] = 42;
+    println!("grid[0][0] = {}", grid[0][0]);
+}

@@ -1,0 +1,11 @@
+// Test: external access to private field (should fail)
+
+class MyClass {
+    i32 private_field;           // Default private
+}
+
+void main() {
+    MyClass obj = MyClass { private_field: 0 };
+    obj.private_field = 42;      // ERROR: private field access from outside
+    println!("value: {}", obj.private_field);
+}

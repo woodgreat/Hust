@@ -1,0 +1,25 @@
+// B13: Ownership/move semantics test
+class Board {
+    i32 size;
+    
+    public Board(i32 s) {
+        self.size = s;
+    }
+    
+    public void set(i32 s) {
+        self.size = s;
+    }
+    
+    public i32 get() {
+        return self.size;
+    }
+}
+
+void main() {
+    Board b1 = new Board(10);
+    Board b2 = b1;  // Clone (default)
+    b2.set(20);
+    
+    println!("b1.size = {}", b1.get());  // Should be 10 (clone)
+    println!("b2.size = {}", b2.get());  // Should be 20
+}

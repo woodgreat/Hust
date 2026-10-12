@@ -15,17 +15,19 @@ class Animal {
 class Dog extends Animal {
     String name;
     
+    public Dog() {}
+    
     public void bark() {
         println!("Woof!");
     }
 }
 
 void main() {
-    Dog d;
-    d.animal.age = 5;
+    Dog d = new Dog();
+    d.Animal.age = 5;
     
-    d.animal.eat();
-    println!("Age: {}", d.animal.getAge());
+    d.Animal.eat();
+    println!("Age: {}", d.Animal.getAge());
     d.bark();
     
     println!("Inheritance test passed!");

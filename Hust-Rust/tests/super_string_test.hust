@@ -1,0 +1,33 @@
+// super_string_test.hust — super() 调用点字符串字面量（2026-09-29 缺口修复）
+// 同族第三处：ctor 体内赋值 / new 调用点实参 / super 调用点实参
+// 现在三处都做 .to_string() 转换
+
+class Animal {
+    String kind;
+    i32 legs;
+    
+    public Animal(String k, i32 l) {
+        self.kind = k;
+        self.legs = l;
+    }
+}
+
+class Dog extends Animal {
+    public Dog() {
+        super("dog", 4);      // ← 字面量实参，直传
+    }
+}
+
+class Bird extends Animal {
+    public Bird() {
+        super("bird", 2);
+    }
+}
+
+void main() {
+    Dog d = new Dog();
+    Bird b = new Bird();
+    println!("{} has {} legs", d.Animal.kind, d.Animal.legs);
+    println!("{} has {} legs", b.Animal.kind, b.Animal.legs);
+    println!("Super string test passed!");
+}

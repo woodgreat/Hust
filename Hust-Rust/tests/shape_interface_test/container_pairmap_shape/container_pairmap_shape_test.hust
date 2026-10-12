@@ -1,0 +1,60 @@
+// r44 shape interface test 2: return blanks + multi-blank cross-method
+// sameness (put key == getValue key, same assoc type Key).
+interface Container {
+    public void add(item);
+    public get(index);
+}
+
+class IntStack implements Container {
+    i32[8] items;
+    i32 count;
+    public IntStack() {
+        this.count = 0;
+    }
+    public void add(i32 item) {
+        this.items[this.count] = item;
+        this.count += 1;
+    }
+    public i32 get(i32 index) {
+        return this.items[index];
+    }
+}
+
+interface PairMap {
+    public void put(key, value);
+    public getValue(key);
+}
+
+class IdScoreMap implements PairMap {
+    i32[8] keys;
+    i32[8] values;
+    i32 count;
+    public IdScoreMap() {
+        this.count = 0;
+    }
+    public void put(i32 key, i32 value) {
+        this.keys[this.count] = key;
+        this.values[this.count] = value;
+        this.count += 1;
+    }
+    public i32 getValue(i32 key) {
+        for (i32 i = 0; i < this.count; i++) {
+            if (this.keys[i] == key) {
+                return this.values[i];
+            }
+        }
+        return -1;
+    }
+}
+
+void main() {
+    IntStack s = new IntStack();
+    s.add(10);
+    s.add(20);
+    println!("stack[0]={}, stack[1]={}", s.get(0), s.get(1));
+
+    IdScoreMap m = new IdScoreMap();
+    m.put(1001, 90);
+    m.put(1002, 85);
+    println!("1001={}, 1002={}", m.getValue(1001), m.getValue(1002));
+}

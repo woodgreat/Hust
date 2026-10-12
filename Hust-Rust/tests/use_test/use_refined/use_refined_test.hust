@@ -1,0 +1,10 @@
+// Use Statement Test 2: Refined import (specific function)
+use math_utils.factorial;
+
+void main() {
+    i32 f = factorial(5);      // Should resolve to math_utils.factorial
+    
+    // i32 s = add(3, 4);      // ERROR: add not imported (commented out)
+    
+    println!("factorial(5) = {}", f);
+}

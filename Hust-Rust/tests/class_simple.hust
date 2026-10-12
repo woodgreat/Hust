@@ -6,7 +6,7 @@ class Point {
 }
 
 void main() {
-    Point p;
+    Point p = new Point();  // ✅ 使用构造函数初始化
     p.x = 10;
     p.y = 20;
     

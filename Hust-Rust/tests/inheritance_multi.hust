@@ -1,0 +1,45 @@
+// Multi-level inheritance test - r24 (Animal -> Dog -> Puppy, 3 layers)
+// Explicit access chains (composition model, r24 design philosophy):
+//   p.dog.animal.age  — 3-layer field chain
+//   p.dog.setWeight() — 2-layer method chain
+// Method bodies use explicit self./chain prefixes (r24 current semantics;
+// bare field names like `weight = n;` need symbol-table support — TODO r24)
+class Animal {
+    i32 age;
+    public void setAge(i32 n) { self.age = n; }
+    public i32 getAge() { return self.age; }
+}
+
+class Dog extends Animal {
+    i32 weight;
+    public void setWeight(i32 n) { self.weight = n; }
+    public i32 getWeight() { return self.weight; }
+}
+
+class Puppy extends Dog {
+    String name;
+    public void setName(String n) { self.name = n; }
+    // String fields need .clone() on return (no Copy — ownership move otherwise)
+    public String getName() { return self.name.clone(); }
+}
+
+void main() {
+    Puppy p = new Puppy();  // ✅ 使用构造函数初始化
+
+    // Explicit chains: every layer written out (r24 design philosophy)
+    // Field names preserve class names as written (case-sensitive, owner 2026.09.22)
+    p.Dog.Animal.age = 3;        // 3-layer field write
+    p.Dog.weight = 2;            // 2-layer field write
+    p.name = "Rex";              // own field
+
+    println!("name={}", p.name);
+    println!("weight={}", p.Dog.weight);
+    println!("age={}", p.Dog.Animal.age);
+
+    // Explicit chain method calls
+    p.Dog.Animal.setAge(4);
+    p.Dog.setWeight(5);
+
+    println!("after set: age={} weight={}", p.Dog.Animal.age, p.Dog.weight);
+    println!("Multi-level inheritance test passed!");
+}

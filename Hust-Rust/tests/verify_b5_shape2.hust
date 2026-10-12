@@ -1,0 +1,24 @@
+// B5: 正确的形状接口写法（blank 名称与实现类参数一致）
+interface MoveGenerator {
+    genmove(board, color);
+}
+
+class Board {
+    i32 size;
+    public Board() { self.size = 19; }
+}
+
+class Level1 implements MoveGenerator {
+    public Board genmove(Board board, i32 color) {
+        board.size = 99;
+        return board;
+    }
+}
+
+void main() {
+    Board b = new Board();
+    // Provide blanks matching Level1 implementation: Board (return), Board (param), i32 (param)
+    MoveGenerator(Board, Board, i32) g = new Level1();
+    b = g.genmove(b, 1);
+    println!("size = {}", b.size);
+}

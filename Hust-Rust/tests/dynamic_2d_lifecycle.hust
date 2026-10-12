@@ -1,0 +1,25 @@
+void main() {
+    i32[][] c;                          // 1. declare -> Vec<Vec<i32>>
+
+    c.push([]);                         // 2. create 3 rows
+    c.push([]);
+    c.push([]);
+
+    c[0].push(1);                       // 3. append elements
+    c[0].push(2);
+    c[1].push(10);
+    c[2].push(100);
+
+    println!("{} {} {}", c[0][0], c[1][0], c[2][0]);   // 4. index read -> 1 10 100
+
+    c[0][1] = 99;                       // 5. index assign (overwrite)
+    println!("{}", c[0][1]);            //    -> 99
+
+    println!("{} {}", c.len(), c[0].len());   // 6. len -> 3 2
+
+    c[2].pop();                         // 7. pop element (100)
+    println!("{}", c[2].len());         //    -> 0
+
+    c.pop();                            // 8. pop row (whole third row)
+    println!("{}", c.len());            //    -> 2
+}

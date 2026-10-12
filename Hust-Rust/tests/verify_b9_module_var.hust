@@ -1,0 +1,6 @@
+// B9: module-level variable (read-only)
+const i32 counter = 42;
+
+void main() {
+    println!("counter = {}", counter);
+}

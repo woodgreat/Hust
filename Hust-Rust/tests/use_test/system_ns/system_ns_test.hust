@@ -1,0 +1,9 @@
+// System Namespace Test
+// Test '-' separator for system namespaces
+
+use RUST-std-io.*;
+
+void main() {
+    println!("Hello from Hust!");
+    // RUST-std-io.println is mapped to Rust's println!
+}

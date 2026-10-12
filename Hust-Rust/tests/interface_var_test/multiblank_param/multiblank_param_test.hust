@@ -1,0 +1,31 @@
+interface Container {
+    public void add(item);
+    public get(index);
+}
+
+class IntStack implements Container {
+    i32[8] items;
+    i32 count;
+    public IntStack() { this.count = 0; }
+    public void add(i32 item) {
+        this.items[this.count] = item;
+        this.count += 1;
+    }
+    public i32 get(i32 index) { return this.items[index]; }
+}
+
+void loadThenRead(Container(i32, i32, i32) c) {
+    c.add(7);
+    println!("read: {}", c.get(0));
+}
+
+Container(i32, i32, i32) buildStack() {
+    return new IntStack();
+}
+
+void main() {
+    loadThenRead(new IntStack());
+    Container(i32, i32, i32) c = buildStack();
+    c.add(9);
+    println!("main read: {}", c.get(0));
+}

@@ -1,0 +1,21 @@
+// Multi-dimensional array stress test: 4D (2x2x2x2 = 16 elements, all 1)
+// Verifies the full N-dim transpile chain:
+//   1. dimension-generalized declaration  i32[2][2][2][2] -> [[[[i32; 2]; 2]; 2]; 2]
+//   2. 4-layer nested C-style for -> while
+//   3. chained index arr4[i][j][k][l] with per-level as-usize peeling
+// Sum over all indices == 16 proves every element is visited exactly once.
+// Expected output: arr4: sum = 16
+void main() {
+    i32[2][2][2][2] arr4 = {{{{1,1},{1,1}},{{1,1},{1,1}}},{{{1,1},{1,1}},{{1,1},{1,1}}}};
+    i32 sum = 0;
+    for (i32 i = 0; i < 2; i++) {
+        for (i32 j = 0; j < 2; j++) {
+            for (i32 k = 0; k < 2; k++) {
+                for (i32 l = 0; l < 2; l++) {
+                    sum = sum + arr4[i][j][k][l];
+                }
+            }
+        }
+    }
+    println!("arr4: sum = {}", sum);
+}
