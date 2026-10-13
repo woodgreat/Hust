@@ -494,7 +494,25 @@ impl Translator {
     fn transform_array_indices(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
-        let mut result = source.to_string();
+        // Protect string literals from array index transformation
+        // by replacing them with placeholders before transformation
+        let mut string_literals: Vec<String> = Vec::new();
+        let mut protected_source = source.to_string();
+        
+        // Match string literals: "..." (handling escaped quotes)
+        let re_string = Regex::new(r#""(?:[^"\\]|\\.)*""#)
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        
+        let mut idx = 0;
+        let protected = re_string.replace_all(&protected_source, |caps: &regex::Captures| {
+            let placeholder = format!("__HUST_STRING_{}__", idx);
+            string_literals.push(caps[0].to_string());
+            idx += 1;
+            placeholder
+        });
+        protected_source = protected.to_string();
+
+        let mut result = protected_source;
 
         // 2-phase peeling. Index pattern starts with [a-zA-Z_]: untransformed
         // indices begin with a letter, transformed ones with '(' — so already
@@ -540,6 +558,12 @@ impl Translator {
                 }
             });
             result = pass2.to_string();
+        }
+
+        // Restore string literals from placeholders
+        for (i, literal) in string_literals.iter().enumerate() {
+            let placeholder = format!("__HUST_STRING_{}__", i);
+            result = result.replace(&placeholder, literal);
         }
 
         Ok(result)
