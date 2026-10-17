@@ -84,6 +84,24 @@ impl Translator {
 
         let mut output = source.to_string();
 
+        // 2026-10-17: Protect println! macro calls from ALL transformations
+        // println!("...") contains strings that may match var decl patterns
+        // Must protect BEFORE any transformation rules run
+        let mut println_macros: Vec<String> = Vec::new();
+        {
+            use regex::Regex;
+            let re_println = Regex::new(r"println!\s*\([^;]+\);")
+                .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+            
+            let mut idx = 0;
+            output = re_println.replace_all(&output, |caps: &regex::Captures| {
+                let placeholder = format!("__HUST_PRINTLN_{}__", idx);
+                println_macros.push(caps[0].to_string());
+                idx += 1;
+                placeholder
+            }).to_string();
+        }
+
         // Rule 0: Initialization reminder (owner design, 2026.09.20) —
         // 非阻断浅扫描：声明后无任何写入 → 提醒"使用前要先初始化，否则
         // 语言核可能报错"。先于一切变换执行，行号对应原始文件。
@@ -266,6 +284,12 @@ impl Translator {
         // Prepend #![recursion_limit] if deep inheritance detected
         if needs_limit {
             output = format!("#![recursion_limit = \"32767\"]\n\n{}", output);
+        }
+
+        // 2026-10-17: Restore println! macros from placeholders
+        for (i, macro_call) in println_macros.iter().enumerate() {
+            let placeholder = format!("__HUST_PRINTLN_{}__", i);
+            output = output.replace(&placeholder, macro_call);
         }
 
         Ok(output)
@@ -1825,6 +1849,20 @@ impl Translator {
     fn transform_variable_declarations(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
+        // 2026-10-17: Protect println! macro calls from variable declaration transformation
+        // println!("...") contains strings that may match var decl patterns (e.g. "--- Object...")
+        let mut println_macros: Vec<String> = Vec::new();
+        let re_println = Regex::new(r"println!\s*\([^;]+\);")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        
+        let mut idx = 0;
+        let protected_source = re_println.replace_all(source, |caps: &regex::Captures| {
+            let placeholder = format!("__HUST_PRINTLN_{}__", idx);
+            println_macros.push(caps[0].to_string());
+            idx += 1;
+            placeholder
+        }).to_string();
+
         // Match: [const] type var = value;  (value captured so the const
         // branch can tell a literal from a runtime expression)
         // NOTE: a `;` inside a string literal in the initializer would
@@ -1835,7 +1873,7 @@ impl Translator {
         let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z]\w*|i8\[\]|i16\[\]|i32\[\]|i64\[\]|u8\[\]|u16\[\]|u32\[\]|u64\[\]|f32\[\]|f64\[\]|bool\[\]|String\[\]|[A-Z]\w*\[\])\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
-        let result = re.replace_all(source, |caps: &regex::Captures| {
+        let result = re.replace_all(&protected_source, |caps: &regex::Captures| {
             let is_const = caps.get(1).is_some();
             let type_name = &caps[2];
             let var_name = &caps[3];
@@ -1852,7 +1890,12 @@ impl Translator {
             while before_start > 0 && !source.is_char_boundary(before_start) {
                 before_start -= 1;
             }
-            let before = &source[before_start..start];
+            // 2026-10-17: Ensure start is also on a char boundary (CJK chars are 3 bytes)
+            let mut safe_start = start;
+            while safe_start > 0 && !source.is_char_boundary(safe_start) {
+                safe_start -= 1;
+            }
+            let before = &source[before_start..safe_start];
 
             // If preceded by "for (" (possibly with whitespace), this is a for loop variable
             // Don't transform it - the for loop transformer will handle it
@@ -1954,7 +1997,14 @@ impl Translator {
                 .join("\n")
         });
 
-        Ok(result.to_string())
+        // Restore println! macros from placeholders
+        let mut final_result = result.to_string();
+        for (i, macro_call) in println_macros.iter().enumerate() {
+            let placeholder = format!("__HUST_PRINTLN_{}__", i);
+            final_result = final_result.replace(&placeholder, macro_call);
+        }
+
+        Ok(final_result)
     }
 
     /// r45 phase 2 helper: extract assoc-type names (declaration order) per
