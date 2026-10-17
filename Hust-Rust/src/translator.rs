@@ -487,14 +487,20 @@ impl Translator {
         }).to_string();
         
         // Pattern 2: Standalone call (no return): arr.replaceit(i, v);
-        let replaceit_re = Regex::new(r"(\w+)\.replaceit\(([^,]+),\s*([^)]+)\)")
+        // 2026-10-17: Use marker-based layered parsing instead of complex regex
+        // Phase 1: Insert markers at .replaceit( calls
+        let replaceit_marker_re = Regex::new(r"(\w+)\.replaceit\(")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        let source = replaceit_re.replace_all(&source, |caps: &regex::Captures| {
+        
+        let source = replaceit_marker_re.replace_all(&source, |caps: &regex::Captures| {
             let array_expr = &caps[1];
-            let index_expr = &caps[2].trim();
-            let value_expr = &caps[3].trim();
-            format!("{}[({}) as usize] = {}.clone()", array_expr, index_expr, value_expr)
+            format!("__REPLACEIT_START__{}__SEP__", array_expr)
         }).to_string();
+        
+        // Phase 2: Parse markers and extract arguments (handles nested parens)
+        let source = self.parse_replaceit_markers(&source)?;
+        
+        // Phase 3: Generate final Rust code (already done in parse_replaceit_markers)
         
         // Pattern: .methodName( -> .method_name(
         let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(")
@@ -507,6 +513,90 @@ impl Translator {
         });
 
         Ok(result.to_string())
+    }
+    
+    /// Parse __REPLACEIT_START__ markers and extract arguments with nested paren support
+    /// Marker format: __REPLACEIT_START__array_expr__SEP__index_expr, value_expr)
+    /// Output: array_expr[(index_expr) as usize] = value_expr.clone()
+    fn parse_replaceit_markers(&self, source: &str) -> Result<String, TranspileError> {
+        let mut result = String::new();
+        let mut pos = 0;
+        let bytes = source.as_bytes();
+        let len = bytes.len();
+        
+        while pos < len {
+            // Check for marker start
+            if source[pos..].starts_with("__REPLACEIT_START__") {
+                // Skip marker
+                pos += "__REPLACEIT_START__".len();
+                
+                // Parse array expression (until __SEP__)
+                let array_start = pos;
+                while pos < len && !source[pos..].starts_with("__SEP__") {
+                    pos += 1;
+                }
+                let array_expr = source[array_start..pos].trim().to_string();
+                pos += "__SEP__".len(); // skip __SEP__
+                
+                // Parse arguments with paren matching
+                let mut paren_depth = 1; // we're inside the (
+                let mut index_expr = String::new();
+                let mut value_expr = String::new();
+                let mut in_index = true; // first arg is index
+                
+                while pos < len && paren_depth > 0 {
+                    let c = source[pos..].chars().next().unwrap();
+                    let char_len = c.len_utf8();
+                    
+                    match c {
+                        '(' => {
+                            paren_depth += 1;
+                            if in_index {
+                                index_expr.push(c);
+                            } else {
+                                value_expr.push(c);
+                            }
+                        }
+                        ')' => {
+                            paren_depth -= 1;
+                            if paren_depth > 0 {
+                                if in_index {
+                                    index_expr.push(c);
+                                } else {
+                                    value_expr.push(c);
+                                }
+                            }
+                        }
+                        ',' if paren_depth == 1 && in_index => {
+                            in_index = false; // switch to value
+                        }
+                        _ => {
+                            if in_index {
+                                index_expr.push(c);
+                            } else {
+                                value_expr.push(c);
+                            }
+                        }
+                    }
+                    pos += char_len;
+                }
+                
+                // Generate code
+                result.push_str(&format!(
+                    "{}[({}) as usize] = {}.clone()",
+                    array_expr,
+                    index_expr.trim(),
+                    value_expr.trim()
+                ));
+            } else {
+                // Regular character
+                let c = source[pos..].chars().next().unwrap();
+                result.push(c);
+                pos += c.len_utf8();
+            }
+        }
+        
+        Ok(result)
     }
 
     /// V0.9: Transform array index expressions to use as usize
@@ -1741,7 +1831,8 @@ impl Translator {
         // truncate the capture — not seen in practice, recorded as a limit.
         // 2026-09-28: Added custom type support (enum, class) - [A-Z]\w*
         // Fix B3: support dynamic array type i32[] in variable declarations
-        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z]\w*|i8\[\]|i16\[\]|i32\[\]|i64\[\]|u8\[\]|u16\[\]|u32\[\]|u64\[\]|f32\[\]|f64\[\]|bool\[\])\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
+        // 2026-10-17: Add object type dynamic array support (String[], Group[], etc.)
+        let re = Regex::new(r"(?:(const)\s+)?\b(i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z]\w*|i8\[\]|i16\[\]|i32\[\]|i64\[\]|u8\[\]|u16\[\]|u32\[\]|u64\[\]|f32\[\]|f64\[\]|bool\[\]|String\[\]|[A-Z]\w*\[\])\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^;]+);")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {

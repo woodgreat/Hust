@@ -1,0 +1,109 @@
+// test_object_dynamic_array.hust - 测试对象类型动态数组支持
+// 2026-10-17
+// 
+// 测试 Hust V0.2.4+ 对象类型动态数组支持
+// - String[] 动态数组
+// - 自定义类动态数组（Item[]）
+// - 基本类型动态数组（对照组）
+
+// ==================== 测试用例 ====================
+
+// 测试 1：String 动态数组
+void test_string_dynamic_array() {
+    println!("Test 1: String[] dynamic array");
+    
+    // 声明 String 动态数组并初始化
+    String[] names = {};
+    names.push("Alice".to_string());
+    names.push("Bob".to_string());
+    
+    println!("  String[] length: {}", names.len());
+    println!("  String[0]: {}", names[0]);
+    println!("  [PASS] String[] dynamic array works");
+}
+
+// 测试 2：自定义类动态数组
+class Item {
+    i32 id;
+    String name;
+    
+    public Item(i32 id, String name) {
+        self.id = id;
+        self.name = name;
+    }
+}
+
+void test_class_dynamic_array() {
+    println!("Test 2: Item[] dynamic array");
+    
+    // 声明 Item 动态数组并初始化
+    Item[] items = {};
+    items.push(new Item(1, "Apple".to_string()));
+    items.push(new Item(2, "Banana".to_string()));
+    
+    println!("  Item[] length: {}", items.len());
+    println!("  Item[0].id: {}", items[0].id);
+    println!("  Item[0].name: {}", items[0].name);
+    println!("  [PASS] Item[] dynamic array works");
+}
+
+// 测试 3：基本类型动态数组（对照组）
+void test_primitive_dynamic_array() {
+    println!("Test 3: i32[] dynamic array (control)");
+    
+    // 基本类型动态数组（应该成功）
+    i32[] numbers = {};
+    numbers.push(10);
+    numbers.push(20);
+    
+    println!("  i32[] length: {}", numbers.len());
+    println!("  i32[0]: {}", numbers[0]);
+    println!("  [PASS] i32[] dynamic array works");
+}
+
+// 测试 4：混合使用 - 对象数组操作
+void test_object_array_operations() {
+    println!("Test 4: Object array operations");
+    
+    Item[] items = {};
+    items.push(new Item(1, "Apple".to_string()));
+    items.push(new Item(2, "Banana".to_string()));
+    items.push(new Item(3, "Cherry".to_string()));
+    
+    // 测试 len()
+    println!("  Length: {}", items.len());
+    
+    // 测试访问（使用引用，避免移动）
+    println!("  First item: id={}, name={}", items[0].id, items[0].name);
+    
+    // 测试 replaceit
+    items.replaceit(0, new Item(99, "Zebra".to_string()));
+    println!("  After replaceit: items[0].name={}", items[0].name);
+    
+    println!("  [PASS] Object array operations work");
+}
+
+// ==================== 主函数 ====================
+
+public void main() {
+    println!("--- Object Dynamic Array Support Test ---");
+    println!("");
+    
+    // 先测试基本类型（对照组）
+    test_primitive_dynamic_array();
+    println!("");
+    
+    // 测试 String 动态数组
+    test_string_dynamic_array();
+    println!("");
+    
+    // 测试自定义类动态数组
+    test_class_dynamic_array();
+    println!("");
+    
+    // 测试对象数组操作
+    test_object_array_operations();
+    println!("");
+    
+    println!("--- All tests completed ---");
+}
