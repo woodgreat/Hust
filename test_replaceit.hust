@@ -1,0 +1,24 @@
+// test_replaceit.hust - Test .replaceit() method
+
+public void main() {
+    // Test 1: Basic type array
+    i32[] numbers;
+    numbers.push(10);
+    numbers.push(20);
+    numbers.push(30);
+    
+    println!("Before replace: numbers[1] = {}", numbers[1]);
+    numbers.replaceit(1, 99);
+    println!("After replace: numbers[1] = {}", numbers[1]);
+    
+    // Test 2: Multiple replacements
+    numbers.replaceit(0, 111);
+    numbers.replaceit(2, 333);
+    
+    println!("After multiple replaces:");
+    for (i32 i = 0; i < numbers.len(); i++) {
+        println!("numbers[{}] = {}", i, numbers[i]);
+    }
+    
+    println!("Test completed");
+}

@@ -467,6 +467,17 @@ impl Translator {
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let source = moveit_re.replace_all(source, "").to_string();
 
+        // Fix R1: .replaceit(idx, val) -> array element assignment
+        // Hust: arr.replaceit(i, v);  ->  Rust: arr[i] = v;
+        let replaceit_re = Regex::new(r"(\w+(?:\.\w+|\[[^\]]+\])*?)\.replaceit\(([^,]+),\s*([^)]+)\)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let source = replaceit_re.replace_all(&source, |caps: &regex::Captures| {
+            let array_expr = &caps[1];
+            let index_expr = &caps[2].trim();
+            let value_expr = &caps[3].trim();
+            format!("{}[({}) as usize] = {}", array_expr, index_expr, value_expr)
+        }).to_string();
+
         // Pattern: .methodName( -> .method_name(
         let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
