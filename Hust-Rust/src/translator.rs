@@ -480,8 +480,6 @@ impl Translator {
             let array_expr = &caps[3];
             let index_expr = &caps[4].trim();
             let value_expr = &caps[5].trim();
-            #[cfg(debug_assertions)]
-            eprintln!("[DEBUG] Pattern 1 matched: var={}, type={}, arr={}, idx={}, val={}", var_name, type_name, array_expr, index_expr, value_expr);
             format!(
                 "let {}: {} = if ({} as i32) >= 0 && (({}) as usize) < {}.len() {{ {}[({}) as usize] = {}; 1 }} else {{ 0 }};",
                 var_name, type_name, index_expr, index_expr, array_expr, array_expr, index_expr, value_expr
@@ -495,15 +493,9 @@ impl Translator {
             let array_expr = &caps[1];
             let index_expr = &caps[2].trim();
             let value_expr = &caps[3].trim();
-            #[cfg(debug_assertions)]
-            eprintln!("[DEBUG] Pattern 2 matched: arr={}, idx={}, val={}", array_expr, index_expr, value_expr);
             format!("{}[({}) as usize] = {}", array_expr, index_expr, value_expr)
         }).to_string();
         
-        // Debug: print source after Pattern 2
-        #[cfg(debug_assertions)]
-        eprintln!("[DEBUG] After Pattern 2:\n{}", source);
-
         // Pattern: .methodName( -> .method_name(
         let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
@@ -1295,12 +1287,6 @@ impl Translator {
         let (uses, _remaining) = registry.parse_use_statements(source, "temp.hust");
 
         // Debug: print all parsed use statements
-        eprintln!("[DEBUG] Parsed {} use statements", uses.len());
-        for (i, u) in uses.iter().enumerate() {
-            eprintln!("[DEBUG] uses[{}]: namespace={:?}, module={:?}, item={:?}", i, u.namespace, u.module, u.item);
-        }
-        eprintln!("[DEBUG] rust_imports: {:?}", registry.rust_imports);
-
         // Check for invalid system namespaces (e.g., RUST.UNKNOWN.SOMETHING)
         // These start with RUST. or HUST. but are not in the mapping table
         for use_stmt in &uses {
@@ -5266,7 +5252,6 @@ impl Translator {
                             value = format!("{}.to_string()", value);
                         } else if value.starts_with("new ") && value.contains("[") {
                             // Fix B7: new i32[0] -> Vec::new(), new i32[5] -> vec![0; 5]
-                            eprintln!("[B7 DEBUG] value = {}", value);
                             let re = regex::Regex::new(r"new\s+(\w+)\[(\d*)\]").unwrap();
                             if let Some(cap) = re.captures(&value) {
                                 let elem_type = cap[1].to_string();
