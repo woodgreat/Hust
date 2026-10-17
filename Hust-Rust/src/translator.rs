@@ -467,9 +467,9 @@ impl Translator {
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let source = moveit_re.replace_all(source, "").to_string();
 
-        // Fix R1: .replaceit(idx, val) -> array element assignment with return code
-        // Hust: arr.replaceit(i, v);  ->  Rust: arr[(i) as usize] = v; (no return)
-        // Hust: i32 rc = arr.replaceit(i, v);  ->  Rust: let rc: i32 = if (i as usize) < arr.len() { arr[(i) as usize] = v; 1 } else { 0 };
+        // Fix R1: .replaceit(idx, val) -> array element assignment with return code (clone semantics)
+        // Hust: arr.replaceit(i, v);  ->  Rust: arr[(i) as usize] = v.clone(); (no return, clone semantics)
+        // Hust: i32 rc = arr.replaceit(i, v);  ->  Rust: let rc: i32 = if (i as usize) < arr.len() { arr[(i) as usize] = v.clone(); 1 } else { 0 };
         
         // Pattern 1: Assignment with return code (Rust style): let mut var: type = arr.replaceit(i, v);
         let replaceit_assign_re = Regex::new(r"let\s+mut\s+(\w+)\s*:\s*(\w+)\s*=\s*(\w+)\.replaceit\(([^,]+),\s*([^;]+)\);")
@@ -481,7 +481,7 @@ impl Translator {
             let index_expr = &caps[4].trim();
             let value_expr = &caps[5].trim();
             format!(
-                "let {}: {} = if ({} as i32) >= 0 && (({}) as usize) < {}.len() {{ {}[({}) as usize] = {}; 1 }} else {{ 0 }};",
+                "let {}: {} = if ({} as i32) >= 0 && (({}) as usize) < {}.len() {{ {}[({}) as usize] = {}.clone(); 1 }} else {{ 0 }};",
                 var_name, type_name, index_expr, index_expr, array_expr, array_expr, index_expr, value_expr
             )
         }).to_string();
@@ -493,7 +493,7 @@ impl Translator {
             let array_expr = &caps[1];
             let index_expr = &caps[2].trim();
             let value_expr = &caps[3].trim();
-            format!("{}[({}) as usize] = {}", array_expr, index_expr, value_expr)
+            format!("{}[({}) as usize] = {}.clone()", array_expr, index_expr, value_expr)
         }).to_string();
         
         // Pattern: .methodName( -> .method_name(
