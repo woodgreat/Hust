@@ -467,16 +467,42 @@ impl Translator {
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let source = moveit_re.replace_all(source, "").to_string();
 
-        // Fix R1: .replaceit(idx, val) -> array element assignment
-        // Hust: arr.replaceit(i, v);  ->  Rust: arr[i] = v;
-        let replaceit_re = Regex::new(r"(\w+(?:\.\w+|\[[^\]]+\])*?)\.replaceit\(([^,]+),\s*([^)]+)\)")
+        // Fix R1: .replaceit(idx, val) -> array element assignment with return code
+        // Hust: arr.replaceit(i, v);  ->  Rust: arr[(i) as usize] = v; (no return)
+        // Hust: i32 rc = arr.replaceit(i, v);  ->  Rust: let rc: i32 = if (i as usize) < arr.len() { arr[(i) as usize] = v; 1 } else { 0 };
+        
+        // Pattern 1: Assignment with return code (Rust style): let mut var: type = arr.replaceit(i, v);
+        let replaceit_assign_re = Regex::new(r"let\s+mut\s+(\w+)\s*:\s*(\w+)\s*=\s*(\w+)\.replaceit\(([^,]+),\s*([^;]+)\);")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let source = replaceit_assign_re.replace_all(&source, |caps: &regex::Captures| {
+            let var_name = &caps[1];
+            let type_name = &caps[2];
+            let array_expr = &caps[3];
+            let index_expr = &caps[4].trim();
+            let value_expr = &caps[5].trim();
+            #[cfg(debug_assertions)]
+            eprintln!("[DEBUG] Pattern 1 matched: var={}, type={}, arr={}, idx={}, val={}", var_name, type_name, array_expr, index_expr, value_expr);
+            format!(
+                "let {}: {} = if ({} as i32) >= 0 && (({}) as usize) < {}.len() {{ {}[({}) as usize] = {}; 1 }} else {{ 0 }};",
+                var_name, type_name, index_expr, index_expr, array_expr, array_expr, index_expr, value_expr
+            )
+        }).to_string();
+        
+        // Pattern 2: Standalone call (no return): arr.replaceit(i, v);
+        let replaceit_re = Regex::new(r"(\w+)\.replaceit\(([^,]+),\s*([^)]+)\)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let source = replaceit_re.replace_all(&source, |caps: &regex::Captures| {
             let array_expr = &caps[1];
             let index_expr = &caps[2].trim();
             let value_expr = &caps[3].trim();
+            #[cfg(debug_assertions)]
+            eprintln!("[DEBUG] Pattern 2 matched: arr={}, idx={}, val={}", array_expr, index_expr, value_expr);
             format!("{}[({}) as usize] = {}", array_expr, index_expr, value_expr)
         }).to_string();
+        
+        // Debug: print source after Pattern 2
+        #[cfg(debug_assertions)]
+        eprintln!("[DEBUG] After Pattern 2:\n{}", source);
 
         // Pattern: .methodName( -> .method_name(
         let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(")
