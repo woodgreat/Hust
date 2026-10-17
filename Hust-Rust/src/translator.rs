@@ -87,6 +87,7 @@ impl Translator {
         // 2026-10-17: Protect println! macro calls from ALL transformations
         // println!("...") contains strings that may match var decl patterns
         // Must protect BEFORE any transformation rules run
+        // Also mark array indices inside println! for later transformation
         let mut println_macros: Vec<String> = Vec::new();
         {
             use regex::Regex;
@@ -95,8 +96,11 @@ impl Translator {
             
             let mut idx = 0;
             output = re_println.replace_all(&output, |caps: &regex::Captures| {
+                let macro_call = caps[0].to_string();
+                // Mark array indices inside println! for later transformation
+                let marked_call = self.mark_array_indices_in_println(&macro_call);
                 let placeholder = format!("__HUST_PRINTLN_{}__", idx);
-                println_macros.push(caps[0].to_string());
+                println_macros.push(marked_call);
                 idx += 1;
                 placeholder
             }).to_string();
@@ -287,12 +291,80 @@ impl Translator {
         }
 
         // 2026-10-17: Restore println! macros from placeholders
+        // Also restore marked array indices and transform them
         for (i, macro_call) in println_macros.iter().enumerate() {
             let placeholder = format!("__HUST_PRINTLN_{}__", i);
-            output = output.replace(&placeholder, macro_call);
+            // First restore the marked array indices to normal form
+            let restored = self.restore_marked_array_indices(macro_call);
+            // Then transform array indices to use as usize
+            let transformed = self.transform_array_indices_in_println(&restored)?;
+            output = output.replace(&placeholder, &transformed);
         }
 
         Ok(output)
+    }
+
+    /// Transform array indices inside println! macro
+    /// Converts items[i] to items[(i) as usize]
+    fn transform_array_indices_in_println(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+        
+        // Match array indexing: array[index] where index is a simple variable
+        let re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\[([a-zA-Z_][a-zA-Z0-9_]*)\]")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let array_name = &caps[1];
+            let index_name = &caps[2];
+            // Skip if already transformed
+            if index_name.contains(" as usize") {
+                return caps[0].to_string();
+            }
+            format!("{}[({}) as usize]", array_name, index_name)
+        });
+        
+        Ok(result.to_string())
+    }
+
+    /// Mark array indices inside println! macro for later transformation
+    /// Converts items[i] to __HUST_ARR_MARK__items__HUST_IDX_MARK__i__HUST_END_MARK__
+    /// This allows transform_array_indices to process them after println! restoration
+    fn mark_array_indices_in_println(&self, macro_call: &str) -> String {
+        use regex::Regex;
+        
+        // Match array indexing: array[index] where index is a simple variable
+        // Avoid matching format string placeholders like {} or {:>5}
+        let re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\[([a-zA-Z_][a-zA-Z0-9_]*)\]").unwrap();
+        
+        let result = re.replace_all(macro_call, |caps: &regex::Captures| {
+            let array_name = &caps[1];
+            let index_name = &caps[2];
+            format!(
+                "__HUST_ARR_MARK__{}__HUST_IDX_MARK__{}__HUST_END_MARK__",
+                array_name, index_name
+            )
+        });
+        
+        result.to_string()
+    }
+
+    /// Restore marked array indices from println! macro
+    /// Converts __HUST_ARR_MARK__items__HUST_IDX_MARK__i__HUST_END_MARK__ back to items[i]
+    /// Then transform_array_indices will convert to items[(i) as usize]
+    fn restore_marked_array_indices(&self, source: &str) -> String {
+        use regex::Regex;
+        
+        let re = Regex::new(
+            r"__HUST_ARR_MARK__([a-zA-Z_][a-zA-Z0-9_]*)__HUST_IDX_MARK__([a-zA-Z_][a-zA-Z0-9_]*)__HUST_END_MARK__"
+        ).unwrap();
+        
+        let result = re.replace_all(source, |caps: &regex::Captures| {
+            let array_name = &caps[1];
+            let index_name = &caps[2];
+            format!("{}[{}]", array_name, index_name)
+        });
+        
+        result.to_string()
     }
 
     /// r45 phase 2: translate expression-position `new X(args)` to
