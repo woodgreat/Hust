@@ -5620,14 +5620,15 @@ impl Translator {
 
         use regex::Regex;
 
-        // Method signature start: [public] [Type] name ( ... ) {
+        // Method signature start: [public] [readonly] [Type] name ( ... ) {
         // (brace-depth-aware body extraction — methods may contain nested
         //  if/for blocks, which the old [^{}]* pattern could not handle)
         // Supports constructors: public ClassName(...) with no return type
         // Constructor: public ClassName(...) - no return type
-        // Regular method: [public] ReturnType name(...)
+        // Regular method: [public] [readonly] ReturnType name(...)
+        // V0.2.6: added readonly modifier support
         let sig_re = Regex::new(
-            r"(?s)(public\s+)?(?:(\w+)\s+)?([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{",
+            r"(?s)(public\s+)?(readonly\s+)?(?:(\w+)\s+)?([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{",
         )
         .unwrap();
 
@@ -5757,20 +5758,24 @@ impl Translator {
                 params,
                 body,
                 visibility: Visibility::Public,
+                is_readonly: false,  // V0.2.6: constructors are never readonly
             });
         }
 
-        // Regular method: [public] ReturnType name(params) { body }
+        // Regular method: [public] [readonly] ReturnType name(params) { body }
+        // V0.2.6: support readonly method modifier
+        // Fixed: more flexible whitespace handling
         let re =
-            Regex::new(r"(?s)^\s*(public\s+)?(\w+)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*(\{.*\})?").unwrap();
+            Regex::new(r"(?s)^\s*(public)?\s*(readonly)?\s*(\w+)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*(\{.*\})?").unwrap();
 
         let caps = re.captures(text)?;
 
         let is_public = caps.get(1).is_some();
-        let ret_type = caps[2].to_string();
-        let name = caps[3].to_string();
-        let params = caps[4].to_string();
-        let body = caps.get(5).map(|m| m.as_str().to_string());
+        let is_readonly = caps.get(2).is_some();  // V0.2.6: readonly modifier
+        let ret_type = caps[3].to_string();
+        let name = caps[4].to_string();
+        let params = caps[5].to_string();
+        let body = caps.get(6).map(|m| m.as_str().to_string());
 
         Some(ClassMethod {
             name,
@@ -5782,6 +5787,7 @@ impl Translator {
             } else {
                 Visibility::Private
             },
+            is_readonly,  // V0.2.6: readonly method modifier
         })
     }
 
@@ -6218,9 +6224,10 @@ impl Translator {
             // visibility), because this function returns String (no Err path).
             let rust_params = self.transform_method_params(&method.params);
 
-            // self param: always &mut self to match trait declaration
-            // (trait methods are declared with &mut self for flexibility)
-            let self_param = "&mut self";
+            // V0.2.6: support readonly method modifier
+            // Default: &mut self (max permission)
+            // readonly: &self (read-only)
+            let self_param = if method.is_readonly { "&self" } else { "&mut self" };
 
             let sig = if method.ret_type == "void" {
                 format!("\n    fn {}({}{}) {{", rust_name, self_param, rust_params)
@@ -6472,7 +6479,10 @@ impl Translator {
                     })
                     .unwrap_or(false)
             };
-            let self_param = if needs_mut { "&mut self" } else { "&self" };
+            // V0.2.6: readonly keyword support
+            // Default: &mut self (max permission)
+            // readonly: &self (read-only)
+            let self_param = if method.is_readonly { "&self" } else { "&mut self" };
 
             // Constructor: generate new() method instead of method with &mut self
             if method.ret_type == "Self" {
@@ -6985,6 +6995,7 @@ struct ClassMethod {
     params: String,
     body: Option<String>,
     visibility: Visibility,
+    is_readonly: bool,  // V0.2.6: readonly method modifier
 }
 
 /// Visibility enum

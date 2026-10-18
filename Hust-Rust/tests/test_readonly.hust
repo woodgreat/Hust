@@ -1,0 +1,59 @@
+// test_readonly.hust - Test readonly method modifier (V0.2.6)
+// 测试 readonly 方法修饰符
+
+class Counter {
+    i32 count;
+    
+    public Counter() {
+        self.count = 0;
+    }
+    
+    // 默认：最大权限（&mut self）
+    public void increment() {
+        self.count = self.count + 1;
+    }
+    
+    // readonly：只读权限（&self）
+    public readonly i32 get_count() {
+        return self.count;
+    }
+    
+    // readonly：只读，无返回值
+    public readonly void print() {
+        println!("Count: {}", self.count);
+    }
+    
+    // 默认：修改方法
+    public void reset() {
+        self.count = 0;
+    }
+}
+
+void test_readonly() {
+    println!("=== readonly method modifier test ===");
+    
+    Counter c = new Counter();
+    
+    // 测试默认方法（&mut self）
+    c.increment();
+    c.increment();
+    c.increment();
+    
+    // 测试 readonly 方法（&self）
+    i32 val = c.get_count();
+    println!("Count after 3 increments: {}", val);  // 应该输出 3
+    
+    // 测试 readonly void 方法
+    c.print();  // 应该输出 "Count: 3"
+    
+    // 测试修改方法
+    c.reset();
+    i32 val2 = c.get_count();
+    println!("Count after reset: {}", val2);  // 应该输出 0
+    
+    println!("=== Test completed ===");
+}
+
+void main() {
+    test_readonly();
+}
