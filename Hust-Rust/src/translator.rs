@@ -91,7 +91,7 @@ impl Translator {
         let mut println_macros: Vec<String> = Vec::new();
         {
             use regex::Regex;
-            let re_println = Regex::new(r"println!\s*\([^;]+\);")
+            let re_println = Regex::new(r"println!\s*\([^;]+\)")
                 .map_err(|e| TranspileError::TransformError(e.to_string()))?;
             
             let mut idx = 0;
@@ -1930,7 +1930,7 @@ impl Translator {
         // 2026-10-17: Protect println! macro calls from variable declaration transformation
         // println!("...") contains strings that may match var decl patterns (e.g. "--- Object...")
         let mut println_macros: Vec<String> = Vec::new();
-        let re_println = Regex::new(r"println!\s*\([^;]+\);")
+        let re_println = Regex::new(r"println!\s*\([^;]+\)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         
         let mut idx = 0;
@@ -3082,6 +3082,7 @@ impl Translator {
             let mut in_string = false;
             let mut body_end_abs = body_start_abs;
             let body_src = &source[body_start_abs..];
+            
             for (i, c) in body_src.char_indices() {
                 if c == '"' {
                     in_string = !in_string;
@@ -3100,9 +3101,11 @@ impl Translator {
                     }
                 }
             }
+            
             if brace_depth != 0 {
                 return None; // malformed, no matching closing brace
             }
+            
             Some((
                 source[body_start_abs..body_end_abs].trim().to_string(),
                 body_end_abs + 1,
@@ -3121,6 +3124,7 @@ impl Translator {
                 }
             }
             let stmt_end = stmt_end?;
+            
             Some((
                 format!("{};", after_header[..stmt_end].trim()),
                 after_header_start + stmt_end + 1,
@@ -3253,13 +3257,12 @@ impl Translator {
             let init_value = caps[3].trim();
             let condition = caps[4].trim();
             let update = caps[5].trim();
-
+            
             let (body, full_for_end) = match self.extract_for_body(&result, header_match.end()) {
                 Some(x) => x,
                 None => break, // malformed body
             };
             let full_for_start = header_match.start();
-            ;
 
             // Update statement: block / marked ++/-- / plain (see helper —
             // branch order matters, block must be checked first)
@@ -3515,36 +3518,61 @@ impl Translator {
         let update_var = &caps[2];
         let update_op = &caps[4];
 
-        // Find the body - look for the opening { after the for loop header
-        // and get everything until the matching }
+        // Find the body - use marker-based approach to avoid brace matching issues
         let after_header = &for_loop[caps.get(0).unwrap().end()..];
-        let body_start = after_header.find('{')?;
-        let body_rest = &after_header[body_start..];
-
-        // Find the matching closing brace
+        
+        // Use unique markers for braces to avoid nesting issues
+        // Generate unique ID using timestamp + counter + memory address
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static MARKER_COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let counter = MARKER_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let addr = for_loop.as_ptr() as usize; // Use memory address as entropy
+        let unique_id = format!("{}_{}_{}", timestamp, counter, addr);
+        let left_marker = format!("###brace_left_{}###", unique_id);
+        let right_marker = format!("###brace_right_{}###", unique_id);
+        let left_marker_str = left_marker.as_str();
+        let right_marker_str = right_marker.as_str();
+        
+        // Replace all braces in the for loop with markers first
+        let marked_loop = for_loop.replace('{', left_marker_str).replace('}', right_marker_str);
+        
+        // Now find the body between the first left marker and its matching right marker
+        let after_header_marked = &marked_loop[caps.get(0).unwrap().end()..];
+        let body_start = after_header_marked.find(left_marker_str)?;
+        let body_rest = &after_header_marked[body_start..];
+        
+        // Find the matching closing marker
         let mut depth = 0;
         let mut body_end = 0;
-        for (i, c) in body_rest.chars().enumerate() {
-            match c {
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        body_end = i;
-                        break;
-                    }
+        let mut pos = 0;
+        while pos < body_rest.len() {
+            if body_rest[pos..].starts_with(left_marker_str) {
+                depth += 1;
+                pos += left_marker.len();
+            } else if body_rest[pos..].starts_with(right_marker_str) {
+                depth -= 1;
+                if depth == 0 {
+                    body_end = pos;
+                    break;
                 }
-                _ => {}
+                pos += right_marker.len();
+            } else {
+                pos += 1;
             }
         }
-
-        let body = &body_rest[1..body_end]; // Skip the opening {
-
+        
+        // Extract body and restore original braces
+        let body_marked = &body_rest[left_marker.len()..body_end];
+        let body = body_marked.replace(left_marker_str, "{").replace(right_marker_str, "}");
+        
         // Build update statement based on operator
-        let update_stmt = format!("{}= 1;", update_var);
-
-        // Build the while loop
-        Some(format!("while {} {{{}{}\n}}", condition, body, update_stmt))
+        let update_stmt = format!("\n{} {}= {};", update_var, update_op, &caps[5]);
+        
+        // Build the while loop - ensure proper brace matching
+        let trimmed_body = body.trim();
+        Some(format!("while {} {{\n{}\n{}}}", condition, trimmed_body, update_stmt))
     }
 
     /// V0.2: Remove parentheses from if/while conditions (Rust style)

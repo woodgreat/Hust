@@ -6,15 +6,15 @@ class Point {
     
     public Point() {}
     
-    public i32 getX() { return this.x; }
-    public i32 getY() { return this.y; }
-    public void setX(i32 val) { this.x = val; }
+    public i32 get_x() { return this.x; }
+    public i32 get_y() { return this.y; }
+    public void set_x(i32 val) { this.x = val; }
 }
 
 void main() {
     Point p = new Point();
-    p.setX(10);
+    p.set_x(10);
     
-    println!("X: {}", p.getX());
+    println!("X: {}", p.get_x());
     println!("Class v2 test passed!");
 }
