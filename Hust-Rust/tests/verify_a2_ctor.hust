@@ -3,12 +3,12 @@ class Board {
     i32 size;
     
     public Board() {
-        self.size = 19;
-        self.init();
+        this.size = 19;
+        this.init();
     }
     
     void init() {
-        self.size = 13;
+        this.size = 13;
     }
 }
 

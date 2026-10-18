@@ -1,0 +1,32 @@
+// test_this_supported.hust - Test supported 'this' keyword
+// This should compile and run successfully
+
+class Point {
+    i32 x;
+    i32 y;
+    
+    public Point(i32 x, i32 y) {
+        this.x = x;
+        this.y = y;
+    }
+    
+    public i32 get_x() {
+        return this.x;  // ✅ Correct: use 'this'
+    }
+    
+    public i32 get_y() {
+        return this.y;  // ✅ Correct: use 'this'
+    }
+    
+    public void print() {
+        println!("Point({}, {})", this.x, this.y);
+    }
+}
+
+void main() {
+    Point p = new Point(10, 20);
+    println!("x = {}", p.get_x());
+    println!("y = {}", p.get_y());
+    p.print();
+    println!("=== Test completed ===");
+}

@@ -5,7 +5,7 @@ interface MoveGenerator {
 
 class Board {
     i32 size;
-    public Board() { self.size = 19; }
+    public Board() { this.size = 19; }
 }
 
 class Level1 implements MoveGenerator {

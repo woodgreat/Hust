@@ -10,14 +10,14 @@ class Outer {
         public Inner() {}
         
         public i32 get_value() {
-            return self.inner_field;
+            return this.inner_field;
         }
     }
     
     public Outer() {}
     
     public void init() {
-        self.outer_field = 10;
+        this.outer_field = 10;
     }
 }
 

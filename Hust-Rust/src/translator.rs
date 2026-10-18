@@ -306,14 +306,20 @@ impl Translator {
 
     /// Transform array indices inside println! macro
     /// Converts items[i] to items[(i) as usize]
+    /// Also converts this.x to self.x (Hust uses 'this', Rust uses 'self')
     fn transform_array_indices_in_println(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
+        
+        // First, transform this.x -> self.x inside println!
+        let this_re = Regex::new(r"\bthis\b")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let source = this_re.replace_all(source, "self").to_string();
         
         // Match array indexing: array[index] where index is a simple variable
         let re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\[([a-zA-Z_][a-zA-Z0-9_]*)\]")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         
-        let result = re.replace_all(source, |caps: &regex::Captures| {
+        let result = re.replace_all(&source, |caps: &regex::Captures| {
             let array_name = &caps[1];
             let index_name = &caps[2];
             // Skip if already transformed
@@ -6719,6 +6725,19 @@ impl Translator {
         // Transform this.x -> self.x (Hust uses 'this', Rust uses 'self')
         // Pattern: this.field or this.method() -> self.field or self.method()
         use regex::Regex;
+        
+        // V0.2.7: Check for deprecated 'self' usage in Hust source
+        let self_re = Regex::new(r"\bself\b").unwrap();
+        if self_re.is_match(&result) {
+            eprintln!("[Hust Error] Deprecated keyword 'self' detected.");
+            eprintln!("[Hust Error] Please use 'this' instead of 'self' in Hust code.");
+            eprintln!("[Hust Error] Example: change 'self.x' to 'this.x'");
+            eprintln!("[Hust Error] Found in: {}", result.lines()
+                .find(|line| self_re.is_match(line))
+                .unwrap_or("unknown location"));
+            panic!("Hust compilation failed: deprecated 'self' keyword used");
+        }
+        
         let this_re = Regex::new(r"\bthis\b").unwrap();
         result = this_re.replace_all(&result, "self").to_string();
         

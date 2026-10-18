@@ -5,27 +5,27 @@ class Counter {
     i32 count;
     
     public Counter() {
-        self.count = 0;
+        this.count = 0;
     }
     
     // 默认：最大权限（&mut self）
     public void increment() {
-        self.count = self.count + 1;
+        this.count = this.count + 1;
     }
     
     // readonly：只读权限（&self）
     public readonly i32 get_count() {
-        return self.count;
+        return this.count;
     }
     
     // readonly：只读，无返回值
     public readonly void print() {
-        println!("Count: {}", self.count);
+        println!("Count: {}", this.count);
     }
     
     // 默认：修改方法
     public void reset() {
-        self.count = 0;
+        this.count = 0;
     }
 }
 

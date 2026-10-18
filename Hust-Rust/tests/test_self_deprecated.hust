@@ -1,0 +1,21 @@
+// test_self_deprecated.hust - Test deprecated 'self' keyword detection
+// This should trigger a friendly error message
+
+class Point {
+    i32 x;
+    i32 y;
+    
+    public Point(i32 x, i32 y) {
+        this.x = x;
+        this.y = y;
+    }
+    
+    public i32 get_x() {
+        return self.x;  // ❌ Deprecated: should use 'this' instead
+    }
+}
+
+void main() {
+    Point p = new Point(10, 20);
+    println!("x = {}", p.get_x());
+}

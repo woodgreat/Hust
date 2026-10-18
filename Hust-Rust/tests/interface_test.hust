@@ -14,7 +14,7 @@ class Rectangle implements Drawable {
     }
     
     public i32 getArea() {
-        return self.width * self.height;
+        return this.width * this.height;
     }
 }
 

@@ -28,8 +28,8 @@ class Item {
     String name;
     
     public Item(i32 id, String name) {
-        self.id = id;
-        self.name = name;
+        this.id = id;
+        this.name = name;
     }
 }
 

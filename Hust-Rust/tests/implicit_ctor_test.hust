@@ -15,11 +15,11 @@ class Accumulator {
     i32 total;
     
     public void add(i32 v) {
-        self.total += v;
+        this.total += v;
     }
     
     public i32 get() {
-        return self.total;
+        return this.total;
     }
 }
 
@@ -28,11 +28,11 @@ class Greeter {
     String name;
     
     public Greeter(String n) {
-        self.name = n;
+        this.name = n;
     }
     
     public void hello() {
-        println!("hi {}", self.name);
+        println!("hi {}", this.name);
     }
 }
 

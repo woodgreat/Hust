@@ -6,9 +6,9 @@ class Point {
     
     public Point() {}
     
-    public i32 getX() { return self.x; }
-    public i32 getY() { return self.y; }
-    public void setX(i32 val) { self.x = val; }
+    public i32 getX() { return this.x; }
+    public i32 getY() { return this.y; }
+    public void setX(i32 val) { this.x = val; }
 }
 
 void main() {

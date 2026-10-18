@@ -8,7 +8,7 @@ class Animal {
     }
     
     public i32 getAge() {
-        return self.age;
+        return this.age;
     }
 }
 

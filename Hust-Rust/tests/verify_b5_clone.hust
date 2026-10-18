@@ -1,6 +1,6 @@
 class Board {
     i32 size;
-    public Board() { self.size = 19; }
+    public Board() { this.size = 19; }
 }
 
 void main() {

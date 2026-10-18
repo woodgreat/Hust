@@ -12,7 +12,7 @@ class Rectangle implements Shape {
     public Rectangle() {}
     
     public f64 area() {
-        return self.width * self.height;
+        return this.width * this.height;
     }
     
     public void draw() {
@@ -26,7 +26,7 @@ class Circle implements Shape {
     public Circle() {}
     
     public f64 area() {
-        return 3.14159 * self.radius * self.radius;
+        return 3.14159 * this.radius * this.radius;
     }
     
     public void draw() {

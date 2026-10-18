@@ -4,16 +4,16 @@ class Board {
     i32[] history;
     
     public Board() {
-        self.size = 19;
-        self.history = new i32[0];
+        this.size = 19;
+        this.history = new i32[0];
     }
     
     public void add(i32 mv) {
-        self.history.push(mv);
+        this.history.push(mv);
     }
     
     public i32 get_size() {
-        return self.size;
+        return this.size;
     }
 }
 

@@ -2,7 +2,7 @@
 class Foo {
     i32 x;
     public Foo() {
-        self.x = 42;
+        this.x = 42;
     }
 }
 

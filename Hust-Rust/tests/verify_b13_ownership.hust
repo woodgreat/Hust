@@ -3,15 +3,15 @@ class Board {
     i32 size;
     
     public Board(i32 s) {
-        self.size = s;
+        this.size = s;
     }
     
     public void set(i32 s) {
-        self.size = s;
+        this.size = s;
     }
     
     public i32 get() {
-        return self.size;
+        return this.size;
     }
 }
 

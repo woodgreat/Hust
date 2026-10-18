@@ -2,25 +2,25 @@
 // Explicit access chains (composition model, r24 design philosophy):
 //   p.dog.animal.age  — 3-layer field chain
 //   p.dog.setWeight() — 2-layer method chain
-// Method bodies use explicit self./chain prefixes (r24 current semantics;
+// Method bodies use explicit this./chain prefixes (r24 current semantics;
 // bare field names like `weight = n;` need symbol-table support — TODO r24)
 class Animal {
     i32 age;
-    public void setAge(i32 n) { self.age = n; }
-    public i32 getAge() { return self.age; }
+    public void setAge(i32 n) { this.age = n; }
+    public i32 getAge() { return this.age; }
 }
 
 class Dog extends Animal {
     i32 weight;
-    public void setWeight(i32 n) { self.weight = n; }
-    public i32 getWeight() { return self.weight; }
+    public void setWeight(i32 n) { this.weight = n; }
+    public i32 getWeight() { return this.weight; }
 }
 
 class Puppy extends Dog {
     String name;
-    public void setName(String n) { self.name = n; }
+    public void setName(String n) { this.name = n; }
     // String fields need .clone() on return (no Copy — ownership move otherwise)
-    public String getName() { return self.name.clone(); }
+    public String getName() { return this.name.clone(); }
 }
 
 void main() {
