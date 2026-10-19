@@ -1,4 +1,4 @@
-// Interface test - V0.6
+// interface_test.hust — 接口定义与实现（方法名须 snake_case）
 
 interface Drawable {
     public void draw();

@@ -1,4 +1,4 @@
-// Inheritance test - V0.6
+// inheritance_test.hust — 单层继承 + 父类成员访问 d.Animal.x（方法名须 snake_case）
 
 class Animal {
     i32 age;

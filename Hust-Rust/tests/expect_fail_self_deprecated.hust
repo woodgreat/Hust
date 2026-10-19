@@ -1,4 +1,4 @@
-// test_self_deprecated.hust - Test deprecated 'self' keyword detection
+// expect_fail_self_deprecated.hust — 负向测试：已弃用的 self 关键字必须被拒绝编译
 // This should trigger a friendly error message
 
 class Point {

@@ -1,4 +1,4 @@
-// Nested Class Test
+// Nested Class Test — 测试嵌套类 Outer.Inner 的扁平化与方法内 this 改写（B22）
 // Test basic nested class definition and usage
 
 class Outer {
