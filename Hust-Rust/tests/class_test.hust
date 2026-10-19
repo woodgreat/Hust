@@ -1,8 +1,8 @@
 // Class test - V0.6
 
 interface Shape {
-    public area();
-    public void draw();
+    public areaSize area();
+    public draw();
 }
 
 class Rectangle implements Shape {

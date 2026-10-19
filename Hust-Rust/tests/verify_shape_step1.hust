@@ -1,6 +1,6 @@
 // Step 1: Simple interface with 1 param, no return var
 interface Shape1 {
-    public area(width);  // 1 blank: Width
+    public areaSize area(width);  // 返回变量名 areaSize，形参名 width
 }
 
 class Rect1 implements Shape1 {

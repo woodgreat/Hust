@@ -1,20 +1,47 @@
-// interface_test.hust — 接口定义与实现（方法名须 snake_case）
+// interface_test.hust — 形状接口正面测试（r44）：接口正文只写名字，类型由实现类填
+// 三个用例覆盖：无返回值、有返回值、有返回值+多个形参
 
 interface Drawable {
-    public void draw();
-    public getArea();
+    public draw();
+    public areaSize getArea();
+}
+
+interface Container {
+    public add(item);
+    public indexNumber get(index);
+    public faceArea getRectArea(sideA, sideB);
 }
 
 class Rectangle implements Drawable {
     i32 width;
     i32 height;
-    
+
+    public Rectangle() {}
+
     public void draw() {
         println!("Drawing rectangle");
     }
-    
-    public i32 get_area() {
+
+    public i32 getArea() {
         return this.width * this.height;
+    }
+}
+
+class IntStack implements Container {
+    i32 total;
+
+    public IntStack() {}
+
+    public void add(i32 item) {
+        this.total = this.total + item;
+    }
+
+    public i32 get(i32 index) {
+        return this.total;
+    }
+
+    public i32 getRectArea(i32 sideA, i32 sideB) {
+        return sideA * sideB;
     }
 }
 
@@ -22,9 +49,12 @@ void main() {
     Rectangle r = new Rectangle();
     r.width = 10;
     r.height = 5;
-    
     r.draw();
-    println!("Area: {}", r.get_area());
-    
+    println!("Area: {}", r.getArea());
+
+    IntStack s = new IntStack();
+    s.add(7);
+    println!("get: {} rect: {}", s.get(0), s.getRectArea(3, 4));
+
     println!("Interface test passed!");
 }

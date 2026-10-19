@@ -8,6 +8,7 @@
 | 文件 | 测试目的 |
 |------|----------|
 | `expect_fail_self_deprecated.hust` | 已弃用的 `self` 关键字必须被拒绝，并给出友好提示 |
+| `expect_fail_shape_type_in_interface.hust` | 形状接口正文出现类型字（如 `void`）必须被拒绝（r44 铁律）|
 
 ## 二、类与面向对象
 

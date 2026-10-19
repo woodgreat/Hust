@@ -609,9 +609,11 @@ impl Translator {
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(&source, |caps: &regex::Captures| {
-            let method_name = &caps[1];
-            let rust_method = self.to_snake_case(method_name);
-            format!(".{}(", rust_method)
+            // r73 (2026-10-19, owner): identifiers pass through unchanged.
+            // Hust is not Rust; the author's naming style is not rewritten.
+            // Rust may warn (non_snake_case) -- that is acceptable and even
+            // nudges the author toward good naming.
+            format!(".{}(", &caps[1])
         });
 
         Ok(result.to_string())
@@ -803,7 +805,12 @@ impl Translator {
 
         // 1. 识别函数签名边界（fn name(...) -> type {）
         // 匹配函数签名：fn name(params) -> return_type {
-        let sig_re = Regex::new(r"fn\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\([^)]*\)\s*(?:->\s*[^{]+)?\s*\{")
+        // NOTE (2026-10-19): `-> [^{]+` used to swallow semicolons and
+        // newlines, so a trait declaration (`fn f(&mut self);`) could match
+        // across several lines and even over the next function, producing a
+        // reversed slice range (panic: "byte range starts at X but ends at Y").
+        // Keep the return-type span on one line and stop at `;`.
+        let sig_re = Regex::new(r"fn\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\([^)]*\)\s*(?:->\s*[^;{\n]+)?\s*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let mut result = String::new();
@@ -811,6 +818,10 @@ impl Translator {
 
         // 2. 遍历所有函数签名，分离签名和函数体
         for m in sig_re.find_iter(source) {
+            // Defensive: never slice backwards, whatever the regex did.
+            if m.start() < last_end || m.end() < m.start() {
+                continue;
+            }
             // 添加函数签名之前的代码（不转换）
             result.push_str(&source[last_end..m.start()]);
             
@@ -5058,13 +5069,22 @@ impl Translator {
             let params_raw = caps[3].trim();
 
             // Return classification
+            //
+            // r44 铁律 (owner, 2026-10-19): a shape interface body never
+            // contains type words. Everything written there is a NAME:
+            //   - a word before the method name  -> return variable name
+            //   - no word before the method name -> no return value
+            //   - each word inside the parens    -> formal parameter name
+            // So `public draw();` means "no return", while `void` and
+            // `i32` are types and must never appear here.
             let ret = match ret_word.as_deref() {
-                None => {
-                    // untyped return => blank named after the method
-                    let assoc = reg_assoc(&method_name, &mut assoc_names, &mut seen);
-                    ShapeRet::Blank(assoc)
+                None => ShapeRet::Void,
+                Some("void") => {
+                    return Err(TranspileError::TransformError(format!(
+                        "syntax error: interface `{}` method `{}` declares `void`. Shape interfaces never contain type words (r44): write `{}();` for a method with no return value. `void` belongs in the implementing class, not the interface.",
+                        interface_name, method_name, method_name
+                    )));
                 }
-                Some("void") => ShapeRet::Void,
                 Some(name) => {
                     // Fix B12 (2026-10-10): use keyword table to distinguish type vs variable name.
                     // is_type_name checks: builtin types, reserved keywords, user-defined types.
@@ -5132,7 +5152,7 @@ impl Translator {
             }
 
             methods.push(ShapeMethod {
-                name: self.to_snake_case(&method_name),
+                name: method_name.clone(),  // r73: keep author spelling
                 params,
                 ret,
             });
@@ -5154,7 +5174,7 @@ impl Translator {
             let mut params = String::new();
             for p in &m.params {
                 params.push_str(&format!(", {}: Self::{}",
-                    self.to_snake_case(&p.pname),
+                    p.pname.clone(),  // r73: keep author spelling
                     p.assoc.as_deref().unwrap_or("()"),
                 ));
             }
@@ -5189,7 +5209,7 @@ impl Translator {
             let params = &caps[4];
 
             // Convert method name to snake_case
-            let rust_method = self.to_snake_case(method_name);
+            let rust_method = method_name.to_string();  // r73: keep author spelling
 
             // Transform parameters
             let rust_params = self.transform_method_params(params);
@@ -5431,7 +5451,7 @@ impl Translator {
         };
         
         for field in &fields {
-            let rust_field = self.to_snake_case(&field.name);
+            let rust_field = field.name.clone();  // r73: keep author spelling
             result.push_str(format!("\n    {}: {},", rust_field, field.type_name).as_str());
         }
         result.push_str("\n}\n");
@@ -5442,7 +5462,7 @@ impl Translator {
             result.push_str("\n    fn default() -> Self {");
             result.push_str("\n        Self {");
             for field in &fields {
-                let rust_field = self.to_snake_case(&field.name);
+                let rust_field = field.name.clone();  // r73: keep author spelling
                 // For array types like [i32; 169], generate [0; 169]
                 let re = regex::Regex::new(r"\[(\d+)\]").unwrap();
                 let default_value = if let Some(cap) = re.captures(&field.type_name) {
@@ -5878,7 +5898,7 @@ impl Translator {
 
         // Add own fields with visibility
         for field in fields {
-            let rust_field = self.to_snake_case(&field.name);
+            let rust_field = field.name.clone();  // r73: keep author spelling
             let field_vis = match field.visibility {
                 Visibility::Public => "pub ",
                 Visibility::Private => "",
@@ -5901,7 +5921,7 @@ impl Translator {
             result.push_str("\n    fn default() -> Self {");
             result.push_str("\n        Self {");
             for field in fields {
-                let rust_field = self.to_snake_case(&field.name);
+                let rust_field = field.name.clone();  // r73: keep author spelling
                 // For array types like [i32; 169], generate [0; 169] as value
                 let re = regex::Regex::new(r"\[(\w+);\s*(\d+)\]").unwrap();
                 let default_value = if let Some(cap) = re.captures(&field.type_name) {
@@ -6214,7 +6234,7 @@ impl Translator {
             for mcaps in method_re.captures_iter(body) {
                 let is_public = mcaps.get(1).is_some();
                 let ret_type = &mcaps[2];
-                let m_rust = self.to_snake_case(&mcaps[3]);
+                let m_rust = mcaps[3].to_string();  // r73: keep author spelling
                 if !is_public {
                     if let Some(if_name) = if_methods.get(&m_rust) {
                         return Err(TranspileError::TransformError(format!(
@@ -6254,7 +6274,7 @@ impl Translator {
         }
 
         for method in methods {
-            let rust_name = self.to_snake_case(&method.name);
+            let rust_name = method.name.clone();  // r73: keep author spelling
             if !trait_methods.contains(&rust_name) {
                 continue; // not an interface member: inherent-only
             }
@@ -6412,7 +6432,7 @@ impl Translator {
         // Provider method table: snake_name -> (param type by name, ret_type)
         let mut provider_map: HashMap<String, (HashMap<String, String>, String)> = HashMap::new();
         for m in provider {
-            let key = self.to_snake_case(&m.name);
+            let key = m.name.clone();  // r73: keep author spelling
             let mut param_types: HashMap<String, String> = HashMap::new();
             for piece in m.params.split(',') {
                 let words: Vec<&str> = piece.split_whitespace().collect();
@@ -6491,7 +6511,7 @@ impl Translator {
                 Visibility::Private => "",
             };
 
-            let rust_name = self.to_snake_case(&method.name);
+            let rust_name = method.name.clone();  // r73: keep author spelling
             let rust_params = self.transform_method_params(&method.params);
 
             // needs_mut: field-WRITE detection only — `self.x =` / `self.x +=` etc.
@@ -6802,9 +6822,8 @@ impl Translator {
         let re = Regex::new(r"\.([a-z][a-zA-Z0-9]*)\s*\(").unwrap();
         result = re
             .replace_all(&result, |caps: &regex::Captures| {
-                let method_name = &caps[1];
-                let rust_method = self.to_snake_case(method_name);
-                format!(".{}(", rust_method)
+                // r73: identifiers pass through unchanged (see note above)
+                format!(".{}(", &caps[1])
             })
             .to_string();
 
@@ -6893,7 +6912,33 @@ impl Translator {
         fields
     }
     
-    /// Convert camelCase to snake_case
+    // ─────────────────────────────────────────────────────────────────
+    // RETIRED (2026-10-19, owner decision): identifier rewriting removed.
+    //
+    // Why: Hust is its own language, not a Rust front-end. The author's
+    // naming style is preserved verbatim — `getArea` stays `getArea`,
+    // `get_area` stays `get_area`. They are two different identifiers and
+    // Rust lets them coexist; choosing both is the programmer's semantic
+    // problem, not the transpiler's.
+    //
+    // Rust will emit `non_snake_case` warnings for camelCase names. That is
+    // intentional: it nudges the author toward good naming without the
+    // transpiler silently rewriting anything. Suppressing it with
+    // `#![allow(non_snake_case)]` was rejected — hiding would break the
+    // "transparent, no hidden magic" principle. Authors who need a clean
+    // build can adopt another language core once those land.
+    //
+    // A previous proposal used `___` (three underscores) as a translation
+    // marker so camelCase and snake_case would never collide. It was
+    // withdrawn: it only existed to make rewriting safe, and rewriting is
+    // no longer done at all.
+    //
+    // Kept (unused) for reference if a future language core ever requires
+    // case normalisation. Do not call it from new code without an owner
+    // decision recorded in Hust-Docs.
+    // ─────────────────────────────────────────────────────────────────
+    #[allow(dead_code)]
+    /// Convert camelCase to snake_case (retired, see note above)
     fn to_snake_case(&self, name: &str) -> String {
         let mut result = String::new();
         let chars: Vec<char> = name.chars().collect();

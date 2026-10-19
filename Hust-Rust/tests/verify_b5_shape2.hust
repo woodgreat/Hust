@@ -1,6 +1,6 @@
 // B5: 正确的形状接口写法（blank 名称与实现类参数一致）
 interface MoveGenerator {
-    genmove(board, color);
+    public moveResult genmove(board, color);
 }
 
 class Board {

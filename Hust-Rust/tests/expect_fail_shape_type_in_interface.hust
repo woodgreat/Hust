@@ -1,0 +1,21 @@
+// expect_fail_shape_type_in_interface.hust — negative test (r44): shape interfaces never contain type words
+// `void` belongs in the implementing class, not in the interface body.
+
+interface Bad {
+    public void draw();
+}
+
+class Box implements Bad {
+    i32 w;
+
+    public Box() {}
+
+    public void draw() {
+        println!("draw");
+    }
+}
+
+void main() {
+    Box b = new Box();
+    b.draw();
+}

@@ -1,7 +1,7 @@
 // B5: 形状接口 + class 传参（zulu 说 wood 手把手教的）
 // Fix: public interface support + shape interface (no concrete types)
 public interface MoveGenerator {
-    public genmove(board, color);
+    public moveResult genmove(board, color);
 }
 
 class Board {
