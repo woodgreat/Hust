@@ -7,7 +7,7 @@ class Animal {
         println!("Animal eating");
     }
     
-    public i32 getAge() {
+    public i32 get_age() {
         return this.age;
     }
 }
@@ -27,7 +27,7 @@ void main() {
     d.Animal.age = 5;
     
     d.Animal.eat();
-    println!("Age: {}", d.Animal.getAge());
+    println!("Age: {}", d.Animal.get_age());
     d.bark();
     
     println!("Inheritance test passed!");

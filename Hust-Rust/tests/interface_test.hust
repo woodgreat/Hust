@@ -13,7 +13,7 @@ class Rectangle implements Drawable {
         println!("Drawing rectangle");
     }
     
-    public i32 getArea() {
+    public i32 get_area() {
         return this.width * this.height;
     }
 }
@@ -24,7 +24,7 @@ void main() {
     r.height = 5;
     
     r.draw();
-    println!("Area: {}", r.getArea());
+    println!("Area: {}", r.get_area());
     
     println!("Interface test passed!");
 }

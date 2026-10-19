@@ -5587,7 +5587,12 @@ impl Translator {
             }
             
             if let Some(body) = &method.body {
-                for line in body.lines() {
+                // B22 (2026-10-19): nested-class methods bypassed the
+                // this -> self rewrite, so `this.field` leaked into the
+                // generated Rust of flat Outer_Inner impls (E0425).
+                // Run the same transform used by top-level class methods.
+                let transformed = self.transform_self_references(body);
+                for line in transformed.lines() {
                     let trimmed = line.trim();
                     if !trimmed.is_empty() {
                         result.push_str(format!("\n        {}", trimmed).as_str());
