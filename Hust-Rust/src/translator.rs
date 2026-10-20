@@ -1,6 +1,7 @@
 //! Transpiler Core Module
 //! Transpiles Hust code to Rust code
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -51,12 +52,33 @@ pub struct ModuleContext {
 #[derive(Debug)]
 pub struct Translator {
     options: TranspileOptions,
+    /// r49/B27: class-typed variables visible while transforming calls
+    /// (`Counter c = new Counter();` -> c is a Counter). Shared across
+    /// passes because the call pass runs long after the declaration pass.
+    class_vars: RefCell<HashMap<String, String>>,
+    /// B28: function/method signatures collected before calls are rewritten.
+    /// Maps callable name to its parameter type words, in order.
+    fn_sigs: RefCell<HashMap<String, Vec<String>>>,
+    /// B26: field types per class (`Class` -> field -> type word), used to spot
+    /// String targets for automatic literal conversion.
+    field_types: RefCell<HashMap<String, HashMap<String, String>>>,
+    /// B26: element type of String[] variables, for push/assign conversion.
+    array_elems: RefCell<HashMap<String, String>>,
+    /// B26: `var -> (Class, field)` for field-assignment conversion.
+    field_owners: RefCell<HashMap<String, (String, String)>>,
 }
 
 impl Translator {
     /// Create new transpiler
     pub fn new(options: TranspileOptions) -> Self {
-        Self { options }
+        Self {
+            options,
+            class_vars: RefCell::new(HashMap::new()),
+            fn_sigs: RefCell::new(HashMap::new()),
+            field_types: RefCell::new(HashMap::new()),
+            array_elems: RefCell::new(HashMap::new()),
+            field_owners: RefCell::new(HashMap::new()),
+        }
     }
 
     /// Default configuration
@@ -165,6 +187,14 @@ impl Translator {
         // ClassName var = otherVar; -> let mut var: ClassName = otherVar.clone();
         // Must run before transform_function_definitions to catch assignments inside main()
         output = self.transform_class_var_assignment(&output)?;
+
+        // B27/r49: class variables and function signatures must be known
+        // before call arguments are rewritten.
+        output = self.collect_call_context(&output)?;
+        output = self.transform_object_arguments(&output)?;
+
+        // B26: literals landing on a String target convert automatically.
+        output = self.transform_string_targets(&output)?;
         
         // Rule 4: Function definition transform with visibility
         // public void func() -> pub fn func()
@@ -1171,6 +1201,462 @@ impl Translator {
     /// Fix B13 (2026-10-10): Transform class variable assignment
     /// ClassName var = otherVar; -> let mut var: ClassName = otherVar.clone();
     /// Must run BEFORE transform_function_definitions to catch assignments inside main()
+    /// B27/r49: collect class-typed variables and callable signatures so the
+    /// call-argument pass can decide where a `.clone()` is required.
+    fn collect_call_context(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        // B26: field types per class, used to know when a literal lands on a
+        // String target (field assignment / constructor argument).
+        // Accept both shapes: Rust `struct X { f: T }` and Hust `class X { T f; }`.
+        let class_hdr_re = Regex::new(r"(?:(?:pub\s+)?struct\s+|class\s+)([A-Z]\w*)\s*\{")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let field_re = Regex::new(r"(?m)^\s*(?:pub\s+)?([a-z_]\w*)\s*:\s*([A-Za-z_]\w*)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let hust_field_re = Regex::new(r"(?m)^\s*(?:public\s+)?([A-Z]\w*)\[?\]?\s+([a-z_]\w*)\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        {
+            // Merge instead of clear: transpile() runs once per module and a
+            // class declared in an earlier module must stay visible.
+            let mut ft = self.field_types.borrow_mut();
+            ft.clear();
+        }
+        for caps in class_hdr_re.captures_iter(source) {
+            let cls = caps[1].to_string();
+            let Some(open) = caps.get(0).map(|m| m.end()) else { continue; };
+            let bytes = source.as_bytes();
+            let mut depth = 1i32;
+            let mut idx = open;
+            while idx < bytes.len() {
+                match bytes[idx] as char {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                idx += 1;
+            }
+            if depth != 0 || idx >= bytes.len() {
+                continue;
+            }
+            let body = &source[open..idx];
+            // only the field block: stop at the first nested brace
+            let head_len = body.find('{').unwrap_or(body.len());
+            let head = &body[..head_len];
+            for fcaps in field_re.captures_iter(head) {
+                self.field_types
+                    .borrow_mut()
+                    .entry(cls.clone())
+                    .or_insert_with(HashMap::new)
+                    .insert(fcaps[1].to_string(), fcaps[2].to_string());
+            }
+            for fcaps in hust_field_re.captures_iter(head) {
+                self.field_types
+                    .borrow_mut()
+                    .entry(cls.clone())
+                    .or_insert_with(HashMap::new)
+                    .insert(fcaps[2].to_string(), fcaps[1].to_string());
+            }
+        }
+
+
+        let decl_re = Regex::new(
+            r"\b([A-Z]\w*)[ \t]+([a-z_][a-zA-Z0-9_]*)[ \t]*=[ \t]*(?:new\s+)?([a-zA-Z_][a-zA-Z0-9_]*)"
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        {
+            let mut cv = self.class_vars.borrow_mut();
+            cv.clear();
+            for caps in decl_re.captures_iter(source) {
+                cv.insert(caps[2].to_string(), caps[1].to_string());
+            }
+        }
+
+        // B26: String[] variables -> element type, for push/assign conversion.
+        let arr_re = Regex::new(r"\b([A-Za-z_]\w*)\[\]\s+([a-z_][a-zA-Z0-9_]*)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        {
+            let mut ae = self.array_elems.borrow_mut();
+            ae.clear();
+            for caps in arr_re.captures_iter(source) {
+                ae.insert(caps[2].to_string(), caps[1].to_string());
+            }
+        }
+
+        // B26: instances that are already built classes, for field assignment.
+        {
+            let mut fo = self.field_owners.borrow_mut();
+            fo.clear();
+            let cv = self.class_vars.borrow();
+            for (var, cls) in cv.iter() {
+                fo.insert(var.clone(), (cls.clone(), String::new()));
+            }
+        }
+
+        let sig_re = Regex::new(
+            r"(?:\bfn\s+|\b(?:public\s+|private\s+)?[A-Za-z_]\w*\s+)([a-zA-Z_]\w*)\s*\(([^)]*)\)"
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        {
+            let mut sigs = self.fn_sigs.borrow_mut();
+            sigs.clear();
+            for caps in sig_re.captures_iter(source) {
+                let name = caps[1].to_string();
+                if matches!(name.as_str(), "if" | "while" | "for" | "match" | "return" | "impl") {
+                    continue;
+                }
+                let mut tys: Vec<String> = Vec::new();
+                let mut ok = true;
+                for piece in caps[2].split(',') {
+                    let p = piece.trim();
+                    if p.is_empty() {
+                        continue;
+                    }
+                    let first = match p.split_whitespace().next() {
+                        Some(v) => v.to_string(),
+                        None => {
+                            ok = false;
+                            break;
+                        }
+                    };
+                    let first = first
+                        .trim_start_matches("&mut ")
+                        .trim_start_matches("&")
+                        .trim_start_matches("mut ")
+                        .to_string();
+                    if first == "self" || first.is_empty() {
+                        ok = false;
+                        break;
+                    }
+                    tys.push(first);
+                }
+                if ok && !tys.is_empty() {
+                    sigs.insert(name, tys);
+                }
+            }
+        }
+        Ok(source.to_string())
+    }
+
+    /// B27/r49: class arguments are by-value; clone them so the caller keeps
+    /// its own variable usable after the call.
+    /// B26: a literal landing on a String target becomes String automatically.
+    /// Targets: String[] push/assign, function args, class method args,
+    /// constructor args, field assignment right-hand side.
+    /// B28: in a readonly method the receiver is `&self`, so returning a
+    /// non-Copy field must clone it (`return self.name;` -> `...clone()`).
+    /// B28: locate the original class body so field types can be parsed.
+    fn find_class_body<'a>(source: &'a str, class_name: &str) -> Option<&'a str> {
+        use regex::Regex;
+        let pat = format!(r"(?m)(?:public\s+)?class\s+{}\b[^{{]*\{{", regex::escape(class_name));
+        let re = Regex::new(&pat).ok()?;
+        let m = re.find(source)?;
+        let start = m.end();
+        let bytes = source.as_bytes();
+        let mut depth = 1i32;
+        let mut idx = start;
+        while idx < bytes.len() {
+            match bytes[idx] as char {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(&source[start..idx]);
+                    }
+                }
+                _ => {}
+            }
+            idx += 1;
+        }
+        None
+    }
+
+    /// B28: these fields are returned by value from &self methods, so the
+    /// caller must receive a copy (String and class fields are not Copy).
+    fn clone_returned_fields(&self, body: &str, own_fields: &[(String, String)]) -> String {
+        use regex::Regex;
+
+        let ret_re = match Regex::new(r"return\s+(?:self|this)\.([a-zA-Z_]\w*)\s*;") {
+            Ok(r) => r,
+            Err(_) => return body.to_string(),
+        };
+
+        let cloned: Vec<String> = own_fields
+            .iter()
+            .filter(|(_, t)| {
+                t == "String" || t.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+            })
+            .map(|(f, _)| f.clone())
+            .collect();
+
+        ret_re
+            .replace_all(body, |caps: &regex::Captures| {
+                let fld = caps[1].to_string();
+                if cloned.contains(&fld) {
+                    // keep the Hust keyword here; the self-reference pass
+                    // rewrites `this.` to `self.` later in the pipeline.
+                    format!("return this.{}.clone();", fld)
+                } else {
+                    caps[0].to_string()
+                }
+            })
+            .to_string()
+    }
+
+
+
+    fn transform_string_targets(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        let array_elems = self.array_elems.borrow();
+        let field_types = self.field_types.borrow();
+        let class_vars = self.class_vars.borrow();
+        let fn_sigs = self.fn_sigs.borrow();
+        let mut out = source.to_string();
+
+        // 1. String[] push / add
+        let push_re = Regex::new(r#"([a-z_]\w*)\s*\.\s*(push|add)\s*\(\s*("(?:[^"\\]|\\.)*")\s*\)"#)
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        out = push_re
+            .replace_all(&out, |caps: &regex::Captures| {
+                let var = &caps[1];
+                let is_str = array_elems.get(var).map(|t| t == "String").unwrap_or(false);
+                if is_str {
+                    format!("{}.{}({}.to_string())", var, &caps[2], &caps[3])
+                } else {
+                    caps[0].to_string()
+                }
+            })
+            .to_string();
+
+        // 2. String[] element assignment: names[0] = "Bob";
+        let idx_re = Regex::new(r#"([a-zA-Z_]\w*)\s*(\[[^\]]*\])\s*=\s*("(?:[^"\\]|\\.)*")"#)
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        out = idx_re
+            .replace_all(&out, |caps: &regex::Captures| {
+                let var = &caps[1];
+                let is_str = array_elems.get(var).map(|t| t == "String").unwrap_or(false);
+                if is_str {
+                    format!("{}{} = {}.to_string()", var, &caps[2], &caps[3])
+                } else {
+                    caps[0].to_string()
+                }
+            })
+            .to_string();
+
+        // 3. Field assignment on a known instance: it.name = "x";
+        let field_re = Regex::new(r#"([a-z_]\w*)\s*\.\s*([a-z_]\w*)\s*=\s*("(?:[^"\\]|\\.)*")"#)
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        out = field_re
+            .replace_all(&out, |caps: &regex::Captures| {
+                let var = &caps[1];
+                let fld = &caps[2];
+                let lit = &caps[3];
+                let cls = class_vars.get(var);
+                let is_str = match cls {
+                    Some(c) => field_types
+                        .get(c)
+                        .and_then(|m| m.get(fld))
+                        .map(|t| t == "String")
+                        .unwrap_or(false),
+                    None => false,
+                };
+                if is_str {
+                    format!("{}.{} = {}.to_string()", var, fld, lit)
+                } else {
+                    caps[0].to_string()
+                }
+            })
+            .to_string();
+
+        // 4. Function / method / constructor arguments whose target type is String.
+        //    Method calls are matched by name as well; the signature table is
+        //    keyed by plain name, which is enough for String detection.
+        let call_re = Regex::new(r#"\b([a-zA-Z_]\w*)\s*\("#)
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let mut result = String::with_capacity(out.len());
+        let mut last = 0usize;
+        for caps in call_re.captures_iter(&out) {
+            let name = caps[1].to_string();
+            if matches!(
+                name.as_str(),
+                "if" | "while" | "for" | "match" | "return" | "println" | "print"
+                    | "format" | "vec" | "panic" | "Some" | "Ok" | "Err" | "new"
+            ) {
+                continue;
+            }
+            let Some(expected) = fn_sigs.get(&name) else { continue; };
+            let Some(m0) = caps.get(0) else { continue; };
+            let open_end = m0.end();
+            let bytes = out.as_bytes();
+            let mut depth = 1i32;
+            let mut idx = open_end;
+            while idx < bytes.len() {
+                match bytes[idx] as char {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 { break; }
+                    }
+                    _ => {}
+                }
+                idx += 1;
+            }
+            if depth != 0 || idx >= bytes.len() { continue; }
+            let raw_args = &out[open_end..idx];
+            let mut pieces: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            let mut d = 0i32;
+            for ch in raw_args.chars() {
+                match ch {
+                    '(' | '[' | '{' => { d += 1; cur.push(ch); }
+                    ')' | ']' | '}' => { d -= 1; cur.push(ch); }
+                    ',' if d == 0 => { pieces.push(cur.clone()); cur.clear(); }
+                    _ => cur.push(ch),
+                }
+            }
+            if !cur.trim().is_empty() || !pieces.is_empty() {
+                pieces.push(cur);
+            }
+            if pieces.is_empty() || pieces.len() != expected.len() { continue; }
+            let mut changed = false;
+            for (pos, piece) in pieces.iter_mut().enumerate() {
+                let want = expected.get(pos).map(|t| t == "String").unwrap_or(false);
+                if !want { continue; }
+                let t = piece.trim();
+                if !t.starts_with('"') || !t.ends_with('"') || t.len() < 2 { continue; }
+                if let Some(close) = t.rfind('"') {
+                    let tail = &t[close + 1..];
+                    if tail.contains("to_string") { continue; }
+                }
+                *piece = format!(" {}.to_string()", t);
+                changed = true;
+            }
+            if changed {
+                result.push_str(&out[last..open_end]);
+                result.push_str(&pieces.join(","));
+                last = idx;
+            }
+        }
+        result.push_str(&out[last..]);
+        Ok(result)
+    }
+
+    fn transform_object_arguments(&self, source: &str) -> Result<String, TranspileError> {
+        use regex::Regex;
+
+        let fn_sigs = self.fn_sigs.borrow();
+        let class_vars = self.class_vars.borrow();
+        if class_vars.is_empty() || fn_sigs.is_empty() {
+            return Ok(source.to_string());
+        }
+
+        let ident_re = Regex::new(r"^[a-z_][a-zA-Z0-9_]*$")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let call_re = Regex::new(r"\b([a-zA-Z_]\w*)\s*\(")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let mut out = String::with_capacity(source.len());
+        let mut last = 0usize;
+        for caps in call_re.captures_iter(source) {
+            let name = caps[1].to_string();
+            if matches!(
+                name.as_str(),
+                "if" | "while" | "for" | "match" | "return" | "println" | "print"
+                    | "format" | "vec" | "panic" | "Box" | "Vec" | "Some" | "Ok" | "Err"
+            ) {
+                continue;
+            }
+            let Some(expected) = fn_sigs.get(&name) else {
+                continue;
+            };
+            let open_end = match caps.get(0) {
+                Some(m) => m.end(),
+                None => continue,
+            };
+            let bytes = source.as_bytes();
+            let mut depth = 1i32;
+            let mut idx = open_end;
+            while idx < bytes.len() {
+                match bytes[idx] as char {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                idx += 1;
+            }
+            if depth != 0 || idx >= bytes.len() {
+                continue;
+            }
+            let args_start = open_end;
+            let args_end = idx;
+            let raw_args = &source[args_start..args_end];
+            let mut pieces: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            let mut d = 0i32;
+            for ch in raw_args.chars() {
+                match ch {
+                    '(' | '[' | '{' => {
+                        d += 1;
+                        cur.push(ch);
+                    }
+                    ')' | ']' | '}' => {
+                        d -= 1;
+                        cur.push(ch);
+                    }
+                    ',' if d == 0 => {
+                        pieces.push(cur.clone());
+                        cur.clear();
+                    }
+                    _ => cur.push(ch),
+                }
+            }
+            if !cur.trim().is_empty() || !pieces.is_empty() {
+                pieces.push(cur);
+            }
+            if pieces.is_empty() || pieces.len() != expected.len() {
+                continue;
+            }
+            let mut changed = false;
+            for (pos, piece) in pieces.iter_mut().enumerate() {
+                let arg_trim = piece.trim().to_string();
+                let want_class = expected
+                    .get(pos)
+                    .and_then(|t| t.chars().next())
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false);
+                if !want_class || !ident_re.is_match(&arg_trim) {
+                    continue;
+                }
+                if !class_vars.contains_key(&arg_trim) {
+                    continue;
+                }
+                *piece = format!(" {}.clone()", arg_trim);
+                changed = true;
+            }
+            if changed {
+                out.push_str(&source[last..args_start]);
+                out.push_str(&pieces.join(","));
+                last = args_end;
+            }
+        }
+        out.push_str(&source[last..]);
+        if out != source {
+        } else {
+        }
+        Ok(out)
+    }
+
     fn transform_class_var_assignment(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
         
@@ -2395,7 +2881,14 @@ impl Translator {
                         }
                         continue;
                     }
-                    transformed_params.push(format!("{}: {}", var_word, type_word));
+                    // r49/B27: class-typed parameter takes a private copy;
+                    // the caller keeps its own variable usable.
+                    let first_ch = type_word.chars().next().unwrap_or(' ');
+                    if first_ch.is_uppercase() {
+                        transformed_params.push(format!("mut {}: {}", var_word, type_word));
+                    } else {
+                        transformed_params.push(format!("{}: {}", var_word, type_word));
+                    }
                     iface_param_map.push(None);
                 } else {
                     transformed_params.push(param.to_string());
@@ -2987,8 +3480,15 @@ impl Translator {
             if parts.len() == 2 {
                 let type_name = parts[0];
                 let var_name = parts[1];
-                // Fix: Hust default mut for parameters (2026-10-10)
-                result.push(format!("mut {}: {}", var_name, type_name));
+                // r49/B27: class-typed parameters take a private copy, so the
+                // caller keeps its own variable usable (Hust default clone).
+                // Hust default mut for parameters (2026-10-10).
+                let first_ch = type_name.chars().next().unwrap_or(' ');
+                if first_ch.is_uppercase() {
+                    result.push(format!("mut {}: {} ", var_name, type_name));
+                } else {
+                    result.push(format!("mut {}: {}", var_name, type_name));
+                }
             } else {
                 // Keep as-is if can't parse
                 result.push(param.to_string());
@@ -6491,6 +6991,15 @@ impl Translator {
         source: &str,
     ) -> String {
         let mut result = format!("impl {} {{", class_name);
+        // B28: field types of this class, parsed once and reused by every
+        // method below (readonly methods need to clone non-Copy returns).
+        let mut own_fields: Vec<(String, String)> = Vec::new();
+        if let Some(body) = Self::find_class_body(source, class_name) {
+            let (fields, _methods) = self.parse_class_body(body);
+            for f in fields {
+                own_fields.push((f.name, f.type_name));
+            }
+        }
         
         // Implicit empty constructor (2026-09-29, wood decision):
         // a class with NO user-declared constructor implicitly owns an
@@ -6727,9 +7236,14 @@ impl Translator {
                 result.push_str(&sig);
 
                 if let Some(ref body) = method.body {
-                    let body_content = body.trim_start_matches('{').trim_end_matches('}');
+                    let mut body_content = body.trim_start_matches('{').trim_end_matches('}').to_string();
+                    // B28: a readonly method borrows &self, so returning a
+                    // non-Copy field moves out of it — clone instead.
+                    if method.is_readonly {
+                        body_content = self.clone_returned_fields(&body_content, &own_fields);
+                    }
                     let transformed_body = self.transform_self_references_with_fields(
-                        body_content, 
+                        &body_content, 
                         Some(&field_path_map)
                     );
                     result.push_str(&transformed_body);
