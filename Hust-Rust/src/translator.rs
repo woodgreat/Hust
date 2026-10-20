@@ -66,6 +66,11 @@ pub struct Translator {
     array_elems: RefCell<HashMap<String, String>>,
     /// B26: `var -> (Class, field)` for field-assignment conversion.
     field_owners: RefCell<HashMap<String, (String, String)>>,
+    /// B29: formal parameters of every function, keyed by a fully qualified
+    /// id `Owner::fn::param` (Owner is empty for free functions). Parameters
+    /// are not class_vars: they only exist inside their own body, and two
+    /// functions may both name a parameter `b`.
+    param_types: RefCell<HashMap<String, String>>,
 }
 
 impl Translator {
@@ -78,6 +83,7 @@ impl Translator {
             field_types: RefCell::new(HashMap::new()),
             array_elems: RefCell::new(HashMap::new()),
             field_owners: RefCell::new(HashMap::new()),
+            param_types: RefCell::new(HashMap::new()),
         }
     }
 
@@ -1276,6 +1282,84 @@ impl Translator {
             }
         }
 
+        // B29: formal parameters are class values inside their own body.
+        // Hust form at this stage: `Board generate(Board b, i32 color)`.
+        // Only the argument list is scanned, so struct fields and local
+        // declarations cannot leak in.
+        // B29: accept both the source signature (`i32 f(Type a)`) and the
+        // Rust form (`pub fn f(&mut self, a: Type) -> R`).
+        let sig_scan_re = Regex::new(r"(?:\bfn\s+[a-zA-Z_]\w*\s*|\b[A-Za-z_]\w*\s+[a-zA-Z_]\w*\s*)\(([^)]*)\)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        // Two shapes reach this pass: Hust source (`Board b`) for modules that
+        // contain no class definition, and already-converted Rust
+        // (`b: Board`) for the rest. Both are collected.
+        let param_hust_re = Regex::new(r"([A-Z]\w*)\s+([a-z_][a-zA-Z0-9_]*)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let param_rust_re = Regex::new(r"(?:mut\s+)?([a-z_][a-zA-Z0-9_]*)\s*:\s*&?(?:mut\s+)?([A-Z]\w*)")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        // B29: register every formal parameter under a scoped id
+        // `Owner::fn::param`, so two functions may both use `b` without
+        // colliding, and a parameter never leaks into another body.
+        let fn_owner_scan = Regex::new(r"impl\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+for\s+)?([A-Z]\w*)\s*\{")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let mut owner_spans: Vec<(String, usize, usize)> = Vec::new();
+        {
+            let bytes = source.as_bytes();
+            for caps in fn_owner_scan.captures_iter(source) {
+                let cls = caps[1].to_string();
+                let Some(whole) = caps.get(0) else { continue };
+                let start = whole.start();
+                let mut depth = 0i32;
+                let mut idx = whole.end() - 1;
+                while idx < bytes.len() {
+                    match bytes[idx] as char {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    idx += 1;
+                }
+                owner_spans.push((cls, start, idx));
+            }
+        }
+        let fn_name_re = Regex::new(r"(?:fn\s+|([A-Za-z_]\w*)\s+|)([a-zA-Z_]\w*)\s*\(")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let _ = fn_name_re;
+        {
+            let mut pt = self.param_types.borrow_mut();
+            for caps in sig_scan_re.captures_iter(source) {
+                let args = &caps[1];
+                let at = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                let owner = owner_spans
+                    .iter()
+                    .find(|(_, s0, e0)| at >= *s0 && at <= *e0)
+                    .map(|(c, _, _)| c.clone())
+                    .unwrap_or_default();
+                let head = &source[at..caps.get(0).map(|m| m.end()).unwrap_or(at)];
+                let fname = head
+                    .split('(')
+                    .next()
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or("")
+                    .to_string();
+                for pcaps in param_hust_re.captures_iter(args) {
+                    let key = format!("{}::{}::{}", owner, fname, &pcaps[2]);
+                    pt.insert(key, pcaps[1].to_string());
+                }
+                for pcaps in param_rust_re.captures_iter(args) {
+                    let key = format!("{}::{}::{}", owner, fname, &pcaps[1]);
+                    pt.insert(key, pcaps[2].to_string());
+                }
+            }
+        }
+
         // B26: String[] variables -> element type, for push/assign conversion.
         let arr_re = Regex::new(r"\b([A-Za-z_]\w*)\[\]\s+([a-z_][a-zA-Z0-9_]*)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
@@ -1301,11 +1385,57 @@ impl Translator {
             r"(?:\bfn\s+|\b(?:public\s+|private\s+)?[A-Za-z_]\w*\s+)([a-zA-Z_]\w*)\s*\(([^)]*)\)"
         )
         .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        // B29: method names collide across classes (`Board::get` vs `Tactics::get`),
+        // so every signature inside an `impl` block is keyed as `Class::name`.
+        // Free functions keep their bare name. Lookup prefers `Class::name` and
+        // falls back to the bare name.
+        let impl_scan_re = Regex::new(r"impl\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+for\s+)?([A-Z]\w*)\s*\{")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let mut impl_ranges: Vec<(String, usize, usize)> = Vec::new();
+        {
+            let bytes = source.as_bytes();
+            for caps in impl_scan_re.captures_iter(source) {
+                let cls = caps[1].to_string();
+                let Some(whole) = caps.get(0) else { continue };
+                let start = whole.start();
+                let mut depth = 0i32;
+                let mut idx = whole.end() - 1;
+                while idx < bytes.len() {
+                    match bytes[idx] as char {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    idx += 1;
+                }
+                impl_ranges.push((cls, start, idx));
+            }
+        }
         {
             let mut sigs = self.fn_sigs.borrow_mut();
-            sigs.clear();
+            // B29: function signatures are module-global knowledge, so the table
+            // accumulates across modules instead of being reset per file.
+            // (class_vars stays per-module: those are local variables.)
             for caps in sig_re.captures_iter(source) {
-                let name = caps[1].to_string();
+                let bare = caps[1].to_string();
+                let owner = caps
+                    .get(0)
+                    .and_then(|m| {
+                        let at = m.start();
+                        impl_ranges
+                            .iter()
+                            .find(|(_, s0, e0)| at >= *s0 && at <= *e0)
+                            .map(|(c, _, _)| c.clone())
+                    });
+                let name = match owner {
+                    Some(c) => format!("{}::{}", c, bare),
+                    None => bare.clone(),
+                };
                 if matches!(name.as_str(), "if" | "while" | "for" | "match" | "return" | "impl") {
                     continue;
                 }
@@ -1328,14 +1458,48 @@ impl Translator {
                         .trim_start_matches("&")
                         .trim_start_matches("mut ")
                         .to_string();
-                    if first == "self" || first.is_empty() {
-                        ok = false;
-                        break;
+                    // B29: two parameter shapes reach this pass.
+                    //   source / half-converted: `mut b: Board`  (name first)
+                    //   source original:         `Board b`       (type first)
+                    // For the `name: Type` shape the type follows the colon, so
+                    // the first word is the name and must be dropped.
+                    let first = if let Some(colon) = p.find(':') {
+                        let ty = p[colon + 1..].trim();
+                        let ty = ty
+                            .trim_start_matches("&mut ")
+                            .trim_start_matches("&")
+                            .trim_start_matches("mut ")
+                            .trim();
+                        ty.split(|c: char| c == ',' || c.is_whitespace())
+                            .next()
+                            .unwrap_or("")
+                            .to_string()
+                    } else {
+                        first
+                    };
+                    // B29: the receiver is not a call argument. Skipping it here
+                    // keeps the arity of a method signature equal to the number of
+                    // arguments written at call sites (`t.score_of(b, x)`).
+                    // B29: `&mut self` splits into `&mut` + `self`, so the
+                    // leftover prefix words must be dropped rather than
+                    // recorded as a parameter type. `mut` alone is never a
+                    // type in Hust, so treating it as a receiver fragment is
+                    // safe and keeps arity equal to the call site.
+                    if matches!(first.as_str(), "self" | "&self" | "mut" | "&mut" | "") {
+                        continue;
                     }
                     tys.push(first);
                 }
-                if ok && !tys.is_empty() {
-                    sigs.insert(name, tys);
+                if ok {
+                    if name.contains("generate") || name.contains("score_of") {
+                    }
+                    if !tys.is_empty() {
+                        sigs.insert(name.clone(), tys.clone());
+                    }
+                    // Zero-argument functions are real signatures too, and an
+                    // empty parameter list must still be recorded so call sites
+                    // can be checked for arity.
+                    sigs.entry(name.clone()).or_insert_with(Vec::new);
                 }
             }
         }
@@ -1523,7 +1687,9 @@ impl Translator {
             if !cur.trim().is_empty() || !pieces.is_empty() {
                 pieces.push(cur);
             }
-            if pieces.is_empty() || pieces.len() != expected.len() { continue; }
+            if pieces.is_empty() || pieces.len() != expected.len() {
+                continue;
+            }
             let mut changed = false;
             for (pos, piece) in pieces.iter_mut().enumerate() {
                 let want = expected.get(pos).map(|t| t == "String").unwrap_or(false);
@@ -1552,7 +1718,11 @@ impl Translator {
 
         let fn_sigs = self.fn_sigs.borrow();
         let class_vars = self.class_vars.borrow();
-        if class_vars.is_empty() || fn_sigs.is_empty() {
+        // B29: `class_vars` only holds local declarations; a module whose
+        // calls pass formal parameters has none, yet still needs rewriting
+        // (param_types covers those). Only bail out when there is no
+        // signature knowledge at all.
+        if fn_sigs.is_empty() && self.param_types.borrow().is_empty() {
             return Ok(source.to_string());
         }
 
@@ -1561,10 +1731,99 @@ impl Translator {
         let call_re = Regex::new(r"\b([a-zA-Z_]\w*)\s*\(")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
+        // B29: `self.method(` needs the enclosing impl to resolve a signature.
+        // Ranges are computed once; ownership stays in this function.
+        let impl_owner_re = Regex::new(r"impl\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+for\s+)?([A-Z]\w*)\s*\{")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let mut impl_spans: Vec<(String, usize, usize)> = Vec::new();
+        {
+            let bytes = source.as_bytes();
+            for caps in impl_owner_re.captures_iter(source) {
+                let cls = caps[1].to_string();
+                let Some(whole) = caps.get(0) else { continue };
+                let start = whole.start();
+                let mut depth = 0i32;
+                let mut idx = whole.end() - 1;
+                while idx < bytes.len() {
+                    match bytes[idx] as char {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    idx += 1;
+                }
+                impl_spans.push((cls, start, idx));
+            }
+        }
+
+        // B29: function body spans, so a call can be attributed to the
+        // function that encloses it (needed for scoped parameter lookups).
+        // B29: modules without a class definition never run the class pass, so
+        // their functions are still in source form (`Board put(Board b, ...)`);
+        // modules with classes are already Rust (`pub fn put(...)`).
+        let fn_span_re = Regex::new(r"(?:\bfn\s+|\b(?:public\s+|private\s+|readonly\s+)*[A-Za-z_]\w*\s+)([a-zA-Z_]\w*)\s*\(")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let mut fn_spans: Vec<(String, usize, usize)> = Vec::new();
+        {
+            let bytes = source.as_bytes();
+            for caps in fn_span_re.captures_iter(source) {
+                let fname = caps[1].to_string();
+                if matches!(fname.as_str(), "if" | "while" | "for" | "match" | "return" | "impl") {
+                    continue;
+                }
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                // skip the parameter list, then find the opening brace
+                let mut idx = caps.get(0).map(|m| m.end()).unwrap_or(0);
+                while idx < bytes.len() && bytes[idx] as char != '{' {
+                    idx += 1;
+                }
+                if idx >= bytes.len() {
+                    continue;
+                }
+                let mut depth = 0i32;
+                let mut end = idx;
+                while end < bytes.len() {
+                    match bytes[end] as char {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    end += 1;
+                }
+                fn_spans.push((fname, start, end));
+            }
+        }
+
         let mut out = String::with_capacity(source.len());
         let mut last = 0usize;
         for caps in call_re.captures_iter(source) {
             let name = caps[1].to_string();
+            let call_at = caps.get(0).map(|m| m.start()).unwrap_or(0);
+            let current_impl: Option<String> = impl_spans
+                .iter()
+                .find(|(_, s0, e0)| call_at >= *s0 && call_at <= *e0)
+                .map(|(c, _, _)| c.clone());
+
+            // B29: the enclosing function name, needed for the scoped
+            // `Owner::fn::param` lookup of parameter types.
+            // B29: find the function whose body contains this call. Scanning
+            // back for `(` is wrong (it finds the callee's own paren) and can
+            // also land inside a multi-byte character; walk the recorded fn
+            // definitions instead and test containment.
+            let current_fn: Option<String> = fn_spans
+                .iter()
+                .find(|(_, s0, e0)| call_at >= *s0 && call_at <= *e0)
+                .map(|(n, _, _)| n.clone());
             if matches!(
                 name.as_str(),
                 "if" | "while" | "for" | "match" | "return" | "println" | "print"
@@ -1572,9 +1831,44 @@ impl Translator {
             ) {
                 continue;
             }
-            let Some(expected) = fn_sigs.get(&name) else {
+            // B29: resolve the call to the right signature. `t.generate(` and
+            // `self.score_of(` are methods, so the receiver type decides which
+            // `Class::name` entry applies; a bare name is the fallback for free
+            // functions and for receivers whose type is unknown.
+            let receiver_cls = {
+                let at = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                let mut safe_at = at;
+                while safe_at > 0 && !source.is_char_boundary(safe_at) {
+                    safe_at -= 1;
+                }
+                let head = &source[..safe_at];
+                let trimmed = head.trim_end();
+                if let Some(dot) = trimmed.rfind('.') {
+                    let before = &trimmed[..dot];
+                    let start = before
+                        .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+                        .map(|i| i + 1)
+                        .unwrap_or(0);
+                    let recv = &before[start..];
+                    if recv == "self" {
+                        current_impl.clone()
+                    } else {
+                        class_vars.get(recv).cloned()
+                    }
+                } else {
+                    None
+                }
+            };
+            let lookup = match &receiver_cls {
+                Some(cls) => fn_sigs
+                    .get(&format!("{}::{}", cls, name))
+                    .or_else(|| fn_sigs.get(&name)),
+                None => fn_sigs.get(&name),
+            };
+            let Some(expected) = lookup else {
                 continue;
             };
+            let expected = expected.clone();
             let open_end = match caps.get(0) {
                 Some(m) => m.end(),
                 None => continue,
@@ -1638,7 +1932,20 @@ impl Translator {
                 if !want_class || !ident_re.is_match(&arg_trim) {
                     continue;
                 }
-                if !class_vars.contains_key(&arg_trim) {
+                // B29: an argument may be a local class variable (class_vars)
+                // or a formal parameter of the enclosing function
+                // (param_types, keyed `Owner::fn::param`).
+                let param_key = format!(
+                    "{}::{}::{}",
+                    current_impl.clone().unwrap_or_default(),
+                    current_fn.clone().unwrap_or_default(),
+                    arg_trim
+                );
+                let is_class_arg = class_vars.contains_key(&arg_trim)
+                    || matches!(self.param_types.borrow().get(&param_key), Some(t) if t.chars().next().map(|c| c.is_uppercase()).unwrap_or(false));
+                if !is_class_arg {
+                    if arg_trim == "b" {
+                    }
                     continue;
                 }
                 *piece = format!(" {}.clone()", arg_trim);
