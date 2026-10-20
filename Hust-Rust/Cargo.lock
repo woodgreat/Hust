@@ -138,7 +138,7 @@ checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
 name = "hust-rust"
-version = "0.3.2+20261020213000"
+version = "0.3.3+20261020214600"
 dependencies = [
  "anyhow",
  "clap",
