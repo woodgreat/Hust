@@ -48,6 +48,26 @@ pub struct ModuleContext {
     pub public_functions: HashSet<String>,
 }
 
+/// LAYER 1 segment classification. The scanner is the ONLY place that
+/// decides where a string literal or a comment begins and ends; rules must
+/// never guess with their own regex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentKind {
+    Code,
+    Str,
+    LineComment,
+    BlockComment,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Segment {
+    pub kind: SegmentKind,
+    /// Byte offset of the segment start in the source.
+    pub start: usize,
+    /// Byte offset one past the segment end.
+    pub end: usize,
+}
+
 /// Transpiler
 #[derive(Debug)]
 pub struct Translator {
@@ -2306,6 +2326,138 @@ impl Translator {
     }
 
     /// V0.5: Remove use statements (handled at module level)
+    /// LAYER 1 core: classify the source into Code / Str / LineComment /
+    /// BlockComment segments. Stream form (owner decision 2026-10-21) so the
+    /// split can be asserted directly in tests.
+    ///
+    /// C-style rules:
+    ///   in code    : '"' opens a string, '//' opens a line comment,
+    ///                '/*' opens a block comment
+    ///   in string  : backslash escapes the next char, '"' closes; '//' and
+    ///                '/*' are plain content
+    ///   text inside comments and strings is preserved verbatim; the scanner
+    ///   only reports boundaries.
+    fn str_scan(source: &str) -> Vec<Segment> {
+        let bytes = source.as_bytes();
+        let len = bytes.len();
+        let mut segs: Vec<Segment> = Vec::new();
+        let mut i = 0usize;
+        let mut code_start = 0usize;
+
+        macro_rules! flush_code {
+            ($at:expr) => {
+                if $at > code_start {
+                    segs.push(Segment { kind: SegmentKind::Code, start: code_start, end: $at });
+                }
+            };
+        }
+
+        while i < len {
+            let c = bytes[i];
+
+            if c == b'"' {
+                flush_code!(i);
+                let start = i;
+                let mut j = i + 1;
+                let mut escaped = false;
+                while j < len {
+                    let d = bytes[j];
+                    if escaped {
+                        escaped = false;
+                    } else if d == b'\\' {
+                        escaped = true;
+                    } else if d == b'"' {
+                        j += 1;
+                        break;
+                    }
+                    j += 1;
+                }
+                segs.push(Segment { kind: SegmentKind::Str, start, end: j.min(len) });
+                i = j;
+                code_start = i;
+                continue;
+            }
+
+            if c == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
+                flush_code!(i);
+                let start = i;
+                let mut j = i;
+                while j < len && bytes[j] != b'\n' {
+                    j += 1;
+                }
+                segs.push(Segment { kind: SegmentKind::LineComment, start, end: j });
+                i = j;
+                code_start = i;
+                continue;
+            }
+
+            if c == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
+                flush_code!(i);
+                let start = i;
+                let mut j = i + 2;
+                let mut closed = false;
+                while j + 1 < len {
+                    if bytes[j] == b'*' && bytes[j + 1] == b'/' {
+                        j += 2;
+                        closed = true;
+                        break;
+                    }
+                    j += 1;
+                }
+                if !closed {
+                    j = len;
+                }
+                segs.push(Segment { kind: SegmentKind::BlockComment, start, end: j.min(len) });
+                i = j;
+                code_start = i;
+                continue;
+            }
+
+            i += 1;
+        }
+
+        flush_code!(len);
+        segs
+    }
+    /// LAYER 1: replace every string literal with __HUST_STR_N__ and keep the
+    /// original text in `table`. The scan is delegated to str_scan, so rules
+    /// can never disagree about where a string starts.
+    fn str_lift(&self, source: &str, table: &mut Vec<String>) -> Result<String, TranspileError> {
+        let segs = Self::str_scan(source);
+        let mut out = String::with_capacity(source.len());
+        let mut last = 0usize;
+        for seg in &segs {
+            if seg.kind != SegmentKind::Str {
+                continue;
+            }
+            let literal = &source[seg.start..seg.end];
+            // Multi-line literals are not supported. Refuse loudly instead of
+            // silently swallowing newlines, which would shift line numbers.
+            if literal.contains('\n') {
+                return Err(TranspileError::TransformError(
+                    "multi-line string literals are not supported: a string literal must open and close on the same line".to_string(),
+                ));
+            }
+            out.push_str(&source[last..seg.start]);
+            let idx = table.len();
+            table.push(literal.to_string());
+            out.push_str(&format!("__HUST_STR_{}__", idx));
+            last = seg.end;
+        }
+        out.push_str(&source[last..]);
+        Ok(out)
+    }
+
+    /// LAYER 3: put the string literals back.
+    fn str_restore(&self, source: &str, table: &[String]) -> String {
+        let mut out = source.to_string();
+        for (idx, literal) in table.iter().enumerate() {
+            let placeholder = format!("__HUST_STR_{}__", idx);
+            out = out.replace(&placeholder, literal);
+        }
+        out
+    }
+
     /// LAYER 1 helper: lift line comments out of the code stream.
     ///
     /// Every comment (minus the newline) becomes a placeholder
@@ -2322,98 +2474,26 @@ impl Translator {
     /// a `//` preceded by an odd number of quotes is treated as string
     /// content and left alone (conservative: never strips too much).
     fn lift_comments(&self, source: &str, table: &mut Vec<String>) -> String {
+        // Delegates boundary detection to str_scan: ONE scanner decides where
+        // strings and comments start and end. Comments are replaced by
+        // placeholders; strings are copied through untouched here (str_lift
+        // handles them separately).
+        let segs = Self::str_scan(source);
         let mut out = String::with_capacity(source.len());
-        // Tracks whether the scanner is inside a string literal. Escape
-        // state matters: \" must not close the literal, otherwise a quote
-        // inside a string would flip the parity and expose real code.
-        let mut in_string = false;
-        let mut escaped = false;
-        let mut in_block = false;
-
-        let chars: Vec<char> = source.chars().collect();
-        let mut i = 0;
-        let mut pending = String::new();
-
-        while i < chars.len() {
-            let c = chars[i];
-
-            if in_block {
-                // Block comment: keep newlines so line numbers stay put.
-                if c == '*' && i + 1 < chars.len() && chars[i + 1] == '/' {
-                    in_block = false;
-                    i += 2;
-                    continue;
+        let mut last = 0usize;
+        for seg in &segs {
+            match seg.kind {
+                SegmentKind::LineComment | SegmentKind::BlockComment => {
+                    out.push_str(&source[last..seg.start]);
+                    let idx = table.len();
+                    table.push(source[seg.start..seg.end].to_string());
+                    out.push_str(&format!("__HUST_COMMENT_{}__", idx));
+                    last = seg.end;
                 }
-                if c == '\n' {
-                    out.push('\n');
-                }
-                i += 1;
-                continue;
+                _ => {}
             }
-
-            if in_string {
-                pending.push(c);
-                if escaped {
-                    escaped = false;
-                } else if c == '\\' {
-                    escaped = true;
-                } else if c == '"' {
-                    in_string = false;
-                    out.push_str(&pending);
-                    pending.clear();
-                }
-                i += 1;
-                continue;
-            }
-
-            // Not in a string, not in a block comment.
-            if c == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
-                // Block comment: capture the FULL original text so the
-                // preprocess+restore invariant holds byte for byte. Newlines
-                // inside it are kept as-is, which also preserves line numbers.
-                let mut end = i + 2;
-                while end + 1 < chars.len() {
-                    if chars[end] == '*' && chars[end + 1] == '/' {
-                        end += 2;
-                        break;
-                    }
-                    end += 1;
-                }
-                let comment: String = chars[i..end].iter().collect();
-                let idx = table.len();
-                table.push(comment);
-                out.push_str(&format!("__HUST_COMMENT_{}__", idx));
-                i = end;
-                continue;
-            }
-
-            if c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
-                let mut end = i;
-                while end < chars.len() && chars[end] != '\n' {
-                    end += 1;
-                }
-                let comment: String = chars[i..end].iter().collect();
-                let idx = table.len();
-                table.push(comment);
-                out.push_str(&format!("__HUST_COMMENT_{}__", idx));
-                i = end;
-                continue;
-            }
-
-            if c == '"' {
-                in_string = true;
-                escaped = false;
-                pending.push(c);
-                i += 1;
-                continue;
-            }
-
-            out.push(c);
-            i += 1;
         }
-
-        // Unterminated string: flush what we held back.
-        out.push_str(&pending);
+        out.push_str(&source[last..]);
         out
     }
 
