@@ -2323,35 +2323,97 @@ impl Translator {
     /// content and left alone (conservative: never strips too much).
     fn lift_comments(&self, source: &str, table: &mut Vec<String>) -> String {
         let mut out = String::with_capacity(source.len());
-        for line in source.split_inclusive('\n') {
-            let body = line.strip_suffix('\n').unwrap_or(line);
-            let has_newline = line.ends_with('\n');
+        // Tracks whether the scanner is inside a string literal. Escape
+        // state matters: \" must not close the literal, otherwise a quote
+        // inside a string would flip the parity and expose real code.
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut in_block = false;
 
-            let pos = match body.find("//") {
-                Some(p) => p,
-                None => {
-                    out.push_str(line);
+        let chars: Vec<char> = source.chars().collect();
+        let mut i = 0;
+        let mut pending = String::new();
+
+        while i < chars.len() {
+            let c = chars[i];
+
+            if in_block {
+                // Block comment: keep newlines so line numbers stay put.
+                if c == '*' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                    in_block = false;
+                    i += 2;
                     continue;
                 }
-            };
-
-            let code = &body[..pos];
-            // Odd number of quotes before the marker: we are inside a string.
-            if code.matches('"').count() % 2 == 1 {
-                out.push_str(line);
+                if c == '\n' {
+                    out.push('\n');
+                }
+                i += 1;
                 continue;
             }
 
-            let comment = &body[pos..];
-            let idx = table.len();
-            table.push(comment.to_string());
-
-            out.push_str(code);
-            out.push_str(&format!("__HUST_COMMENT_{}__", idx));
-            if has_newline {
-                out.push('\n');
+            if in_string {
+                pending.push(c);
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_string = false;
+                    out.push_str(&pending);
+                    pending.clear();
+                }
+                i += 1;
+                continue;
             }
+
+            // Not in a string, not in a block comment.
+            if c == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
+                // Block comment: capture the FULL original text so the
+                // preprocess+restore invariant holds byte for byte. Newlines
+                // inside it are kept as-is, which also preserves line numbers.
+                let mut end = i + 2;
+                while end + 1 < chars.len() {
+                    if chars[end] == '*' && chars[end + 1] == '/' {
+                        end += 2;
+                        break;
+                    }
+                    end += 1;
+                }
+                let comment: String = chars[i..end].iter().collect();
+                let idx = table.len();
+                table.push(comment);
+                out.push_str(&format!("__HUST_COMMENT_{}__", idx));
+                i = end;
+                continue;
+            }
+
+            if c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                let mut end = i;
+                while end < chars.len() && chars[end] != '\n' {
+                    end += 1;
+                }
+                let comment: String = chars[i..end].iter().collect();
+                let idx = table.len();
+                table.push(comment);
+                out.push_str(&format!("__HUST_COMMENT_{}__", idx));
+                i = end;
+                continue;
+            }
+
+            if c == '"' {
+                in_string = true;
+                escaped = false;
+                pending.push(c);
+                i += 1;
+                continue;
+            }
+
+            out.push(c);
+            i += 1;
         }
+
+        // Unterminated string: flush what we held back.
+        out.push_str(&pending);
         out
     }
 
