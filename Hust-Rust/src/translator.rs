@@ -125,6 +125,11 @@ impl Translator {
         //   gap is step 1 of the four-step migration in develop_guide.md.
         // ============================================================
 
+        // LAYER 1: strip line comments so no rule can ever match inside one.
+        // Restored in LAYER 3 below. Line count is preserved.
+        let mut comment_table: Vec<String> = Vec::new();
+        output = self.lift_comments(&output, &mut comment_table);
+
         // 2026-10-17: Protect println! macro calls from ALL transformations
         // println!("...") contains strings that may match var decl patterns
         // Must protect BEFORE any transformation rules run
@@ -357,6 +362,9 @@ impl Translator {
         //   Put back everything LAYER 1 lifted out. Restore must be
         //   idempotent, and no placeholder may survive into the output.
         // ============================================================
+
+        // LAYER 3: put the comments back before returning.
+        output = self.restore_comments(&output, &comment_table);
 
         // 2026-10-17: Restore println! macros from placeholders
         // Also restore marked array indices and transform them
@@ -2298,6 +2306,65 @@ impl Translator {
     }
 
     /// V0.5: Remove use statements (handled at module level)
+    /// LAYER 1 helper: lift line comments out of the code stream.
+    ///
+    /// Every comment (minus the newline) becomes a placeholder
+    /// `__HUST_COMMENT_N__` on the same line, so line numbers stay stable
+    /// for error messages and the Rule 0 reminder.
+    ///
+    /// Why this exists (2026-10-21, B31): rule regexes used to run over raw
+    /// text, so a comment containing something that looks like a declaration
+    /// ("... The empty_count == 0") was matched AS a declaration and, because
+    /// the pattern allows newlines, swallowed the real declaration on a later
+    /// line. Stripping comments in LAYER 1 removes that whole class of bug.
+    ///
+    /// String literals are NOT lifted yet; that is the next step. Until then
+    /// a `//` preceded by an odd number of quotes is treated as string
+    /// content and left alone (conservative: never strips too much).
+    fn lift_comments(&self, source: &str, table: &mut Vec<String>) -> String {
+        let mut out = String::with_capacity(source.len());
+        for line in source.split_inclusive('\n') {
+            let body = line.strip_suffix('\n').unwrap_or(line);
+            let has_newline = line.ends_with('\n');
+
+            let pos = match body.find("//") {
+                Some(p) => p,
+                None => {
+                    out.push_str(line);
+                    continue;
+                }
+            };
+
+            let code = &body[..pos];
+            // Odd number of quotes before the marker: we are inside a string.
+            if code.matches('"').count() % 2 == 1 {
+                out.push_str(line);
+                continue;
+            }
+
+            let comment = &body[pos..];
+            let idx = table.len();
+            table.push(comment.to_string());
+
+            out.push_str(code);
+            out.push_str(&format!("__HUST_COMMENT_{}__", idx));
+            if has_newline {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    /// LAYER 3 helper: put the comments back.
+    fn restore_comments(&self, source: &str, table: &[String]) -> String {
+        let mut out = source.to_string();
+        for (idx, comment) in table.iter().enumerate() {
+            let placeholder = format!("__HUST_COMMENT_{}__", idx);
+            out = out.replace(&placeholder, comment);
+        }
+        out
+    }
+
     fn remove_use_statements(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
