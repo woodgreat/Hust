@@ -325,8 +325,18 @@ impl Translator {
         // Rule 10: Remove parentheses from if/while conditions
         output = self.remove_condition_parens(&output)?;
 
+        // Rule 11.2 preparation: collect local String variable names BEFORE
+        // Rule 11 rewrites declarations into Rust shape (B37). The concat
+        // rule needs to know whether an operand owns a String or not.
+        let mut string_vars: HashSet<String> = HashSet::new();
+        self.collect_string_vars(&output, &mut string_vars);
+
         // Rule 11: Transform String initialization
         output = self.transform_string_init(&output)?;
+
+        // Rule 11.2: string concatenation chains (B37). Rust only offers
+        // String + &str: the head operand must own a String, the rest borrow.
+        output = self.transform_string_concat(&output, &string_vars)?;
         
         // Rule 11.5: Transform string literals in function calls and returns
         // greet("World") -> greet("World".to_string())
@@ -1282,6 +1292,168 @@ impl Translator {
     /// Must run BEFORE transform_function_definitions to catch assignments inside main()
     /// B27/r49: collect class-typed variables and callable signatures so the
     /// call-argument pass can decide where a `.clone()` is required.
+    /// Rewrite a string concatenation chain into Rust's `String + &str` form.
+    ///
+    /// Rust only implements `Add<&str> for String`, so a chain is valid only
+    /// when the FIRST operand owns a String and every later operand borrows.
+    /// Hust hides that from the author; this rule supplies the right shape:
+    ///
+    ///   chain head : literal      -> append .to_string()
+    ///                String var   -> unchanged
+    ///   later      : literal      -> unchanged (stays &str)
+    ///                String var   -> prefix with &
+    ///
+    /// Splitting happens on '+' found in CODE segments only, so a plus sign
+    /// inside a string literal is content, not an operator.
+    fn transform_string_concat(
+        &self,
+        source: &str,
+        string_vars: &HashSet<String>,
+    ) -> Result<String, TranspileError> {
+        // Work on the WHOLE source, line by line. Splitting on segments first
+        // would cut a chain like  "w" + a  in half, because the '+' sits
+        // between a string segment and a code segment. The scanner is still
+        // the authority: for every '+' we ask whether it is inside a string.
+        let segs = Self::str_scan(source);
+        let mut out = String::with_capacity(source.len());
+        let mut line_start = 0usize;
+
+        for line in source.split_inclusive('\n') {
+            let body = line.strip_suffix('\n').unwrap_or(line);
+            let has_newline = line.ends_with('\n');
+            let rewritten = self.rewrite_concat_line(body, line_start, &segs, string_vars);
+            out.push_str(&rewritten);
+            if has_newline {
+                out.push('\n');
+            }
+            line_start += line.len();
+        }
+
+        Ok(out)
+    }
+
+    /// Rewrite one line if it is a String assignment containing a '+'.
+    fn rewrite_concat_line(&self, line: &str, base: usize, segs: &[Segment], string_vars: &HashSet<String>) -> String {
+        if !line.contains('+') || !line.contains("String") {
+            return line.to_string();
+        }
+
+        // Split "prefix = expr;" so only the right-hand side is rewritten.
+        let Some(eq) = line.find('=') else {
+            return line.to_string();
+        };
+        // Keep the whitespace that follows '=' so the rebuilt line keeps
+        // its original spacing (`String =a` looked wrong and is easy to avoid).
+        let after_eq = eq + 1;
+        let ws_end = line[after_eq..]
+            .find(|c: char| !c.is_whitespace())
+            .map(|p| after_eq + p)
+            .unwrap_or(after_eq);
+        let (prefix, rest) = line.split_at(ws_end);
+        let (expr, tail) = match rest.find(';') {
+            Some(p) => (&rest[..p], &rest[p..]),
+            None => (rest, ""),
+        };
+
+        // Split the expression on '+' at nesting depth 0. Quotes inside the
+        // expression were already excluded by the caller (code segments only),
+        // but keep a simple depth counter for parentheses.
+        // Split on '+' only where the '+' is CODE. `base` is the byte offset
+        // of this line in the whole source, so offset_in_string can answer.
+        let mut parts: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        let mut depth = 0i32;
+        let expr_off = base + (expr.as_ptr() as usize - line.as_ptr() as usize);
+        for (i, ch) in expr.char_indices() {
+            match ch {
+                '(' | '[' => {
+                    depth += 1;
+                    cur.push(ch);
+                }
+                ')' | ']' => {
+                    depth -= 1;
+                    cur.push(ch);
+                }
+                '+' if depth == 0 && !Self::offset_in_string(segs, expr_off + i) => {
+                    parts.push(cur.trim().to_string());
+                    cur.clear();
+                }
+                _ => cur.push(ch),
+            }
+        }
+        let last_part = cur.trim().to_string();
+        if last_part.is_empty() {
+            return line.to_string();
+        }
+        parts.push(last_part);
+
+        if parts.len() < 2 {
+            return line.to_string();
+        }
+
+        let mut rebuilt = String::new();
+        for (idx, part) in parts.iter().enumerate() {
+            if idx > 0 {
+                rebuilt.push_str(" + ");
+            }
+            // Strip a trailing .to_string() that an earlier rule may have
+            // appended: this rule decides conversions itself, and a leftover
+            // suffix would hide the operand from string_vars lookup (B37).
+            let clean = part.trim_end_matches(".to_string()").trim();
+            let is_literal = clean.starts_with('"');
+            let is_var = string_vars.contains(clean);
+            if idx == 0 {
+                if is_literal {
+                    rebuilt.push_str(clean);
+                    rebuilt.push_str(".to_string()");
+                } else if is_var {
+                    // Rust's String + &str consumes the left-hand String, so
+                    // a variable head would be moved. Clone it: Hust authors
+                    // mean "concatenate", not "consume", and the same
+                    // variable is often used again on the next line.
+                    rebuilt.push_str(clean);
+                    rebuilt.push_str(".clone()");
+                } else {
+                    rebuilt.push_str(clean);
+                }
+            } else if is_var {
+                rebuilt.push('&');
+                rebuilt.push_str(clean);
+            } else {
+                rebuilt.push_str(clean);
+            }
+        }
+
+        format!("{}{}{}", prefix, rebuilt, tail)
+    }
+
+    /// Record the names of locally declared `String` variables.
+    ///
+    /// The concat rule needs to know whether an operand is a String variable
+    /// (then it needs `&`) or a literal (then it stays a bare `&str`). Local
+    /// types were not tracked anywhere before; this is that record.
+    ///
+    /// Matches both Hust shape `String name` and Rust shape `name: String`,
+    /// and deliberately ignores `String[]` arrays.
+    fn collect_string_vars(&self, source: &str, out: &mut HashSet<String>) {
+        use regex::Regex;
+        let hust_decl = Regex::new(
+            r"(?m)^\s*(?:const\s+)?String\s+([a-z_][A-Za-z0-9_]*)\s*[=;]"
+        ).unwrap();
+        for caps in hust_decl.captures_iter(source) {
+            // A bare type word: `String[] x` does not match, as intended.
+            out.insert(caps[1].to_string());
+        }
+        // Safety net: if a pass already rewrote declarations to Rust shape,
+        // pick those up too rather than silently collecting nothing.
+        let rust_decl = Regex::new(
+            r"(?m)^\s*let\s+mut\s+([a-z_][A-Za-z0-9_]*)\s*:\s*String\s*="
+        ).unwrap();
+        for caps in rust_decl.captures_iter(source) {
+            out.insert(caps[1].to_string());
+        }
+    }
+
     fn collect_call_context(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
 
@@ -4823,8 +4995,12 @@ impl Translator {
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let var_name = &caps[1];
             let value = &caps[2];
-            // Check if value is a string literal
-            if value.trim().starts_with('"') {
+            // A concatenation chain is handled by Rule 11.2; appending
+            // .to_string() to the whole expression would land it on the last
+            // operand only (B37). Leave it for the dedicated rule.
+            if value.contains('+') {
+                format!("let mut {}: String = {};", var_name, value)
+            } else if value.trim().starts_with('"') {
                 format!("let mut {}: String = {}.to_string();", var_name, value)
             } else {
                 // Keep as-is for non-string-literal values
