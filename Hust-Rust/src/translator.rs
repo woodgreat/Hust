@@ -3385,7 +3385,11 @@ impl Translator {
                 // handle this declaration downstream
                 format!("{} {} = {};", type_name, var_name, value)
             } else if type_name == "String" && value.starts_with('"') {
-                // r3: String declaration with literal -> owned String
+                // r3: Hust form `String s = "x";` -> owned String.
+                // This is the primary owner of that conversion; Rule 11
+                // (transform_string_init) only backstops declarations that
+                // arrive already in Rust shape, and must not add a second
+                // .to_string() here (B38).
                 format!("let mut {}: String = {}.to_string();", var_name, value)
             } else if type_name.ends_with("[]") {
                 // Fix B3: dynamic array declaration i32[] -> Vec<i32>
@@ -4998,9 +5002,16 @@ impl Translator {
             // A concatenation chain is handled by Rule 11.2; appending
             // .to_string() to the whole expression would land it on the last
             // operand only (B37). Leave it for the dedicated rule.
+            // Ownership split: Rule 9 already rewrote the Hust form
+            // (`String s = "x";`) into `let mut s: String = "x".to_string();`.
+            // This rule only covers declarations that arrive already in Rust
+            // shape, i.e. written by the author that way or produced by
+            // another path. A value that already ends in .to_string() is
+            // therefore done - appending again was the B38 double call.
+            let trimmed = value.trim();
             if value.contains('+') {
                 format!("let mut {}: String = {};", var_name, value)
-            } else if value.trim().starts_with('"') {
+            } else if trimmed.starts_with('"') && !trimmed.ends_with(".to_string()") {
                 format!("let mut {}: String = {}.to_string();", var_name, value)
             } else {
                 // Keep as-is for non-string-literal values
