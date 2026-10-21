@@ -57,6 +57,11 @@ pub enum SegmentKind {
     Str,
     LineComment,
     BlockComment,
+    /// A string literal that never closed before end of file. The scanner
+    /// still consumes to EOF so downstream stages stay well-defined, but the
+    /// lift stage must report it as a Hust error rather than letting rustc
+    /// complain about something unrelated.
+    UnterminatedStr,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -149,6 +154,10 @@ impl Translator {
         // Restored in LAYER 3 below. Line count is preserved.
         let mut comment_table: Vec<String> = Vec::new();
         output = self.lift_comments(&output, &mut comment_table);
+        // LAYER 1 check: an unterminated string literal must fail here, in
+        // Hust terms with the real line number, instead of leaking into rustc
+        // as an E0765 pointing at some unrelated later line.
+        Self::check_string_literals(&output)?;
 
         // 2026-10-17: Protect println! macro calls from ALL transformations
         // println!("...") contains strings that may match var decl patterns
@@ -2393,6 +2402,11 @@ impl Translator {
                 let start = i;
                 let mut j = i + 1;
                 let mut escaped = false;
+                // `closed` is a fact recorded during the scan, not inferred
+                // afterwards from the last character. Inferring from the
+                // trailing byte misjudges the case where the file simply
+                // ends on a quote-like byte.
+                let mut closed = false;
                 while j < len {
                     let d = bytes[j];
                     if escaped {
@@ -2401,11 +2415,17 @@ impl Translator {
                         escaped = true;
                     } else if d == b'"' {
                         j += 1;
+                        closed = true;
                         break;
                     }
                     j += 1;
                 }
-                segs.push(Segment { kind: SegmentKind::Str, start, end: j.min(len) });
+                let kind = if closed {
+                    SegmentKind::Str
+                } else {
+                    SegmentKind::UnterminatedStr
+                };
+                segs.push(Segment { kind, start, end: j.min(len) });
                 i = j;
                 code_start = i;
                 continue;
@@ -2452,6 +2472,94 @@ impl Translator {
         flush_code!(len);
         segs
     }
+    /// LAYER 1 check: report unterminated string literals in Hust terms.
+    /// Does not rewrite anything - this stage only reports what the scanner
+    /// saw, so ordinary source keeps flowing untouched.
+    /// LAYER 1 check: report unterminated string literals in Hust terms.
+    /// Read-only: this stage reports what the scanner saw and never rewrites
+    /// source, so the ordinary path stays untouched.
+    ///
+    /// The report is a RANGE, not a single line (owner decision 2026-10-21).
+    /// The scanner cannot know which quote the author meant to close, so a
+    /// one-line pointer is often wrong; a short window plus a likely cause is
+    /// enough for a human or an AI to find it, without dumping the file.
+    fn check_string_literals(source: &str) -> Result<(), TranspileError> {
+        let segs = Self::str_scan(source);
+
+        // 1. A closed literal that spans lines: Hust strings stay on one
+        //    line unless the break is escaped with a trailing backslash.
+        //    This catches the common case below, where the missing quote on
+        //    line 2 silently eats the first quote of line 3.
+        for seg in &segs {
+            if seg.kind != SegmentKind::Str {
+                continue;
+            }
+            let lit = &source[seg.start..seg.end];
+            let mut escaped = false;
+            let mut bad_break = None;
+            for (idx, ch) in lit.char_indices() {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if ch == '\\' {
+                    escaped = true;
+                } else if ch == '\n' {
+                    bad_break = Some(idx);
+                    break;
+                }
+            }
+            let Some(rel) = bad_break else {
+                continue;
+            };
+            let break_at = seg.start + rel;
+            let start_line = source[..seg.start].matches("\n").count() + 1;
+            let break_line = source[..break_at].matches("\n").count() + 1;
+            let mut msg = String::new();
+            msg.push_str("syntax error: string literal cannot span multiple lines\n");
+            msg.push_str(&format!("near lines {}-{}:\n", start_line, break_line));
+            msg.push_str(&Self::line_snippet(source, start_line, 3));
+            msg.push_str(&format!("likely cause: the quote on line {} was not closed before the end of that line,\n", start_line));
+            msg.push_str("so the next quote in the file was taken as its closing quote.\n");
+            msg.push_str("to continue a long string onto the next line, end that line with a backslash");
+            return Err(TranspileError::TransformError(msg));
+        }
+
+        // 2. A literal still open at end of file: report the swallow range.
+        for seg in &segs {
+            if seg.kind != SegmentKind::UnterminatedStr {
+                continue;
+            }
+            let start_line = source[..seg.start].matches("\n").count() + 1;
+            let end_line = source[..seg.end.min(source.len())].matches("\n").count() + 1;
+            let total = end_line.saturating_sub(start_line) + 1;
+            let mut msg = String::new();
+            msg.push_str("syntax error: unterminated string literal\n");
+            msg.push_str(&format!("near lines {}-{} ({} line(s) swallowed as string content):\n", start_line, end_line, total));
+            msg.push_str(&Self::line_snippet(source, start_line, 3));
+            msg.push_str("likely cause: the string is still open when the file ends: no closing quote was found.\n");
+            msg.push_str("to continue a long string onto the next line, end that line with a backslash");
+            return Err(TranspileError::TransformError(msg));
+        }
+
+        Ok(())
+    }
+
+    /// Grab `count` source lines starting at `first` (1-based), for error
+    /// messages. Kept short on purpose: enough to orient, not enough to bury
+    /// the message.
+    fn line_snippet(source: &str, first: usize, count: usize) -> String {
+        let mut out = String::new();
+        for (idx, line) in source.lines().enumerate() {
+            let no = idx + 1;
+            if no < first || no >= first + count {
+                continue;
+            }
+            out.push_str(&format!("  {:>4} | {}\n", no, line));
+        }
+        out
+    }
+
     /// LAYER 1: replace every string literal with __HUST_STR_N__ and keep the
     /// original text in `table`. The scan is delegated to str_scan, so rules
     /// can never disagree about where a string starts.
@@ -2460,6 +2568,17 @@ impl Translator {
         let mut out = String::with_capacity(source.len());
         let mut last = 0usize;
         for seg in &segs {
+            if seg.kind == SegmentKind::UnterminatedStr {
+                let line_no = source[..seg.start].matches('\n').count() + 1;
+                let line_txt = source.lines().nth(line_no - 1).unwrap_or("").trim();
+                return Err(TranspileError::TransformError(format!(
+                    "syntax error: string literal opened on line {} is never closed\n\
+                     line {}: {}\n\
+                     a string literal must end with a quote on the same line \
+                     (use a backslash at end of line to continue onto the next line)",
+                    line_no, line_no, line_txt
+                )));
+            }
             if seg.kind != SegmentKind::Str {
                 continue;
             }
