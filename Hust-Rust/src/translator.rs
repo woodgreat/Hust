@@ -3221,17 +3221,29 @@ impl Translator {
     /// i32[2][3] -> [[i32; 3]; 2]. Non-array types pass through.
     fn c_array_type_to_rust(&self, t: &str) -> String {
         use regex::Regex;
-        let re = Regex::new(r"^([a-zA-Z_]\w*)((?:\[\d+\])+)$").unwrap();
+        // B42: dims may be a dynamic `[]` (Vec) as well as a fixed `[n]`.
+        let re = Regex::new(r"^([a-zA-Z_]\w*)((?:\[[^\[\]]*\])+)$").unwrap();
         if let Some(c) = re.captures(t) {
             let base = &c[1];
-            let dims: Vec<String> = Regex::new(r"\[(\d+)\]")
+            let dims: Vec<String> = Regex::new(r"\[([^\[\]]*)\]")
                 .unwrap()
                 .captures_iter(&c[2])
                 .map(|d| d[1].to_string())
                 .collect();
             let mut ty = base.to_string();
+            // An empty dimension is a dynamic one: `i32[]` is Vec<i32>.
+            // A fixed dimension wraps the element type in a static array.
             for d in dims.iter().rev() {
-                ty = format!("[{}; {}]", ty, d);
+                if d.is_empty() {
+                    ty = format!("Vec<{}>", ty);
+                } else {
+                    let sz = if d.chars().all(|ch| ch.is_ascii_digit()) {
+                        d.clone()
+                    } else {
+                        d.clone()
+                    };
+                    ty = format!("[{}; {}]", ty, sz);
+                }
             }
             ty
         } else {
@@ -4348,14 +4360,27 @@ impl Translator {
         // So we require that the name is followed by (params) directly without = in between
         // 2026.09.25: Support both "pub" and "public" keywords (owner decision: use public)
         // Fix B2: support class types (Capitalized identifiers) as return type
-        let re = Regex::new(r"(?m)^\s*((?:pub|public)\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
+        let re = Regex::new(r"(?m)^\s*((?:pub|public)\s+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z][a-zA-Z0-9_]*)((?:\[[a-zA-Z0-9_]*\])*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\)\s*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let result = re.replace_all(source, |caps: &regex::Captures| {
             let is_pub = caps.get(1).is_some();
-            let ret_type = &caps[2];
-            let func_name = &caps[3];
-            let params = &caps[4];
+            let ret_base = &caps[2];
+            let ret_dims = &caps[3];
+            let func_name = &caps[4];
+            let params = &caps[5];
+
+            // B42: array return types are translated like parameter types
+            // (i32[169] -> [i32; 169], i32[] -> Vec<i32>). Before this the
+            // bracket group was not part of the pattern, so the whole header
+            // fell through untranslated and rustc reported a syntax error.
+            let ret_type_owned;
+            let ret_type: &str = if ret_dims.is_empty() {
+                ret_base
+            } else {
+                ret_type_owned = self.c_array_type_to_rust(&format!("{}{}", ret_base, ret_dims));
+                &ret_type_owned
+            };
 
             // Transform parameters: "i32 a, i32 b" -> "a: i32, b: i32"
             let transformed_params = self.transform_params(params);
@@ -4400,12 +4425,16 @@ impl Translator {
                 let elem_type = &caps[1];
                 let size_str = &caps[2];
                 let var_name = &caps[3];
+                // B44: array parameters are mutable bindings like every other
+                // parameter, so the assignment `out[i] = x;` inside the body
+                // compiles. Dropping `mut` here made array parameters
+                // read-only and failed with E0594.
                 if size_str.is_empty() {
                     // Dynamic array: i32[] cells -> cells: Vec<i32>
-                    result.push(format!("{}: Vec<{ }>", var_name, elem_type));
+                    result.push(format!("mut {}: Vec<{}>", var_name, elem_type));
                 } else {
                     // Fixed array: i32[169] cells -> cells: [i32; 169]
-                    result.push(format!("{}: [{}; {}]", var_name, elem_type, size_str));
+                    result.push(format!("mut {}: [{}; {}]", var_name, elem_type, size_str));
                 }
                 continue;
             }
@@ -5219,6 +5248,21 @@ impl Translator {
                 ty = format!("Vec<{}>", ty);
             }
             format!("let mut {}: {} = Vec::new();", var_name, ty)
+        });
+
+        // B43: array declaration initialised from an expression, not a
+        // brace literal. `i32[169] grid = self.flatten(b);` used to fall
+        // through every rule and reach rustc with the Hust type syntax
+        // intact. Runs after the brace-literal rule, so those keep their
+        // own path.
+        let re_expr = Regex::new(r"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String)(\[[a-zA-Z0-9_]+\])\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^{][^;]*);")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let result = re_expr.replace_all(&result, |caps: &regex::Captures| {
+            let type_name = &caps[1];
+            let dim = self.dim_expr(&caps[2][1..caps[2].len() - 1]);
+            let var_name = &caps[3];
+            let expr = caps[4].trim();
+            format!("let mut {}: [{}; {}] = {};", var_name, type_name, dim, expr)
         });
 
         Ok(result.to_string())
@@ -7132,8 +7176,12 @@ impl Translator {
         // Constructor: public ClassName(...) - no return type
         // Regular method: [public] [readonly] ReturnType name(...)
         // V0.2.6: added readonly modifier support
+        // B46: the return type may carry array dimensions (`i32[169] make()`,
+        // `i32[] make()`). Without the bracket group the scanner could not
+        // find the signature at all, so the method never reached
+        // parse_method and vanished from the generated impl block.
         let sig_re = Regex::new(
-            r"(?s)(public\s+)?(readonly\s+)?(?:(\w+)\s+)?([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{",
+            r"(?s)(public\s+)?(readonly\s+)?(?:(\w+)((?:\[[a-zA-Z0-9_]*\])*)\s+)?([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*\{",
         )
         .unwrap();
 
@@ -7270,17 +7318,26 @@ impl Translator {
         // Regular method: [public] [readonly] ReturnType name(params) { body }
         // V0.2.6: support readonly method modifier
         // Fixed: more flexible whitespace handling
+        // B45: the return type may carry array dimensions (`i32[169] m()`,
+        // `i32[] m()`). Without the bracket group the whole pattern failed
+        // to match and the method was silently dropped from the class.
         let re =
-            Regex::new(r"(?s)^\s*(public)?\s*(readonly)?\s*(\w+)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*(\{.*\})?").unwrap();
+            Regex::new(r"(?s)^\s*(public)?\s*(readonly)?\s*(\w+)((?:\[[a-zA-Z0-9_]*\])*)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*(\{.*\})?").unwrap();
 
         let caps = re.captures(text)?;
 
         let is_public = caps.get(1).is_some();
         let is_readonly = caps.get(2).is_some();  // V0.2.6: readonly modifier
-        let ret_type = caps[3].to_string();
-        let name = caps[4].to_string();
-        let params = caps[5].to_string();
-        let body = caps.get(6).map(|m| m.as_str().to_string());
+        let ret_base = caps[3].to_string();
+        let ret_dims = caps[4].to_string();
+        let ret_type = if ret_dims.is_empty() {
+            ret_base
+        } else {
+            self.c_array_type_to_rust(&format!("{}{}", ret_base, ret_dims))
+        };
+        let name = caps[5].to_string();
+        let params = caps[6].to_string();
+        let body = caps.get(7).map(|m| m.as_str().to_string());
 
         Some(ClassMethod {
             name,

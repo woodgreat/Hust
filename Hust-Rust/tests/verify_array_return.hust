@@ -1,0 +1,101 @@
+// verify_array_return.hust - B42 / B43 / B44 regression
+//
+// Before the fix:
+//   B42  i32[169] fn()        -> whole header untranslated, rustc syntax error
+//   B43  i32[169] g = expr;   -> declaration left in Hust form
+//   B44  array parameter      -> emitted without mut, so writes were E0594
+//
+// Source language policy: ASCII only.
+
+void check(bool cond, String name) {
+    if (cond) {
+        println!("  [PASS] {}", name);
+    } else {
+        println!("  [FAIL] {}", name);
+    }
+}
+
+// B42: static array as a return type.
+i32[4] make_four() {
+    i32[4] out = {10, 20, 30, 40};
+    return out;
+}
+
+// B42: dynamic array as a return type.
+i32[] make_dynamic(i32 n) {
+    i32[] out;
+    for (i32 i = 0; i < n; i++) {
+        out.push(i * 100);
+    }
+    return out;
+}
+
+// Array results travel through the return value, not through an out
+// parameter: a Hust parameter is a copy, so writes to it stop at the
+// method boundary. Building locally and returning is the supported form
+// (and the returned value is cloned like every other value).
+i32[4] build(i32 v) {
+    i32[4] out = {0};
+    for (i32 i = 0; i < 4; i++) {
+        out[i] = v + i;
+    }
+    return out;
+}
+
+// An array parameter is still writable inside the body (B44): the copy
+// may be modified as a local scratch buffer, even though it cannot
+// escape the call.
+i32 use_scratch(i32[4] buf) {
+    i32 sum = 0;
+    for (i32 i = 0; i < 4; i++) {
+        buf[i] = buf[i] * 2;
+        sum = sum + buf[i];
+    }
+    return sum;
+}
+
+void test_static_return() {
+    println!("Test 1: static array return type (B42)");
+    i32[4] a = make_four();
+    check(a[0] == 10, "element 0 survives the return");
+    check(a[3] == 40, "element 3 survives the return");
+}
+
+void test_dynamic_return() {
+    println!("Test 2: dynamic array return type (B42)");
+    i32[] d = make_dynamic(3);
+    check(d.len() == 3, "returned dynamic array has 3 elements");
+    check(d[2] == 200, "element 2 is 200");
+}
+
+void test_array_result() {
+    println!("Test 5: array result built locally and returned");
+    i32[4] r = build(7);
+    check(r[0] == 7, "returned element 0 is 7");
+    check(r[3] == 10, "returned element 3 is 10");
+}
+
+void test_expr_init() {
+    println!("Test 3: array declared from an expression (B43)");
+    i32[4] src = {10, 20, 30, 40};
+    i32[4] copy = src;
+    check(copy[1] == 20, "expression-initialised array holds the source values");
+}
+
+void test_writable_param() {
+    println!("Test 4: array parameter is a writable copy (B44)");
+    i32[4] buf = {1, 2, 3, 4};
+    i32 sum = use_scratch(buf);
+    check(sum == 20, "callee can modify its copy inside the body");
+    check(buf[0] == 1, "caller array is untouched after the call");
+}
+
+void main() {
+    println!("=== Array return / param tests (B42 / B43 / B44) ===");
+    test_static_return();
+    test_dynamic_return();
+    test_expr_init();
+    test_writable_param();
+    test_array_result();
+    println!("=== done ===");
+}
