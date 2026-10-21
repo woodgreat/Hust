@@ -244,6 +244,12 @@ impl Translator {
         // -> struct Point { x: i32 } impl Point { fn get_x(&self) -> i32 { self.x } }
         // First, transform inherited field access in global code (before class definitions are transformed)
         output = self.transform_inherited_field_access(&output)?;
+        // Rule 4.5b MUST run while the source is still Hust-shaped: class
+        // expansion rewrites `this.items = [];` into a struct initialiser
+        // (`Self { items: [], .. }`), after which the author's original
+        // mistake is no longer visible and rustc reports it instead.
+        Self::reject_empty_array_literal(&output)?;
+
         output = self.transform_class_definitions(&output)?;
 
         // Rule 3: Remove use statements (they're handled at module level)
@@ -271,6 +277,7 @@ impl Translator {
         // variables only. Without this guard the raw `const` survives into
         // `const let mut ...`, an illegal Rust construct with a cryptic error.
         Self::reject_const_array(&output)?;
+
 
         // Rule 4.6: reject `.to_vec()` on static arrays (all dimensions)
         // Principle (owner, 2026.09.09): a static array stays static — Hust
@@ -2220,7 +2227,13 @@ impl Translator {
         // Pattern: ClassName var = otherVar;  (assignment from same-type variable)
         // Transform to: let mut var: ClassName = otherVar.clone();  (B5: default clone)
         // Hust: Board b2 = b1;  →  Rust: let mut b2: Board = b1.clone();
-        let re_assign = Regex::new(r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*([a-z_][a-zA-Z0-9_]*)\s*;")
+        // B39: the right-hand side may be a plain variable (b1) or an
+        // indexed element of a dynamic array (gm.groups[i]). Rust cannot
+        // move a value out of an index, so both forms need .clone() -
+        // matching Hust's default copy semantics (B5/B29).
+        let re_assign = Regex::new(
+            r"\b([A-Z][a-zA-Z0-9_]*)\s+([a-z_][a-zA-Z0-9_]*)\s*=\s*([a-z_][a-zA-Z0-9_]*(?:\.[a-z_][a-zA-Z0-9_]*)*(?:\s*\[[^\]]+\])?)\s*;"
+        )
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         
         let result = re_assign
@@ -2972,6 +2985,47 @@ impl Translator {
     /// only. Catches both `const i32[2] a = ...` and the C-style
     /// `const i32 a[2] = ...`, failing fast with guidance instead of
     /// emitting the illegal `const let mut ...`.
+    /// Reject an explicit empty dynamic-array literal written by the author.
+    ///
+    /// Hust rule (owner, 2026-10-21): a dynamic array declared as
+    /// `Type[] name;` is ALREADY empty — there is no initialisation step and
+    /// `= []` is not Hust syntax at all. Reject it here so the author gets a
+    /// Hust error instead of a rustc type mismatch about `[_; 0]`.
+    ///
+    /// `.push([])` is legal and stays untouched: it pushes an empty nested
+    /// array, which is how a row is created for Vec<Vec<T>>.
+    fn reject_empty_array_literal(source: &str) -> Result<(), TranspileError> {
+        use regex::Regex;
+        // Assignment or declaration whose entire right-hand side is [].
+        let re = Regex::new(r"(?:=|\s\s)\s*\[\]\s*;")
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let Some(m) = re.find(source) else {
+            return Ok(());
+        };
+
+        // .push([]); is a nested-array push, not an initialisation.
+        let head = &source[..m.start()];
+        if head.trim_end().ends_with(".push(") {
+            return Ok(());
+        }
+
+        let line_no = source[..m.start()].matches('\n').count() + 1;
+        let line_txt = source.lines().nth(line_no - 1).unwrap_or("").trim();
+
+        return Err(TranspileError::TransformError(format!(
+            "syntax error: a dynamic array is empty when declared\n\
+             line {}: {}\n\
+             `Type[] name;` already gives you an empty dynamic array in Hust - \
+             there is no initialisation step and `[]` is not Hust syntax.\n\
+             build it with push instead:\n\
+                 name.push(item);\n\
+             if you truly need a starting value, assign one element, not an \
+             empty literal",
+            line_no, line_txt
+        )));
+    }
+
     fn reject_const_array(source: &str) -> Result<(), TranspileError> {
         use regex::Regex;
         let re = Regex::new(
@@ -4435,7 +4489,7 @@ impl Translator {
         // index inside gets its as-usize peel later (Rule 18, peeling runs
         // after this pass). Zero brackets degrades to the plain form.
         let re_fwd = Regex::new(
-            r"^([a-zA-Z_]\w*)\s*(<=|>=|<|>)\s*([a-zA-Z_]\w*(?:\[[^\[\]]+\])*)\.len\(\)$",
+            r"^([a-zA-Z_]\w*)\s*(<=|>=|<|>)\s*([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*(?:\[[^\[\]]+\])*)\.len\(\)$",
         )
         .unwrap();
         if let Some(c) = re_fwd.captures(trimmed) {
@@ -4444,7 +4498,7 @@ impl Translator {
 
         // Pattern 3: xxx.len() op var   e.g. "dynamic.len() > i"
         let re_rev = Regex::new(
-            r"^([a-zA-Z_]\w*)\.len\(\)\s*(<=|>=|<|>)\s*([a-zA-Z_]\w*)$",
+            r"^([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)\.len\(\)\s*(<=|>=|<|>)\s*([a-zA-Z_]\w*)$",
         )
         .unwrap();
         if let Some(c) = re_rev.captures(trimmed) {
