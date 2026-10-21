@@ -112,6 +112,19 @@ impl Translator {
 
         let mut output = source.to_string();
 
+        // ============================================================
+        // LAYER 1 / PREPROCESS (see develop_guide.md "three-layer")
+        //   Mark and lift out anything that is NOT code: comments,
+        //   string literals, macro bodies. Replace with placeholders and
+        //   keep a restore table. This layer must NOT change semantics.
+        //   Invariant: preprocess + restore == original, byte for byte.
+        //
+        //   STATUS (2026-10-21): only println! bodies are lifted so far.
+        //   Comments and string literals still flow through LAYER 2,
+        //   which is why rule regexes still see raw text. Closing that
+        //   gap is step 1 of the four-step migration in develop_guide.md.
+        // ============================================================
+
         // 2026-10-17: Protect println! macro calls from ALL transformations
         // println!("...") contains strings that may match var decl patterns
         // Must protect BEFORE any transformation rules run
@@ -145,6 +158,19 @@ impl Translator {
         // 3. Remove use statements
         // 4. Function definitions with visibility
         // 5-12. Other transformations...
+
+        // ============================================================
+        // LAYER 2 / TRANSLATE (see develop_guide.md "three-layer")
+        //   All Rule N passes live here and ONLY here. Rules may assume
+        //   the input is pure code; anything a rule needs from comments
+        //   or literals must come from LAYER 1 structure info, never
+        //   from re-scanning raw text.
+        //
+        //   Order inside this layer is load-bearing (see the V0.6
+        //   ordering note above). Each rule reads the PREVIOUS rule's
+        //   output, so a rule that over-matches silently starves later
+        //   ones. When adding a rule, prove it on a minimal fixture first.
+        // ============================================================
 
         // r45 (pre-Rule-1): interface-typed variable declarations must see
         // `interface` blocks (Rule 1 turns them into traits below).
@@ -325,6 +351,12 @@ impl Translator {
         if needs_limit {
             output = format!("#![recursion_limit = \"32767\"]\n\n{}", output);
         }
+
+        // ============================================================
+        // LAYER 3 / RESTORE (see develop_guide.md "three-layer")
+        //   Put back everything LAYER 1 lifted out. Restore must be
+        //   idempotent, and no placeholder may survive into the output.
+        // ============================================================
 
         // 2026-10-17: Restore println! macros from placeholders
         // Also restore marked array indices and transform them
@@ -1845,9 +1877,14 @@ impl Translator {
                 let trimmed = head.trim_end();
                 if let Some(dot) = trimmed.rfind('.') {
                     let before = &trimmed[..dot];
+                    // B30: rfind returns a char index, not a byte index.
+                    // Slicing with it panics when the text before the call
+                    // contains multi-byte chars (Chinese comments/names).
                     let start = before
-                        .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
-                        .map(|i| i + 1)
+                        .char_indices()
+                        .rev()
+                        .find(|(_, ch)| !(ch.is_alphanumeric() || *ch == '_'))
+                        .map(|(i, ch)| i + ch.len_utf8())
                         .unwrap_or(0);
                     let recv = &before[start..];
                     if recv == "self" {
