@@ -406,26 +406,27 @@ impl Translator {
     fn transform_array_indices_in_println(&self, source: &str) -> Result<String, TranspileError> {
         use regex::Regex;
         
-        // First, transform this.x -> self.x inside println!
         let this_re = Regex::new(r"\bthis\b")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        let source = this_re.replace_all(source, "self").to_string();
-        
-        // Match array indexing: array[index] where index is a simple variable
         let re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\[([a-zA-Z_][a-zA-Z0-9_]*)\]")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
-        
-        let result = re.replace_all(&source, |caps: &regex::Captures| {
-            let array_name = &caps[1];
-            let index_name = &caps[2];
-            // Skip if already transformed
-            if index_name.contains(" as usize") {
-                return caps[0].to_string();
-            }
-            format!("{}[({}) as usize]", array_name, index_name)
+
+        // Rewrites apply to CODE only. The format string argument of a
+        // println! is data: "this is a commit" must survive verbatim.
+        let segs = Self::str_scan(source);
+        let out = Self::map_code_segments(source, &segs, |code| {
+            let step1 = this_re.replace_all(code, "self").to_string();
+            re.replace_all(&step1, |caps: &regex::Captures| {
+                let array_name = &caps[1];
+                let index_name = &caps[2];
+                if index_name.contains(" as usize") {
+                    return caps[0].to_string();
+                }
+                format!("{}[({}) as usize]", array_name, index_name)
+            }).to_string()
         });
-        
-        Ok(result.to_string())
+
+        Ok(out)
     }
 
     /// Mark array indices inside println! macro for later transformation
@@ -437,17 +438,20 @@ impl Translator {
         // Match array indexing: array[index] where index is a simple variable
         // Avoid matching format string placeholders like {} or {:>5}
         let re = Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\[([a-zA-Z_][a-zA-Z0-9_]*)\]").unwrap();
-        
-        let result = re.replace_all(macro_call, |caps: &regex::Captures| {
-            let array_name = &caps[1];
-            let index_name = &caps[2];
-            format!(
-                "__HUST_ARR_MARK__{}__HUST_IDX_MARK__{}__HUST_END_MARK__",
-                array_name, index_name
-            )
-        });
-        
-        result.to_string()
+
+        // Code segments only: a bracketed word inside the format string is
+        // text, not an array access.
+        let segs = Self::str_scan(macro_call);
+        Self::map_code_segments(macro_call, &segs, |code| {
+            re.replace_all(code, |caps: &regex::Captures| {
+                let array_name = &caps[1];
+                let index_name = &caps[2];
+                format!(
+                    "__HUST_ARR_MARK__{}__HUST_IDX_MARK__{}__HUST_END_MARK__",
+                    array_name, index_name
+                )
+            }).to_string()
+        })
     }
 
     /// Restore marked array indices from println! macro
@@ -2326,6 +2330,35 @@ impl Translator {
     }
 
     /// V0.5: Remove use statements (handled at module level)
+    /// Apply a rewrite only to Code segments; string literals and comments
+    /// pass through untouched. This is the "ask the scanner, don't guess"
+    /// pattern: rules that rewrite identifiers call this instead of running
+    /// a regex over the whole text.
+    fn map_code_segments<F>(source: &str, segs: &[Segment], mut f: F) -> String
+    where
+        F: FnMut(&str) -> String,
+    {
+        let mut out = String::with_capacity(source.len());
+        for seg in segs {
+            let slice = &source[seg.start..seg.end];
+            if seg.kind == SegmentKind::Code {
+                out.push_str(&f(slice));
+            } else {
+                out.push_str(slice);
+            }
+        }
+        out
+    }
+
+    /// True when byte offset `at` falls inside a string literal segment.
+    /// Rules that rewrite identifiers (this -> self, camelCase -> snake_case,
+    /// keyword scans) must skip matches inside strings: an ordinary sentence
+    /// like "this is a commit" is data, not code.
+    fn offset_in_string(segs: &[Segment], at: usize) -> bool {
+        segs.iter()
+            .any(|s| s.kind == SegmentKind::Str && at >= s.start && at < s.end)
+    }
+
     /// LAYER 1 core: classify the source into Code / Str / LineComment /
     /// BlockComment segments. Stream form (owner decision 2026-10-21) so the
     /// split can be asserted directly in tests.
@@ -7847,19 +7880,37 @@ impl Translator {
         use regex::Regex;
         
         // V0.2.7: Check for deprecated 'self' usage in Hust source
+        let segs = Self::str_scan(&result);
         let self_re = Regex::new(r"\bself\b").unwrap();
-        if self_re.is_match(&result) {
+        // A sentence inside a string literal is data, not a keyword. Only
+        // flag `self` that appears in code.
+        let self_hit = self_re
+            .find_iter(&result)
+            .find(|m| !Self::offset_in_string(&segs, m.start()));
+        if let Some(m) = self_hit {
             eprintln!("[Hust Error] Deprecated keyword 'self' detected.");
             eprintln!("[Hust Error] Please use 'this' instead of 'self' in Hust code.");
             eprintln!("[Hust Error] Example: change 'self.x' to 'this.x'");
-            eprintln!("[Hust Error] Found in: {}", result.lines()
-                .find(|line| self_re.is_match(line))
-                .unwrap_or("unknown location"));
+            let line_no = result[..m.start()].matches('\n').count() + 1;
+            let line_txt = result.lines().nth(line_no - 1).unwrap_or("unknown location");
+            eprintln!("[Hust Error] Found in line {}: {}", line_no, line_txt);
             panic!("Hust compilation failed: deprecated 'self' keyword used");
         }
         
         let this_re = Regex::new(r"\bthis\b").unwrap();
-        result = this_re.replace_all(&result, "self").to_string();
+        // Skip `this` inside string literals for the same reason.
+        let mut this_out = String::with_capacity(result.len());
+        let mut this_last = 0usize;
+        for m in this_re.find_iter(&result) {
+            if Self::offset_in_string(&segs, m.start()) {
+                continue;
+            }
+            this_out.push_str(&result[this_last..m.start()]);
+            this_out.push_str("self");
+            this_last = m.end();
+        }
+        this_out.push_str(&result[this_last..]);
+        result = this_out;
         
         // Transform inherited field access: obj.field -> obj.ParentChain.field
         // Only for fields that are inherited (not defined in current class)
