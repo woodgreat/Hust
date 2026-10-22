@@ -4428,13 +4428,17 @@ impl Translator {
         if !body.contains("continue;") {
             return body.to_string();
         }
-        // Fresh id for this level. An outer level sees the marker, not a
-        // `continue;`, so it cannot stack a second update on top of this one.
         let id = self.cont_mark_seq.get();
         self.cont_mark_seq.set(id + 1);
         let marker = format!("__HUST_CONT_{}__", id);
-        let needle = "continue;";
+
+        // Nesting depth. The outer for is translated first, while the inner
+        // ones are still `for (...)` text, so a bare text replace would put
+        // the OUTER update in front of the INNER continuation and the outer
+        // counter would run away. Only depth-0 continuations belong to this
+        // loop.
         let mut out = String::with_capacity(body.len() + 48);
+        let mut depth: i32 = 0;
         let mut in_string = false;
         let mut escaped = false;
         let mut i = 0usize;
@@ -4459,19 +4463,69 @@ impl Translator {
                 i += 1;
                 continue;
             }
-            if body[i..].starts_with(needle) {
+            // A nested loop header opens a new level. Skip its parentheses so
+            // a `;` or `continue` inside the header is never mistaken for
+            // body content.
+            if Self::starts_loop_header(&body[i..]) {
+                depth += 1;
+                // copy the header verbatim up to and including its '('
+                while i < bytes.len() {
+                    let ch = bytes[i] as char;
+                    out.push(ch);
+                    i += 1;
+                    if ch == '(' {
+                        break;
+                    }
+                }
+                continue;
+            }
+            if c == '(' {
+                // Parenthesis of a header already counted: copy until it
+                // closes, so a `continue;` cannot appear inside by accident.
+                out.push(c);
+                i += 1;
+                continue;
+            }
+            if c == '{' {
+                out.push(c);
+                i += 1;
+                continue;
+            }
+            if c == '}' {
+                if depth > 0 {
+                    depth -= 1;
+                }
+                out.push(c);
+                i += 1;
+                continue;
+            }
+            if depth == 0 && body[i..].starts_with("continue;") {
                 out.push_str("{ ");
                 out.push_str(update);
                 out.push_str("; ");
                 out.push_str(&marker);
                 out.push_str(" }");
-                i += needle.len();
+                i += "continue;".len();
                 continue;
             }
             out.push(c);
             i += 1;
         }
         out
+    }
+
+    // True when the slice starts with a loop header keyword followed by
+    // optional spaces and an opening parenthesis.
+    fn starts_loop_header(s: &str) -> bool {
+        for kw in ["for", "while"] {
+            if let Some(rest) = s.strip_prefix(kw) {
+                let t = rest.trim_start();
+                if t.starts_with('(') {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// B47 LAYER 3: turn every continue marker back into a `continue;`
