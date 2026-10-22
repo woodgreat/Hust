@@ -80,11 +80,28 @@ void test_continue_inside_string() {
     check(n == 3, "loop with a string literal runs normally");
 }
 
+void test_header_with_string_paren() {
+    println!("Test 5: a ) inside a header string does not close the header");
+    // The header carries a string containing a close parenthesis. The
+    // continuation belongs to the loop body, so it must still get the
+    // increment, and the loop must terminate.
+    i32 n = 0;
+    for (i32 i = 0; i < 4; i++) {
+        String marker = "a)b";
+        if (i == 1) {
+            continue;
+        }
+        n = n + 1;
+    }
+    check(n == 3, "continue still works beside a paren inside a string");
+}
+
 void main() {
     println!("=== Nested continue tests (B47) ===");
     test_continue_single_loop();
     test_continue_nested();
     test_continue_three_deep();
     test_continue_inside_string();
+    test_header_with_string_paren();
     println!("=== done ===");
 }

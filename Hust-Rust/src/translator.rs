@@ -4480,10 +4480,41 @@ impl Translator {
                 continue;
             }
             if c == '(' {
-                // Parenthesis of a header already counted: copy until it
-                // closes, so a `continue;` cannot appear inside by accident.
-                out.push(c);
-                i += 1;
+                // Copy this parenthesis group verbatim, up to and including
+                // the matching ')'. The group belongs to a loop header that
+                // was already counted, so nothing inside it can be a body
+                // statement. String literals are honoured while scanning,
+                // otherwise a ')' inside "..." would close the group early.
+                let mut parens: i32 = 0;
+                let mut pstr = false;
+                let mut pesc = false;
+                while i < bytes.len() {
+                    let ch = bytes[i] as char;
+                    out.push(ch);
+                    i += 1;
+                    if pstr {
+                        if pesc {
+                            pesc = false;
+                        } else if ch == '\\' {
+                            pesc = true;
+                        } else if ch == '"' {
+                            pstr = false;
+                        }
+                        continue;
+                    }
+                    if ch == '"' {
+                        pstr = true;
+                        continue;
+                    }
+                    if ch == '(' {
+                        parens += 1;
+                    } else if ch == ')' {
+                        parens -= 1;
+                        if parens == 0 {
+                            break;
+                        }
+                    }
+                }
                 continue;
             }
             if c == '{' {
