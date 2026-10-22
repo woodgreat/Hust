@@ -1,0 +1,90 @@
+// verify_nested_continue.hust - B47 regression
+//
+// A for loop becomes a while loop, so a bare `continue;` would skip the
+// loop update and run forever. The transpiler therefore injects the update
+// before `continue;` - but it must only touch the continuations that belong
+// to the loop being converted.
+//
+// Before the fix, a nested loop's rewritten continue was matched again by
+// the outer pass, so one continue advanced every enclosing counter and the
+// outer index jumped out of range.
+//
+// Source language policy: ASCII only.
+
+void check(bool cond, String name) {
+    if (cond) {
+        println!("  [PASS] {}", name);
+    } else {
+        println!("  [FAIL] {}", name);
+    }
+}
+
+void test_continue_single_loop() {
+    println!("Test 1: continue in a single loop skips the rest of the body");
+    i32 hits = 0;
+    for (i32 i = 0; i < 10; i++) {
+        if (i == 3) {
+            continue;
+        }
+        hits = hits + 1;
+    }
+    check(hits == 9, "single loop continue skips exactly one body");
+}
+
+void test_continue_nested() {
+    println!("Test 2: continue in an inner loop leaves the outer counter alone");
+    i32 outer = 0;
+    i32 inner_total = 0;
+    for (i32 i = 0; i < 4; i++) {
+        outer = outer + 1;
+        for (i32 j = 0; j < 4; j++) {
+            if (j == 2) {
+                continue;
+            }
+            inner_total = inner_total + 1;
+        }
+    }
+    check(outer == 4, "outer loop ran exactly 4 times");
+    check(inner_total == 12, "inner body ran 3 times per outer iteration");
+}
+
+void test_continue_three_deep() {
+    println!("Test 3: continue two levels down does not disturb either counter");
+    i32 a_count = 0;
+    i32 b_count = 0;
+    i32 c_count = 0;
+    for (i32 a = 0; a < 3; a++) {
+        a_count = a_count + 1;
+        for (i32 b = 0; b < 3; b++) {
+            b_count = b_count + 1;
+            for (i32 c = 0; c < 3; c++) {
+                if (c == 1) {
+                    continue;
+                }
+                c_count = c_count + 1;
+            }
+        }
+    }
+    check(a_count == 3, "outermost ran 3 times");
+    check(b_count == 9, "middle ran 9 times");
+    check(c_count == 18, "innermost body ran twice per middle iteration");
+}
+
+void test_continue_inside_string() {
+    println!("Test 4: the word in a string is not a statement");
+    String label = "continue;";
+    i32 n = 0;
+    for (i32 i = 0; i < 3; i++) {
+        n = n + 1;
+    }
+    check(n == 3, "loop with a string literal runs normally");
+}
+
+void main() {
+    println!("=== Nested continue tests (B47) ===");
+    test_continue_single_loop();
+    test_continue_nested();
+    test_continue_three_deep();
+    test_continue_inside_string();
+    println!("=== done ===");
+}

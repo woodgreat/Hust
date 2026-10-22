@@ -96,6 +96,10 @@ pub struct Translator {
     /// are not class_vars: they only exist inside their own body, and two
     /// functions may both name a parameter `b`.
     param_types: RefCell<HashMap<String, String>>,
+    /// B47: sequence for continue placeholders. Each for-level that rewrites
+    /// a `continue;` takes a fresh id, so an outer pass cannot match a marker
+    /// an inner pass already produced. All markers are restored in LAYER 3.
+    cont_mark_seq: std::cell::Cell<usize>,
 }
 
 impl Translator {
@@ -109,6 +113,7 @@ impl Translator {
             array_elems: RefCell::new(HashMap::new()),
             field_owners: RefCell::new(HashMap::new()),
             param_types: RefCell::new(HashMap::new()),
+            cont_mark_seq: std::cell::Cell::new(0),
         }
     }
 
@@ -422,6 +427,10 @@ impl Translator {
             let transformed = self.transform_array_indices_in_println(&restored)?;
             output = output.replace(&placeholder, &transformed);
         }
+
+        // LAYER 3: put back the continue markers last, once no for-loop pass
+        // can reach them any more.
+        output = self.restore_continue_marks(&output);
 
         Ok(output)
     }
@@ -4402,6 +4411,78 @@ impl Translator {
         Ok(result.to_string())
     }
 
+    // B47: rewrite only the `continue;` statements that belong to THIS loop.
+    //
+    // A `for` becomes a `while`, so a bare `continue;` would restart the
+    // while without advancing the loop variable (the infinite loop Fix A1
+    // addressed). Fix A1 substituted every `continue;` in the body, which is
+    // wrong as soon as the body holds a nested loop: the inner loop rewrote
+    // its own `continue;` first, and the outer pass then matched that fresh
+    // `continue;` and prepended the outer updates as well, so one `continue`
+    // advanced every enclosing counter at once.
+    //
+    // The fix walks the body once, tracks brace depth, and substitutes only
+    // the occurrences at depth 0 that are not inside a string literal.
+    fn inject_update_before_continue(&self, body: &str, update_stmt: &str) -> String {
+        let update = update_stmt.trim().trim_end_matches(';');
+        if !body.contains("continue;") {
+            return body.to_string();
+        }
+        // Fresh id for this level. An outer level sees the marker, not a
+        // `continue;`, so it cannot stack a second update on top of this one.
+        let id = self.cont_mark_seq.get();
+        self.cont_mark_seq.set(id + 1);
+        let marker = format!("__HUST_CONT_{}__", id);
+        let needle = "continue;";
+        let mut out = String::with_capacity(body.len() + 48);
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut i = 0usize;
+        let bytes = body.as_bytes();
+        while i < bytes.len() {
+            let c = bytes[i] as char;
+            if in_string {
+                out.push(c);
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
+                i += 1;
+                continue;
+            }
+            if c == '"' {
+                in_string = true;
+                out.push(c);
+                i += 1;
+                continue;
+            }
+            if body[i..].starts_with(needle) {
+                out.push_str("{ ");
+                out.push_str(update);
+                out.push_str("; ");
+                out.push_str(&marker);
+                out.push_str(" }");
+                i += needle.len();
+                continue;
+            }
+            out.push(c);
+            i += 1;
+        }
+        out
+    }
+
+    /// B47 LAYER 3: turn every continue marker back into a `continue;`
+    /// statement. Markers exist only so that an outer for-loop pass cannot
+    /// mistake an inner loop's rewritten continuation for its own.
+    fn restore_continue_marks(&self, source: &str) -> String {
+        use regex::Regex;
+        let re = Regex::new(r"__HUST_CONT_(\d+)__").unwrap();
+        re.replace_all(source, "continue;").to_string()
+    }
+
     /// Transform function parameters
     /// "i32 a, i32 b" -> "a: i32, b: i32"
     fn transform_params(&self, params: &str) -> String {
@@ -4748,15 +4829,9 @@ impl Translator {
             // Anchored match — compound conditions are left for rustc to report
             let transformed_condition = Self::transform_len_comparison(condition);
 
-            // Fix A1: for + continue infinite loop
-            // If body contains `continue;`, replace it with `{ update_stmt; continue; }`
-            // so that the loop variable is updated before continuing (C semantics).
-            let fixed_body = if body.contains("continue;") {
-                let update_stmt_trimmed = update_stmt.trim().trim_end_matches(';');
-                body.replace("continue;", &format!("{{ {}; continue; }}", update_stmt_trimmed))
-            } else {
-                body.clone()
-            };
+            // Fix A1 / B47: advance this loop's variable before `continue`,
+            // touching only the depth-0 continuations (see the helper).
+            let fixed_body = self.inject_update_before_continue(&body, &update_stmt);
 
             // Typed header: the loop variable is declared here (`let mut`)
             let rust_while = format!(
@@ -4807,13 +4882,8 @@ impl Translator {
             let update_stmt = self.build_update_stmt(update, var_name);
             let transformed_condition = Self::transform_len_comparison(condition);
 
-            // Fix A1: for + continue infinite loop (untyped variant)
-            let fixed_body = if body.contains("continue;") {
-                let update_stmt_trimmed = update_stmt.trim().trim_end_matches(';');
-                body.replace("continue;", &format!("{{ {}; continue; }}", update_stmt_trimmed))
-            } else {
-                body.clone()
-            };
+            // Fix A1 / B47 (untyped variant): same depth-aware rewrite.
+            let fixed_body = self.inject_update_before_continue(&body, &update_stmt);
 
             // Untyped header: NO `let` — assignment into the pre-declared
             // loop variable (first assignment completes its delayed init)
