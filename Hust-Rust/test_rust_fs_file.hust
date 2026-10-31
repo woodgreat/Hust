@@ -1,0 +1,10 @@
+// Test RUST.FS system module - separate tests to avoid duplicate imports
+
+// Test 1: Single item import
+use RUST.FS.FILE;
+
+void main() {
+    println!("=== Test RUST.FS.FILE ===");
+    println!("RUST.FS.FILE import successful");
+    println!("=== RUST.FS.FILE test passed ===");
+}

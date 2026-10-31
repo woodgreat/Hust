@@ -607,20 +607,24 @@ pub fn get_rust_use(hust_path: &str, item: &str) -> Option<String> {
     let mapping = find_mapping(hust_path)?;
 
     if item == "*" {
-        // Wildcard: expand to all supported items
+        // Wildcard: expand to all supported items, use original Rust names
         let items: Vec<_> = mapping
             .items
             .iter()
-            .map(|i| format!("{}", i))
+            .map(|i| *i)
             .collect();
         Some(format!("use {}::{{{}}};", mapping.rust_path, items.join(", ")))
     } else if item.is_empty() {
         // Fix B1: whole module import (e.g., use RUST.IO; -> use std::io;)
         Some(format!("use {};", mapping.rust_path))
     } else {
-        // Single item: check if supported
-        if mapping.items.contains(&item) {
-            Some(format!("use {}::{};", mapping.rust_path, item))
+        // Single item: case-insensitive match, output original Rust name
+        // 2026-10-31: User may write RUST.TIME.SYSTEMTIME, mapping stores SystemTime
+        // Match case-insensitively, but output the original Rust name from mapping
+        let item_lower = item.to_lowercase();
+        let found = mapping.items.iter().find(|i| i.to_lowercase() == item_lower);
+        if let Some(matched_item) = found {
+            Some(format!("use {}::{};", mapping.rust_path, matched_item))
         } else {
             None
         }

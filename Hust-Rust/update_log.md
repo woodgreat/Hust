@@ -1,6 +1,63 @@
 # Hust-Rust 更新日志
 
 --------------------
+**日期**: 2026-10-31
+**版本**: v0.3.10+20261031202100
+
+### 新增特性
+
+1. **系统模块命名规则修订**
+   - **每一级** 系统模块路径必须 **全大写**
+   - **用户模块任一级都不能全大写**（系统预留）
+   - **混合大小写是矛盾**，必须报错
+   - 新增 `validate_module_path` 函数，返回三态：系统/用户/矛盾
+
+2. **支持全大写系统模块导入**
+   - `use RUST.TIME.SYSTEMTIME;` → `use std::time::SystemTime;`
+   - `use RUST.FS.FILE;` → `use std::fs::File;`
+   - `use RUST.COLLECTIONS.HASHMAP;` → `use std::collections::HashMap;`
+   - 匹配时忽略大小写，输出映射表中的原始 Rust 命名
+
+3. **矛盾路径检测**
+   - `RUST.IO.stdin` → 报错（一级系统，二级用户）
+   - `RUST.TIME.SystemTime` → 报错（一级系统，二级用户）
+   - `RUST.time` → 报错（一级系统，二级用户）
+   - 错误信息包含建议和修正提示
+
+### 设计决策
+
+1. **系统模块判定规则**
+   - 所有系统模块名的英文字母都必须是大写
+   - 用户不能在任一一级模块命名中使用全大写
+   - 全大写是系统模块预留
+
+2. **映射表查询规则**
+   - 单映射，直接对应，记录完整路径避免混淆
+   - 映射表记录完整路径：`RUST.TIME` → `std::time`
+   - 用户写 `RUST.TIME.SYSTEMTIME` → 匹配 `SystemTime` → 输出 `use std::time::SystemTime;`
+   - 匹配时忽略大小写（因为用户写全大写，映射表存原始命名）
+
+### 修改文件
+
+- `src/rust_mappings.rs` — `get_rust_use` 函数支持忽略大小写匹配
+- `src/namespace.rs` — 新增 `validate_module_path` 函数，修改 `parse_use_statements`
+- `Cargo.toml` — 版本号更新为 `0.3.10+20261031202100`
+
+### 测试结果
+
+- **61 个单元测试全部通过**
+- 端到端测试通过：
+  - `test_uppercase_import.hust` ✅
+  - `test_rust_fs_file.hust` ✅
+  - `test_rust_fs_wildcard.hust` ✅
+  - `test_rust_collections_hashmap.hust` ✅
+
+### 文档更新
+
+- `develop_guide.md` — 添加系统模块命名规则
+- `Hust语法规则.txt` — 添加系统模块命名规则和矛盾路径报错示例
+
+--------------------
 **日期**: 2026-09-25（第三段）
 **版本**: v0.1.26+20260925194000
 

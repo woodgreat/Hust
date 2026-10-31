@@ -1,0 +1,8 @@
+// Test RUST.FS system module - wildcard import
+use RUST.FS.*;
+
+void main() {
+    println!("=== Test RUST.FS.* ===");
+    println!("RUST.FS.* wildcard import successful");
+    println!("=== RUST.FS.* test passed ===");
+}

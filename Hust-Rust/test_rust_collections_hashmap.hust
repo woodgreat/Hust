@@ -1,0 +1,8 @@
+// Test RUST.COLLECTIONS system module - single item import
+use RUST.COLLECTIONS.HASHMAP;
+
+void main() {
+    println!("=== Test RUST.COLLECTIONS.HASHMAP ===");
+    println!("RUST.COLLECTIONS.HASHMAP import successful");
+    println!("=== RUST.COLLECTIONS.HASHMAP test passed ===");
+}

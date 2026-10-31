@@ -391,6 +391,64 @@ impl NamespaceRegistry {
         name.chars().all(|c| c.is_ascii_uppercase() || c == '_')
     }
 
+    /// Check if a path is a system module path (all uppercase)
+    /// 2026-10-31: System module path validation with contradiction detection
+    /// 
+    /// # Returns
+    /// - `Ok(true)`  - System module path (all uppercase at every level)
+    /// - `Ok(false)` - User module path (no RUST/HUST prefix, or prefix has lowercase)
+    /// - `Err(...)`  - Contradiction: RUST/HUST prefix but lowercase in later levels
+    ///
+    /// # Examples
+    /// - `RUST.TIME.SYSTEMTIME` -> Ok(true)  (system)
+    /// - `RUST.TIME.SystemTime` -> Err(...)   (contradiction!)
+    /// - `Rust.TIME`            -> Ok(false) (user module)
+    /// - `mymodule.utils`       -> Ok(false) (user module)
+    fn validate_module_path(path: &str) -> Result<bool, String> {
+        // Check if starts with RUST. or HUST. (case-sensitive)
+        let has_system_prefix = path.starts_with("RUST.") || path.starts_with("HUST.");
+        
+        if !has_system_prefix {
+            // No system prefix -> user module
+            return Ok(false);
+        }
+        
+        // Has RUST./HUST. prefix -> must be all uppercase
+        // 2026-10-31: Allow '*' wildcard character
+        let is_all_uppercase = path.chars().all(|c| {
+            c.is_ascii_uppercase() || c.is_ascii_digit() || c == '.' || c == '_' || c == '*'
+        });
+        
+        if is_all_uppercase {
+            Ok(true)
+        } else {
+            // Contradiction: system prefix but lowercase found
+            // Find the first lowercase character for error message
+            // 2026-10-31: Allow '*' wildcard in skip/take conditions
+            let lowercase_part = path.chars()
+                .skip_while(|c| c.is_ascii_uppercase() || *c == '.' || c.is_ascii_digit() || *c == '_' || *c == '*')
+                .collect::<String>();
+            
+            let uppercase_prefix = path.chars()
+                .take_while(|c| c.is_ascii_uppercase() || *c == '.' || c.is_ascii_digit() || *c == '_' || *c == '*')
+                .collect::<String>();
+            
+            Err(format!(
+                "{} is invalid!\n  - {} is a system module prefix (all uppercase)\n  - But '{}' contains lowercase letters\n  - System module paths must be ALL UPPERCASE at every level\n  - Did you mean: {} ?",
+                path,
+                uppercase_prefix.trim_end_matches('.'),
+                lowercase_part,
+                path.to_uppercase()
+            ))
+        }
+    }
+    
+    /// Legacy wrapper for backward compatibility
+    /// 2026-10-31: Deprecated, use validate_module_path instead
+    fn is_system_module_path(path: &str) -> bool {
+        Self::validate_module_path(path).unwrap_or(false)
+    }
+
     /// Register system namespaces (RUST, HUST)
     pub fn register_system_namespaces(&mut self) {
         // RUST - Rust bridge
@@ -467,22 +525,35 @@ impl NamespaceRegistry {
 
                 // Step 2: Detect namespace (check for '-')
                 eprintln!("[DEBUG B1] path_part = '{}'", path_part);
+                
+                // 2026-10-31: Validate module path with contradiction detection
+                let validation = Self::validate_module_path(path_part);
+                
                 let (namespace, rest) = if let Some(dash_pos) = path_part.find('-') {
                     // Has namespace: Zoo-Animal (user namespace)
                     let ns = path_part[..dash_pos].trim().to_string();
                     let rest = path_part[dash_pos + 1..].trim().to_string();
                     (Some(ns), rest)
-                } else if path_part.starts_with("RUST.") || path_part.starts_with("HUST.") {
-                    // System library path (no namespace, use . path)
-                    // e.g., RUST.IO or RUST.IO.*
+                } else if let Ok(true) = validation {
+                    // System library path (all uppercase, e.g., RUST.IO, RUST.TIME.SYSTEMTIME)
                     (None, path_part.to_string())
+                } else if let Err(ref err) = validation {
+                    // Contradiction path: RUST.IO.stdin, RUST.time, etc.
+                    // Report error and skip this import
+                    // 2026-10-31: Use warnings field since NamespaceRegistry has no errors field
+                    self.warnings.push(format!("[Error] {}", err));
+                    let line_to_remove = format!("{}\n", trimmed);
+                    remaining = remaining.replacen(&line_to_remove, "", 1);
+                    continue;
                 } else {
                     // No namespace, user module or class
                     (None, path_part.to_string())
                 };
 
                 // Step 2.5: Handle system library imports (RUST.IO, RUST.IO.*, etc.)
-                if namespace.is_none() && (rest.starts_with("RUST.") || rest.starts_with("HUST.")) {
+                // 2026-10-31: Re-validate rest for system module check
+                let is_system = Self::validate_module_path(&rest).unwrap_or(false);
+                if namespace.is_none() && is_system {
                     // Parse system library path: RUST.IO or RUST.IO.*
                     let sys_path = rest.trim();
                     eprintln!("[DEBUG B1] sys_path = '{}'", sys_path);
@@ -1171,14 +1242,143 @@ use RUST.IO.*;
     fn test_parse_use_system_lib_item() {
         let mut registry = NamespaceRegistry::new();
         let source = r#"
-use RUST.IO.stdin;
+use RUST.IO.STDIN;
 "#;
 
         let (uses, _) = registry.parse_use_statements(source, "test.hust");
         assert_eq!(uses.len(), 0);
         assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
         assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.IO");
-        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "stdin");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "STDIN");
+    }
+
+    // 2026-10-31: Contradiction path tests (system prefix + lowercase)
+    #[test]
+    fn test_contradiction_path_rust_io_stdin() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.IO.stdin;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 0);
+        // Should have warning about contradiction
+        assert!(!registry.warnings.is_empty());
+        assert!(registry.warnings.iter().any(|w| w.contains("contradiction") || w.contains("invalid")));
+    }
+
+    #[test]
+    fn test_contradiction_path_rust_time_systemtime() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.TIME.SystemTime;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 0);
+        assert!(!registry.warnings.is_empty());
+        assert!(registry.warnings.iter().any(|w| w.contains("contradiction") || w.contains("invalid")));
+    }
+
+    #[test]
+    fn test_contradiction_path_rust_time_lowercase() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.time;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 0);
+        assert!(!registry.warnings.is_empty());
+        assert!(registry.warnings.iter().any(|w| w.contains("contradiction") || w.contains("invalid")));
+    }
+
+    // 2026-10-31: Valid system paths (all uppercase)
+    #[test]
+    fn test_valid_system_path_rust_io_wildcard() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.IO.*;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.IO");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "*");
+    }
+
+    #[test]
+    fn test_valid_system_path_rust_time_systemtime() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.TIME.SYSTEMTIME;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.TIME");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "SYSTEMTIME");
+    }
+
+    #[test]
+    fn test_valid_system_path_rust_collections() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.COLLECTIONS.*;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.COLLECTIONS");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "*");
+    }
+
+    // 2026-10-31: User module paths (lowercase, no system prefix)
+    #[test]
+    fn test_user_module_path_lowercase() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use mymodule.utils;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        // User module should go to uses, not rust_imports
+        assert_eq!(uses.len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_user_module_path_mixed_case() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use MyModule.Utils;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        // User module with mixed case should go to uses
+        assert_eq!(uses.len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 0);
+    }
+
+    // 2026-10-31: Legacy path RUST.STD.IO (still supported)
+    #[test]
+    fn test_legacy_path_rust_std_io() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.STD.IO.*;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap().len(), 1);
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].hust_path, "RUST.STD.IO");
+        assert_eq!(registry.rust_imports.get("test.hust").unwrap()[0].item, "*");
     }
 
     // 2026-10-06: Forbidden patterns tests

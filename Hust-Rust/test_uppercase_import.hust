@@ -1,0 +1,13 @@
+// Test: UPPERCASE system namespace import
+// RUST.TIME.SYSTEMTIME should match SystemTime in rust_mappings
+
+use RUST.TIME.SYSTEMTIME;
+
+void main() {
+    println!("=== Test UPPERCASE import ===");
+    
+    SystemTime now = SystemTime::now();
+    println!("Got SystemTime");
+    
+    println!("=== UPPERCASE import test passed ===");
+}
