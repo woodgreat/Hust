@@ -52,9 +52,9 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
             "Vec", "vec",
         ],
     },
-    // Standard I/O (2026-10-06: new system library path, no namespace)
+    // Standard I/O (2026-11-01: new system library path, first level uppercase)
     RustMapping {
-        hust_path: "RUST.IO",
+        hust_path: "RUST.io",
         rust_path: "std::io",
         items: &[
             "stdin", "stdout", "stderr",
@@ -64,7 +64,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Result type (new path)
     RustMapping {
-        hust_path: "RUST.RESULT",
+        hust_path: "RUST.result",
         rust_path: "std::result",
         items: &[
             "Result", "Ok", "Err",
@@ -72,7 +72,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Option type (new path)
     RustMapping {
-        hust_path: "RUST.OPTION",
+        hust_path: "RUST.option",
         rust_path: "std::option",
         items: &[
             "Option", "Some", "None",
@@ -80,7 +80,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // String type (new path)
     RustMapping {
-        hust_path: "RUST.STRING",
+        hust_path: "RUST.string",
         rust_path: "std::string",
         items: &[
             "String", "FromUtf8Error", "FromUtf16Error",
@@ -88,7 +88,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // str type (new path)
     RustMapping {
-        hust_path: "RUST.STR",
+        hust_path: "RUST.str",
         rust_path: "std::str",
         items: &[
             "from_utf8", "from_utf16", "Chars", "Bytes", "Lines",
@@ -96,7 +96,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Char type (new path)
     RustMapping {
-        hust_path: "RUST.CHAR",
+        hust_path: "RUST.char",
         rust_path: "std::char",
         items: &[
             "from_u32", "from_digit", "is_alphabetic", "is_numeric",
@@ -106,7 +106,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Path handling (new path)
     RustMapping {
-        hust_path: "RUST.PATH",
+        hust_path: "RUST.path",
         rust_path: "std::path",
         items: &[
             "Path", "PathBuf", "Component", "Components",
@@ -115,7 +115,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Networking (new path)
     RustMapping {
-        hust_path: "RUST.NET",
+        hust_path: "RUST.net",
         rust_path: "std::net",
         items: &[
             "TcpStream", "TcpListener", "UdpSocket",
@@ -124,7 +124,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Threading (new path)
     RustMapping {
-        hust_path: "RUST.THREAD",
+        hust_path: "RUST.thread",
         rust_path: "std::thread",
         items: &[
             "spawn", "sleep", "yield_now", "current",
@@ -133,7 +133,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Synchronization (new path)
     RustMapping {
-        hust_path: "RUST.SYNC",
+        hust_path: "RUST.sync",
         rust_path: "std::sync",
         items: &[
             "Mutex", "RwLock", "Arc", "Barrier",
@@ -142,7 +142,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Collections (new path)
     RustMapping {
-        hust_path: "RUST.COLLECTIONS",
+        hust_path: "RUST.collections",
         rust_path: "std::collections",
         items: &[
             "HashMap", "HashSet", "BTreeMap", "BTreeSet",
@@ -151,7 +151,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Time (new path)
     RustMapping {
-        hust_path: "RUST.TIME",
+        hust_path: "RUST.time",
         rust_path: "std::time",
         items: &[
             "Duration", "Instant", "SystemTime", "SystemTimeError",
@@ -159,7 +159,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // File system (new path)
     RustMapping {
-        hust_path: "RUST.FS",
+        hust_path: "RUST.fs",
         rust_path: "std::fs",
         items: &[
             "File", "OpenOptions", "DirEntry", "ReadDir",
@@ -170,7 +170,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Environment (new path)
     RustMapping {
-        hust_path: "RUST.ENV",
+        hust_path: "RUST.env",
         rust_path: "std::env",
         items: &[
             "args", "args_os", "var", "var_os", "set_var", "remove_var",
@@ -179,7 +179,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Process (new path)
     RustMapping {
-        hust_path: "RUST.PROCESS",
+        hust_path: "RUST.process",
         rust_path: "std::process",
         items: &[
             "Command", "Child", "ChildStdin", "ChildStdout", "ChildStderr",
@@ -189,7 +189,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Formatting (new path)
     RustMapping {
-        hust_path: "RUST.FMT",
+        hust_path: "RUST.fmt",
         rust_path: "std::fmt",
         items: &[
             "Display", "Debug", "Formatter", "Result", "Error",
@@ -198,7 +198,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Macros (new path)
     RustMapping {
-        hust_path: "RUST.MACROS",
+        hust_path: "RUST.macros",
         rust_path: "std::macros",
         items: &[
             "println", "print", "eprintln", "eprint", "format",
@@ -209,7 +209,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Memory (new path, from core::mem)
     RustMapping {
-        hust_path: "RUST.MEM",
+        hust_path: "RUST.mem",
         rust_path: "core::mem",
         items: &[
             "size_of", "align_of", "size_of_val", "align_of_val",
@@ -219,7 +219,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Error trait (new path)
     RustMapping {
-        hust_path: "RUST.ERROR",
+        hust_path: "RUST.error",
         rust_path: "std::error",
         items: &[
             "Error", "ErrorKind",
@@ -227,7 +227,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Conversion traits (new path)
     RustMapping {
-        hust_path: "RUST.CONVERT",
+        hust_path: "RUST.convert",
         rust_path: "std::convert",
         items: &[
             "From", "Into", "TryFrom", "TryInto", "AsRef", "AsMut", "FromStr",
@@ -235,7 +235,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Iterator trait (new path)
     RustMapping {
-        hust_path: "RUST.ITER",
+        hust_path: "RUST.iter",
         rust_path: "std::iter",
         items: &[
             "Iterator", "IntoIterator", "FromIterator", "DoubleEndedIterator",
@@ -245,7 +245,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Operator traits (new path)
     RustMapping {
-        hust_path: "RUST.OPS",
+        hust_path: "RUST.ops",
         rust_path: "std::ops",
         items: &[
             "Add", "Sub", "Mul", "Div", "Rem", "Neg", "Not",
@@ -258,7 +258,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Comparison traits (new path)
     RustMapping {
-        hust_path: "RUST.CMP",
+        hust_path: "RUST.cmp",
         rust_path: "std::cmp",
         items: &[
             "Ord", "Eq", "PartialOrd", "PartialEq", "Ordering", "Reverse",
@@ -267,7 +267,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Clone trait (new path)
     RustMapping {
-        hust_path: "RUST.CLONE",
+        hust_path: "RUST.clone",
         rust_path: "std::clone",
         items: &[
             "Clone",
@@ -275,7 +275,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Default trait (new path)
     RustMapping {
-        hust_path: "RUST.DEFAULT",
+        hust_path: "RUST.default",
         rust_path: "std::default",
         items: &[
             "Default",
@@ -283,7 +283,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Borrow trait (new path)
     RustMapping {
-        hust_path: "RUST.BORROW",
+        hust_path: "RUST.borrow",
         rust_path: "std::borrow",
         items: &[
             "Borrow", "BorrowMut", "Cow", "ToOwned",
@@ -291,7 +291,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Any trait (new path)
     RustMapping {
-        hust_path: "RUST.ANY",
+        hust_path: "RUST.any",
         rust_path: "std::any",
         items: &[
             "Any", "TypeId", "type_name", "type_name_of_val",
@@ -299,7 +299,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Marker traits (new path)
     RustMapping {
-        hust_path: "RUST.MARKER",
+        hust_path: "RUST.marker",
         rust_path: "std::marker",
         items: &[
             "Send", "Sync", "Copy", "Sized", "Unpin", "PhantomData", "PhantomPinned",
@@ -307,7 +307,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Pin (new path)
     RustMapping {
-        hust_path: "RUST.PIN",
+        hust_path: "RUST.pin",
         rust_path: "std::pin",
         items: &[
             "Pin", "pin",
@@ -315,7 +315,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Future trait (new path)
     RustMapping {
-        hust_path: "RUST.FUTURE",
+        hust_path: "RUST.future",
         rust_path: "std::future",
         items: &[
             "Future", "poll_fn", "ready", "pending", "join", "select",
@@ -323,7 +323,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Task module (new path)
     RustMapping {
-        hust_path: "RUST.TASK",
+        hust_path: "RUST.task",
         rust_path: "std::task",
         items: &[
             "Context", "Poll", "RawWaker", "RawWakerVTable", "Waker", "Wake",
@@ -331,7 +331,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Arc (new path)
     RustMapping {
-        hust_path: "RUST.ARC",
+        hust_path: "RUST.arc",
         rust_path: "std::sync",
         items: &[
             "Arc", "Weak",
@@ -339,7 +339,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Rc (new path)
     RustMapping {
-        hust_path: "RUST.RC",
+        hust_path: "RUST.rc",
         rust_path: "std::rc",
         items: &[
             "Rc", "Weak",
@@ -347,7 +347,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Cell (new path)
     RustMapping {
-        hust_path: "RUST.CELL",
+        hust_path: "RUST.cell",
         rust_path: "std::cell",
         items: &[
             "Cell", "RefCell", "Ref", "RefMut", "OnceCell",
@@ -355,7 +355,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Box (new path)
     RustMapping {
-        hust_path: "RUST.BOX",
+        hust_path: "RUST.boxed",
         rust_path: "std::boxed",
         items: &[
             "Box",
@@ -363,7 +363,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Vec (new path)
     RustMapping {
-        hust_path: "RUST.VEC",
+        hust_path: "RUST.vec",
         rust_path: "std::vec",
         items: &[
             "Vec",
@@ -371,7 +371,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Standard I/O (legacy path, kept for compatibility)
     RustMapping {
-        hust_path: "RUST.STD.IO",
+        hust_path: "RUST.STD.io",
         rust_path: "std::io",
         items: &[
             "stdin", "stdout", "stderr",
@@ -381,7 +381,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Result type
     RustMapping {
-        hust_path: "RUST.STD.RESULT",
+        hust_path: "RUST.STD.result",
         rust_path: "std::result",
         items: &[
             "Result", "Ok", "Err",
@@ -389,7 +389,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Option type
     RustMapping {
-        hust_path: "RUST.STD.OPTION",
+        hust_path: "RUST.STD.option",
         rust_path: "std::option",
         items: &[
             "Option", "Some", "None",
@@ -397,7 +397,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // String type
     RustMapping {
-        hust_path: "RUST.STD.STRING",
+        hust_path: "RUST.STD.string",
         rust_path: "std::string",
         items: &[
             "String", "FromUtf8Error", "FromUtf16Error",
@@ -405,7 +405,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // str type
     RustMapping {
-        hust_path: "RUST.STD.STR",
+        hust_path: "RUST.STD.str",
         rust_path: "std::str",
         items: &[
             "from_utf8", "from_utf16", "Chars", "Bytes", "Lines",
@@ -413,7 +413,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Char type
     RustMapping {
-        hust_path: "RUST.STD.CHAR",
+        hust_path: "RUST.STD.char",
         rust_path: "std::char",
         items: &[
             "from_u32", "from_digit", "is_alphabetic", "is_numeric",
@@ -423,7 +423,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Path handling
     RustMapping {
-        hust_path: "RUST.STD.PATH",
+        hust_path: "RUST.STD.path",
         rust_path: "std::path",
         items: &[
             "Path", "PathBuf", "Component", "Components",
@@ -432,7 +432,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Networking
     RustMapping {
-        hust_path: "RUST.STD.NET",
+        hust_path: "RUST.STD.net",
         rust_path: "std::net",
         items: &[
             "TcpStream", "TcpListener", "UdpSocket",
@@ -441,7 +441,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Threading
     RustMapping {
-        hust_path: "RUST.STD.THREAD",
+        hust_path: "RUST.STD.thread",
         rust_path: "std::thread",
         items: &[
             "spawn", "sleep", "yield_now", "current",
@@ -450,7 +450,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Synchronization
     RustMapping {
-        hust_path: "RUST.STD.SYNC",
+        hust_path: "RUST.STD.sync",
         rust_path: "std::sync",
         items: &[
             "Mutex", "RwLock", "Arc", "Barrier",
@@ -459,7 +459,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Collections
     RustMapping {
-        hust_path: "RUST.STD.COLLECTIONS",
+        hust_path: "RUST.STD.collections",
         rust_path: "std::collections",
         items: &[
             "HashMap", "HashSet", "BTreeMap", "BTreeSet",
@@ -468,7 +468,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Core memory operations
     RustMapping {
-        hust_path: "RUST.CORE.MEM",
+        hust_path: "RUST.CORE.mem",
         rust_path: "core::mem",
         items: &[
             "size_of", "align_of", "size_of_val", "align_of_val",
@@ -477,7 +477,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Time
     RustMapping {
-        hust_path: "RUST.STD.TIME",
+        hust_path: "RUST.STD.time",
         rust_path: "std::time",
         items: &[
             "Duration", "Instant", "SystemTime", "SystemTimeError",
@@ -485,7 +485,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // File system
     RustMapping {
-        hust_path: "RUST.STD.FS",
+        hust_path: "RUST.STD.fs",
         rust_path: "std::fs",
         items: &[
             "File", "OpenOptions", "DirEntry", "ReadDir",
@@ -495,7 +495,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Environment
     RustMapping {
-        hust_path: "RUST.STD.ENV",
+        hust_path: "RUST.STD.env",
         rust_path: "std::env",
         items: &[
             "args", "args_os", "var", "var_os", "set_var", "remove_var",
@@ -504,7 +504,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Process
     RustMapping {
-        hust_path: "RUST.STD.PROCESS",
+        hust_path: "RUST.STD.process",
         rust_path: "std::process",
         items: &[
             "Command", "Child", "ChildStdin", "ChildStdout", "ChildStderr",
@@ -513,7 +513,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // String formatting
     RustMapping {
-        hust_path: "RUST.STD.FMT",
+        hust_path: "RUST.STD.fmt",
         rust_path: "std::fmt",
         items: &[
             "Display", "Debug", "Formatter", "Result", "Error",
@@ -522,7 +522,7 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
     },
     // Macros (special handling)
     RustMapping {
-        hust_path: "RUST.STD.MACROS",
+        hust_path: "RUST.STD.macros",
         rust_path: "std",
         items: &[
             "println", "print", "eprintln", "eprint",
@@ -546,8 +546,8 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
 /// ```
 /// use hust_rust::rust_mappings::find_mapping;
 ///
-/// let mapping = find_mapping("RUST.STD.IO").unwrap();
-/// assert_eq!(mapping.rust_path, "std::io");
+/// let mapping = find_mapping("RUST.STD.time").unwrap();
+/// assert_eq!(mapping.rust_path, "std::time");
 /// ```
 pub fn find_mapping(hust_path: &str) -> Option<&'static RustMapping> {
     RUST_MAPPINGS.iter().find(|m| m.hust_path == hust_path)
@@ -568,7 +568,7 @@ pub fn is_rust_namespace(hust_path: &str) -> bool {
 /// Expand wildcard (*) to supported items for a system namespace
 ///
 /// # Arguments
-/// * `hust_path` - Hust system namespace (e.g., "RUST.STD.IO")
+/// * `hust_path` - Hust system namespace (e.g., "RUST.STD.time")
 ///
 /// # Returns
 /// * `Some(Vec<&str>)` - List of supported item names
@@ -578,9 +578,9 @@ pub fn is_rust_namespace(hust_path: &str) -> bool {
 /// ```
 /// use hust_rust::rust_mappings::expand_wildcard;
 ///
-/// let items = expand_wildcard("RUST.STD.IO").unwrap();
-/// assert!(items.contains(&"stdin"));
-/// assert!(items.contains(&"stdout"));
+/// let items = expand_wildcard("RUST.STD.time").unwrap();
+/// assert!(items.contains(&"SystemTime"));
+/// assert!(items.contains(&"Duration"));
 /// ```
 pub fn expand_wildcard(hust_path: &str) -> Option<Vec<&'static str>> {
     find_mapping(hust_path).map(|m| m.items.to_vec())
@@ -589,19 +589,19 @@ pub fn expand_wildcard(hust_path: &str) -> Option<Vec<&'static str>> {
 /// Get the Rust use statement for a mapped item
 ///
 /// # Arguments
-/// * `hust_path` - Hust system namespace (e.g., "RUST.STD.IO")
-/// * `item` - Item name (e.g., "stdin") or "*" for wildcard
+/// * `hust_path` - Hust system namespace (e.g., "RUST.STD.time")
+/// * `item` - Item name (e.g., "SystemTime") or "*" for wildcard
 ///
 /// # Returns
-/// * `Some(String)` - Rust use statement (e.g., "use std::io::stdin;")
+/// * `Some(String)` - Rust use statement (e.g., "use std::time::SystemTime;")
 /// * `None` - If mapping not found or item not supported
 ///
 /// # Example
 /// ```
 /// use hust_rust::rust_mappings::get_rust_use;
 ///
-/// let use_stmt = get_rust_use("RUST.STD.IO", "stdin").unwrap();
-/// assert_eq!(use_stmt, "use std::io::stdin;");
+/// let use_stmt = get_rust_use("RUST.STD.time", "SystemTime").unwrap();
+/// assert_eq!(use_stmt, "use std::time::SystemTime;");
 /// ```
 pub fn get_rust_use(hust_path: &str, item: &str) -> Option<String> {
     let mapping = find_mapping(hust_path)?;
@@ -615,11 +615,11 @@ pub fn get_rust_use(hust_path: &str, item: &str) -> Option<String> {
             .collect();
         Some(format!("use {}::{{{}}};", mapping.rust_path, items.join(", ")))
     } else if item.is_empty() {
-        // Fix B1: whole module import (e.g., use RUST.IO; -> use std::io;)
+        // Fix B1: whole module import (e.g., use RUST.time; -> use std::time;)
         Some(format!("use {};", mapping.rust_path))
     } else {
         // Single item: case-insensitive match, output original Rust name
-        // 2026-10-31: User may write RUST.TIME.SYSTEMTIME, mapping stores SystemTime
+        // 2026-11-01: User may write RUST.time.SYSTEMTIME, mapping stores SystemTime
         // Match case-insensitively, but output the original Rust name from mapping
         let item_lower = item.to_lowercase();
         let found = mapping.items.iter().find(|i| i.to_lowercase() == item_lower);
@@ -642,10 +642,10 @@ mod tests {
 
     #[test]
     fn test_find_mapping() {
-        let mapping = find_mapping("RUST.STD.IO").unwrap();
-        assert_eq!(mapping.rust_path, "std::io");
-        assert!(mapping.items.contains(&"stdin"));
-        assert!(mapping.items.contains(&"stdout"));
+        let mapping = find_mapping("RUST.STD.time").unwrap();
+        assert_eq!(mapping.rust_path, "std::time");
+        assert!(mapping.items.contains(&"SystemTime"));
+        assert!(mapping.items.contains(&"Duration"));
     }
 
     #[test]
@@ -656,19 +656,18 @@ mod tests {
 
     #[test]
     fn test_is_rust_namespace() {
-        assert!(is_rust_namespace("RUST.STD.IO"));
-        assert!(is_rust_namespace("RUST.STD.COLLECTIONS"));
+        assert!(is_rust_namespace("RUST.STD.time"));
+        assert!(is_rust_namespace("RUST.STD.collections"));
         assert!(!is_rust_namespace("Zoo"));
         assert!(!is_rust_namespace("RUST"));  // Too short, not specific enough
     }
 
     #[test]
     fn test_expand_wildcard() {
-        let items = expand_wildcard("RUST.STD.IO").unwrap();
-        assert!(items.contains(&"stdin"));
-        assert!(items.contains(&"stdout"));
-        assert!(items.contains(&"Read"));
-        assert!(items.contains(&"Write"));
+        let items = expand_wildcard("RUST.STD.time").unwrap();
+        assert!(items.contains(&"SystemTime"));
+        assert!(items.contains(&"Duration"));
+        assert!(items.contains(&"Instant"));
         assert!(!items.contains(&"unknown_item"));
     }
 
@@ -679,27 +678,27 @@ mod tests {
 
     #[test]
     fn test_get_rust_use_single() {
-        let use_stmt = get_rust_use("RUST.STD.IO", "stdin").unwrap();
-        assert_eq!(use_stmt, "use std::io::stdin;");
+        let use_stmt = get_rust_use("RUST.STD.time", "SystemTime").unwrap();
+        assert_eq!(use_stmt, "use std::time::SystemTime;");
     }
 
     #[test]
     fn test_get_rust_use_wildcard() {
-        let use_stmt = get_rust_use("RUST.STD.IO", "*").unwrap();
-        assert!(use_stmt.starts_with("use std::io::{"));
-        assert!(use_stmt.contains("stdin"));
-        assert!(use_stmt.contains("stdout"));
+        let use_stmt = get_rust_use("RUST.STD.time", "*").unwrap();
+        assert!(use_stmt.starts_with("use std::time::{"));
+        assert!(use_stmt.contains("SystemTime"));
+        assert!(use_stmt.contains("Duration"));
         assert!(use_stmt.ends_with("};"));
     }
 
     #[test]
     fn test_get_rust_use_unsupported_item() {
-        assert!(get_rust_use("RUST.STD.IO", "unsupported").is_none());
+        assert!(get_rust_use("RUST.STD.time", "unsupported").is_none());
     }
 
     #[test]
     fn test_get_rust_use_unknown_namespace() {
-        assert!(get_rust_use("RUST.UNKNOWN", "stdin").is_none());
+        assert!(get_rust_use("RUST.UNKNOWN", "SystemTime").is_none());
     }
 
     #[test]

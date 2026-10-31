@@ -1,0 +1,15 @@
+// Test: Multi-level module import with dot notation
+// Target: use a.b.c.d should work like use a::b::c::d in Rust
+
+use RUST.TIME.SystemTime;
+use RUST.TIME.Duration;
+
+void main() {
+    println!("=== Test Multi-level Import ===");
+    
+    // Test SystemTime
+    SystemTime now = SystemTime::now();
+    println!("Got SystemTime");
+    
+    println!("=== Multi-level import test passed ===");
+}

@@ -1,0 +1,14 @@
+// Test user module multi-level import
+// Create a simple test with nested module structure
+
+// First, let's test if arbitrary multi-level paths work
+use std.time.SystemTime;
+
+void main() {
+    println!("=== Test std.time.SystemTime ===");
+    
+    SystemTime now = SystemTime::now();
+    println!("Got SystemTime");
+    
+    println!("=== std.time.SystemTime test passed ===");
+}

@@ -1,0 +1,17 @@
+// Test: Use RUST.TIME namespace (Hust system namespace)
+
+use RUST.TIME;
+
+void main() {
+    println!("=== Test RUST.TIME ===");
+    
+    // Test SystemTime
+    SystemTime now = SystemTime::now();
+    println!("Got SystemTime");
+    
+    // Test Duration
+    // Duration dur = now.duration_since(UNIX_EPOCH).unwrap();
+    // println!("Got duration");
+    
+    println!("=== Basic RUST.TIME test passed ===");
+}

@@ -1,0 +1,9 @@
+// Test RUST.FS system module
+use RUST.FS.FILE;
+use RUST.FS.*;
+
+void main() {
+    println!("=== Test RUST.FS ===");
+    println!("RUST.FS.FILE and RUST.FS.* imports successful");
+    println!("=== RUST.FS test passed ===");
+}
