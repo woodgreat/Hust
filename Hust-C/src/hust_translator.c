@@ -1166,13 +1166,82 @@ void translator_translate_interface(Translator* translator, ASTNode* node) {
     fprintf(translator->output, "typedef struct {\n");
     translator->indent_level++;
     
-    /* TODO: Parse interface body and generate vtable entries */
-    translator_write_indent(translator);
-    fprintf(translator->output, "/* vtable entries */\n");
+    /* Parse interface body and generate vtable entries */
+    char* body = strdup(node->value);
+    if (body) {
+        char* saveptr = NULL;
+        char* body_line = strtok_r(body, "\n", &saveptr);
+        bool first_line = true;
+        
+        while (body_line) {
+            /* Skip first line (interface declaration) */
+            if (first_line) {
+                first_line = false;
+                body_line = strtok_r(NULL, "\n", &saveptr);
+                continue;
+            }
+            
+            /* Skip empty lines and closing brace */
+            char* trimmed = body_line;
+            while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+            
+            if (*trimmed == '\0' || *trimmed == '}') {
+                body_line = strtok_r(NULL, "\n", &saveptr);
+                continue;
+            }
+            
+            /* Parse method signature: return_type method_name(params); */
+            char ret_type[32] = {0};
+            char method_name[64] = {0};
+            char params[256] = {0};
+            int i = 0, j = 0;
+            
+            /* Extract return type */
+            while (trimmed[i] && trimmed[i] != ' ' && trimmed[i] != '\t' && j < 31) {
+                ret_type[j++] = trimmed[i++];
+            }
+            ret_type[j] = '\0';
+            
+            /* Skip whitespace */
+            while (trimmed[i] == ' ' || trimmed[i] == '\t') i++;
+            
+            /* Extract method name */
+            j = 0;
+            while (trimmed[i] && trimmed[i] != '(' && trimmed[i] != ' ' && trimmed[i] != '\t' && j < 63) {
+                method_name[j++] = trimmed[i++];
+            }
+            method_name[j] = '\0';
+            
+            /* Skip to parameters */
+            while (trimmed[i] && trimmed[i] != '(') i++;
+            if (trimmed[i] == '(') i++;
+            
+            /* Extract parameters */
+            j = 0;
+            while (trimmed[i] && trimmed[i] != ')' && j < 255) {
+                params[j++] = trimmed[i++];
+            }
+            params[j] = '\0';
+            
+            /* Get C return type */
+            const char* c_ret_type = get_c_type(ret_type);
+            
+            /* Generate function pointer: return_type (*method_name)(self, params) */
+            translator_write_indent(translator);
+            if (strlen(params) > 0) {
+                fprintf(translator->output, "%s (*%s)(void* self, %s);\n", c_ret_type, method_name, params);
+            } else {
+                fprintf(translator->output, "%s (*%s)(void* self);\n", c_ret_type, method_name);
+            }
+            
+            body_line = strtok_r(NULL, "\n", &saveptr);
+        }
+        free(body);
+    }
     
     translator->indent_level--;
     translator_write_indent(translator);
-    fprintf(translator->output, "} %s_vtable;\n", interface_name);
+    fprintf(translator->output, "} %sVTable;\n", interface_name);
     fprintf(translator->output, "\n");
 }
 
