@@ -101,7 +101,143 @@ void translator_translate_program(Translator* translator, ASTNode* node) {
     }
 }
 
-/* Translate function definition */
+/* ============================================
+ * Function Translation Helpers
+ * ============================================ */
+
+/* Helper: Check if function is main */
+static bool translator_is_main_function(const char* line) {
+    if (!line) return false;
+    return (strncmp(line, "void main()", 11) == 0);
+}
+
+/* Helper: Remove 'public ' prefix from line */
+static const char* translator_remove_public_prefix(const char* line) {
+    if (!line) return NULL;
+    if (strncmp(line, "public ", 7) == 0) {
+        return line + 7;
+    }
+    return line;
+}
+
+/* Helper: Parse function signature into components */
+typedef struct {
+    char return_type[32];
+    char func_name[64];
+    char params[128];
+} FunctionSignature;
+
+static bool translator_parse_function_signature(const char* line, FunctionSignature* sig) {
+    if (!line || !sig) return false;
+    
+    int i = 0, j = 0;
+    
+    /* Extract return type */
+    while (line[i] && line[i] != ' ' && line[i] != '\t' && j < 31) {
+        sig->return_type[j++] = line[i++];
+    }
+    sig->return_type[j] = '\0';
+    
+    /* Skip whitespace */
+    while (line[i] == ' ' || line[i] == '\t') i++;
+    
+    /* Extract function name */
+    j = 0;
+    while (line[i] && line[i] != '(' && j < 63) {
+        sig->func_name[j++] = line[i++];
+    }
+    sig->func_name[j] = '\0';
+    
+    /* Skip ( */
+    if (line[i] == '(') i++;
+    
+    /* Extract parameters */
+    j = 0;
+    while (line[i] && line[i] != ')' && j < 127) {
+        sig->params[j++] = line[i++];
+    }
+    sig->params[j] = '\0';
+    
+    return true;
+}
+
+/* Helper: Convert a single parameter from Hust to C */
+static void translator_convert_param(const char* param, char* c_param, size_t c_param_size) {
+    if (!param || !c_param || c_param_size == 0) return;
+    
+    char p_type[32] = {0};
+    char p_name[32] = {0};
+    int k = 0, l = 0;
+    
+    /* Trim leading whitespace */
+    while (*param == ' ' || *param == '\t') param++;
+    
+    /* Extract type */
+    while (param[k] && param[k] != ' ' && param[k] != '\t' && l < 31) {
+        p_type[l++] = param[k++];
+    }
+    p_type[l] = '\0';
+    
+    /* Skip whitespace */
+    while (param[k] == ' ' || param[k] == '\t') k++;
+    
+    /* Extract name */
+    l = 0;
+    while (param[k] && param[k] != ' ' && param[k] != '\t' && param[k] != ',' && l < 31) {
+        p_name[l++] = param[k++];
+    }
+    p_name[l] = '\0';
+    
+    /* Convert type */
+    const char* c_type = get_c_type(p_type);
+    
+    /* Build C parameter */
+    snprintf(c_param, c_param_size, "%s %s", c_type, p_name);
+}
+
+/* Helper: Convert all parameters from Hust to C */
+static void translator_convert_params(const char* params, char* c_params, size_t c_params_size) {
+    if (!params || !c_params || c_params_size == 0) return;
+    
+    c_params[0] = '\0';
+    
+    if (strlen(params) == 0) {
+        strncpy(c_params, "void", c_params_size - 1);
+        c_params[c_params_size - 1] = '\0';
+        return;
+    }
+    
+    /* Parse each parameter: type name */
+    char param_copy[128];
+    strncpy(param_copy, params, sizeof(param_copy) - 1);
+    param_copy[sizeof(param_copy) - 1] = '\0';
+    
+    char* token = strtok(param_copy, ",");
+    bool first = true;
+    
+    while (token) {
+        char c_param[64] = {0};
+        translator_convert_param(token, c_param, sizeof(c_param));
+        
+        if (!first) {
+            strncat(c_params, ", ", c_params_size - strlen(c_params) - 1);
+        }
+        strncat(c_params, c_param, c_params_size - strlen(c_params) - 1);
+        
+        first = false;
+        token = strtok(NULL, ",");
+    }
+}
+
+/* Helper: Output function signature to file */
+static void translator_output_function_signature(Translator* translator, const char* return_type, const char* func_name, const char* params) {
+    if (!translator || !return_type || !func_name || !params) return;
+    
+    fprintf(translator->output, "%s %s(%s) {\n", return_type, func_name, params);
+    translator->indent_level++;
+}
+
+/* Translate function definition - refactored */
 void translator_translate_function(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
     
@@ -110,110 +246,31 @@ void translator_translate_function(Translator* translator, ASTNode* node) {
     line[sizeof(line) - 1] = '\0';
     
     /* Check for main function */
-    if (strncmp(line, "void main()", 11) == 0) {
+    if (translator_is_main_function(line)) {
         fprintf(translator->output, "void main(void) {\n");
         translator->indent_level++;
         return;
     }
     
     /* Remove 'public ' prefix */
-    char* func_start = line;
-    if (strncmp(line, "public ", 7) == 0) {
-        func_start = line + 7;
+    const char* func_start = translator_remove_public_prefix(line);
+    
+    /* Parse function signature */
+    FunctionSignature sig = {0};
+    if (!translator_parse_function_signature(func_start, &sig)) {
+        fprintf(stderr, "Error: Failed to parse function signature\n");
+        return;
     }
-    
-    /* Parse function signature: return_type name(params) { */
-    char return_type[32] = {0};
-    char func_name[64] = {0};
-    char params[128] = {0};
-    int i = 0, j = 0;
-    
-    /* Extract return type */
-    while (func_start[i] && func_start[i] != ' ' && func_start[i] != '\t' && j < 31) {
-        return_type[j++] = func_start[i++];
-    }
-    return_type[j] = '\0';
-    
-    /* Skip whitespace */
-    while (func_start[i] == ' ' || func_start[i] == '\t') i++;
-    
-    /* Extract function name */
-    j = 0;
-    while (func_start[i] && func_start[i] != '(' && j < 63) {
-        func_name[j++] = func_start[i++];
-    }
-    func_name[j] = '\0';
-    
-    /* Skip ( */
-    if (func_start[i] == '(') i++;
-    
-    /* Extract parameters */
-    j = 0;
-    while (func_start[i] && func_start[i] != ')' && j < 127) {
-        params[j++] = func_start[i++];
-    }
-    params[j] = '\0';
     
     /* Convert return type */
-    const char* c_return_type = get_c_type(return_type);
+    const char* c_return_type = get_c_type(sig.return_type);
     
     /* Convert parameters */
     char c_params[256] = {0};
-    if (strlen(params) > 0) {
-        /* Parse each parameter: type name */
-        char param_copy[128];
-        strncpy(param_copy, params, sizeof(param_copy) - 1);
-        param_copy[sizeof(param_copy) - 1] = '\0';
-        
-        char* token = strtok(param_copy, ",");
-        bool first = true;
-        
-        while (token) {
-            /* Trim whitespace */
-            while (*token == ' ' || *token == '\t') token++;
-            
-            /* Parse type and name */
-            char p_type[32] = {0};
-            char p_name[32] = {0};
-            int k = 0, l = 0;
-            
-            /* Extract type */
-            while (token[k] && token[k] != ' ' && token[k] != '\t' && l < 31) {
-                p_type[l++] = token[k++];
-            }
-            p_type[l] = '\0';
-            
-            /* Skip whitespace */
-            while (token[k] == ' ' || token[k] == '\t') k++;
-            
-            /* Extract name */
-            l = 0;
-            while (token[k] && token[k] != ' ' && token[k] != '\t' && token[k] != ',' && l < 31) {
-                p_name[l++] = token[k++];
-            }
-            p_name[l] = '\0';
-            
-            /* Convert type */
-            const char* c_type = get_c_type(p_type);
-            
-            /* Add to params */
-            if (!first) {
-                strncat(c_params, ", ", sizeof(c_params) - strlen(c_params) - 1);
-            }
-            strncat(c_params, c_type, sizeof(c_params) - strlen(c_params) - 1);
-            strncat(c_params, " ", sizeof(c_params) - strlen(c_params) - 1);
-            strncat(c_params, p_name, sizeof(c_params) - strlen(c_params) - 1);
-            
-            first = false;
-            token = strtok(NULL, ",");
-        }
-    } else {
-        strncpy(c_params, "void", sizeof(c_params) - 1);
-    }
+    translator_convert_params(sig.params, c_params, sizeof(c_params));
     
     /* Output function signature */
-    fprintf(translator->output, "%s %s(%s) {\n", c_return_type, func_name, c_params);
-    translator->indent_level++;
+    translator_output_function_signature(translator, c_return_type, sig.func_name, c_params);
 }
 
 /* Translate variable declaration */

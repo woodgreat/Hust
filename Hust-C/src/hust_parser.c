@@ -94,7 +94,7 @@ ASTNode* parser_parse_statement(Parser* parser, const char* line) {
 }
 
 /* ============================================
- * V2 Node Type Detection
+ * V2 Node Type Detection - Refactored
  * ============================================ */
 
 /* Helper: Check if line starts with a keyword (followed by space or paren) */
@@ -119,9 +119,9 @@ static bool is_var_type(const char* line) {
             starts_with_keyword(line, "void"));
 }
 
-/* V2 node type detection */
-NodeType parser_detect_node_type_v2(const char* line) {
-    if (!line || line[0] == '\0') return NODE_UNKNOWN;
+/* Helper: Skip leading whitespace and 'public' prefix */
+static const char* parser_skip_prefix(const char* line) {
+    if (!line) return NULL;
     
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
@@ -133,48 +133,95 @@ NodeType parser_detect_node_type_v2(const char* line) {
         while (*line == ' ' || *line == '\t') line++;
     }
     
-    /* Check for closing brace */
-    if (line[0] == '}' && (line[1] == '\0' || line[1] == ' ' || line[1] == '\t')) {
+    return line;
+}
+
+/* Helper: Check if line is a block end (closing brace) */
+static bool parser_is_block_end(const char* line) {
+    if (!line) return false;
+    return (line[0] == '}' && (line[1] == '\0' || line[1] == ' ' || line[1] == '\t' || line[1] == ';'));
+}
+
+/* Helper: Check if line is a control flow statement */
+static bool parser_is_control_flow(const char* line) {
+    if (!line) return false;
+    return (starts_with_keyword(line, "if") ||
+            starts_with_keyword(line, "while") ||
+            starts_with_keyword(line, "for"));
+}
+
+/* Helper: Check if line is a return statement */
+static bool parser_is_return(const char* line) {
+    if (!line) return false;
+    return starts_with_keyword(line, "return");
+}
+
+/* Helper: Check if line contains balanced parentheses */
+static bool parser_has_balanced_parens(const char* line) {
+    if (!line) return false;
+    
+    int paren_count = 0;
+    bool has_paren = false;
+    const char* p = line;
+    
+    while (*p && *p != '{') {
+        if (*p == '(') {
+            has_paren = true;
+            paren_count++;
+        } else if (*p == ')') {
+            paren_count--;
+        }
+        p++;
+    }
+    
+    return has_paren && paren_count == 0;
+}
+
+/* Helper: Check if line is a function definition */
+static bool parser_is_function_def(const char* line) {
+    if (!line) return false;
+    if (!is_var_type(line)) return false;
+    return parser_has_balanced_parens(line);
+}
+
+/* Helper: Check if line is a variable declaration */
+static bool parser_is_variable_decl(const char* line) {
+    if (!line) return false;
+    if (!is_var_type(line)) return false;
+    return !parser_has_balanced_parens(line);
+}
+
+/* V2 node type detection - refactored with single responsibility */
+NodeType parser_detect_node_type_v2(const char* line) {
+    if (!line || line[0] == '\0') return NODE_UNKNOWN;
+    
+    /* Skip prefix (whitespace + public) */
+    const char* stripped = parser_skip_prefix(line);
+    if (!stripped) return NODE_UNKNOWN;
+    
+    /* Check for block end */
+    if (parser_is_block_end(stripped)) {
         return NODE_BLOCK;
     }
     
     /* Check for control flow */
-    if (starts_with_keyword(line, "if") ||
-        starts_with_keyword(line, "while") ||
-        starts_with_keyword(line, "for")) {
+    if (parser_is_control_flow(stripped)) {
         return NODE_CONTROL_FLOW;
     }
     
     /* Check for return */
-    if (starts_with_keyword(line, "return")) {
+    if (parser_is_return(stripped)) {
         return NODE_RETURN;
     }
     
-    /* Check for function definition: has type + name + ( */
-    if (is_var_type(line)) {
-        /* Look for '(' to distinguish function from variable */
-        const char* p = line;
-        int paren_count = 0;
-        bool has_paren = false;
-        
-        while (*p && *p != '{') {
-            if (*p == '(') {
-                has_paren = true;
-                paren_count++;
-            } else if (*p == ')') {
-                paren_count--;
-            }
-            p++;
-        }
-        
-        if (has_paren && paren_count == 0) {
-            return NODE_FUNCTION_DEF;
-        }
-        
-        /* No parens - it's a variable declaration */
-        if (!has_paren) {
-            return NODE_VARIABLE_DECL;
-        }
+    /* Check for function definition */
+    if (parser_is_function_def(stripped)) {
+        return NODE_FUNCTION_DEF;
+    }
+    
+    /* Check for variable declaration */
+    if (parser_is_variable_decl(stripped)) {
+        return NODE_VARIABLE_DECL;
     }
     
     /* Default: generic statement */
