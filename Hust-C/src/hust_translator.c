@@ -1575,6 +1575,251 @@ static void translator_translate_string_method(Translator* translator, const cha
     }
 }
 
+/* Helper: Convert method call to C function call with proper type detection */
+static void translator_convert_method_call_advanced(const char* obj_name, const char* obj_type, const char* method_call, char* c_call, size_t c_call_size) {
+    if (!obj_name || !method_call || !c_call || c_call_size == 0) return;
+    
+    /* Extract method name and args from method_call */
+    char method_name[64] = {0};
+    char args[256] = {0};
+    
+    int i = 0, j = 0;
+    while (method_call[i] && method_call[i] != '(' && j < 63) {
+        method_name[j++] = method_call[i++];
+    }
+    method_name[j] = '\0';
+    
+    /* Skip ( */
+    if (method_call[i] == '(') i++;
+    
+    /* Extract args */
+    j = 0;
+    while (method_call[i] && method_call[i] != ')' && j < 255) {
+        args[j++] = method_call[i++];
+    }
+    args[j] = '\0';
+    
+    /* Trim whitespace from args */
+    char* args_trim = args;
+    while (*args_trim == ' ' || *args_trim == '\t') args_trim++;
+    size_t args_len = strlen(args_trim);
+    while (args_len > 0 && (args_trim[args_len-1] == ' ' || args_trim[args_len-1] == '\t')) {
+        args_trim[--args_len] = '\0';
+    }
+    
+    /* Build C function call: Type_method(obj, args) */
+    if (obj_type && strlen(obj_type) > 0) {
+        /* Use provided type */
+        if (strlen(args_trim) > 0) {
+            snprintf(c_call, c_call_size, "%s_%s(%s, %s)", obj_type, method_name, obj_name, args_trim);
+        } else {
+            snprintf(c_call, c_call_size, "%s_%s(%s)", obj_type, method_name, obj_name);
+        }
+    } else {
+        /* Fallback: use obj_name as type (not ideal but works for simple cases) */
+        if (strlen(args_trim) > 0) {
+            snprintf(c_call, c_call_size, "%s_%s(%s, %s)", obj_name, method_name, obj_name, args_trim);
+        } else {
+            snprintf(c_call, c_call_size, "%s_%s(%s)", obj_name, method_name, obj_name);
+        }
+    }
+}
+
+/* Helper: Check if line contains method call with assignment */
+static bool translator_is_method_call_assignment(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: var = obj.method(args) or type var = obj.method(args) */
+    const char* eq = strchr(line, '=');
+    if (!eq) return false;
+    
+    /* Check if there's a . after = */
+    const char* dot = strchr(eq, '.');
+    if (!dot) return false;
+    
+    /* Check if there's a ( after . */
+    const char* paren = strchr(dot, '(');
+    if (!paren) return false;
+    
+    return true;
+}
+
+/* Helper: Translate method call with assignment */
+static void translator_translate_method_call_assignment(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Parse: [type] result = obj.method(args) */
+    char result_var[64] = {0};
+    char result_type[32] = {0};
+    char obj_name[64] = {0};
+    char method_call[256] = {0};
+    
+    const char* eq = strchr(line, '=');
+    if (!eq) return;
+    
+    /* Extract result variable and type (before =) */
+    const char* var_start = line;
+    while (*var_start == ' ' || *var_start == '\t') var_start++;
+    
+    /* Check for type declaration */
+    if (strncmp(var_start, "i32 ", 4) == 0) {
+        strncpy(result_type, "int32_t", sizeof(result_type) - 1);
+        var_start += 4;
+    } else if (strncmp(var_start, "i64 ", 4) == 0) {
+        strncpy(result_type, "int64_t", sizeof(result_type) - 1);
+        var_start += 4;
+    } else if (strncmp(var_start, "f32 ", 4) == 0) {
+        strncpy(result_type, "float", sizeof(result_type) - 1);
+        var_start += 4;
+    } else if (strncmp(var_start, "f64 ", 4) == 0) {
+        strncpy(result_type, "double", sizeof(result_type) - 1);
+        var_start += 4;
+    } else if (strncmp(var_start, "bool ", 5) == 0) {
+        strncpy(result_type, "bool", sizeof(result_type) - 1);
+        var_start += 5;
+    } else if (strncmp(var_start, "char ", 5) == 0) {
+        strncpy(result_type, "char", sizeof(result_type) - 1);
+        var_start += 5;
+    } else if (strncmp(var_start, "String ", 7) == 0) {
+        strncpy(result_type, "HustString*", sizeof(result_type) - 1);
+        var_start += 7;
+    } else {
+        /* No type declaration, just variable */
+        result_type[0] = '\0';
+    }
+    
+    /* Extract result variable */
+    int j = 0;
+    while (var_start < eq && *var_start != ' ' && *var_start != '\t' && j < 63) {
+        result_var[j++] = *var_start++;
+    }
+    result_var[j] = '\0';
+    
+    /* Trim whitespace */
+    char* var_trim = result_var;
+    while (*var_trim == ' ' || *var_trim == '\t') var_trim++;
+    size_t var_len = strlen(var_trim);
+    while (var_len > 0 && (var_trim[var_len-1] == ' ' || var_trim[var_len-1] == '\t')) {
+        var_trim[--var_len] = '\0';
+    }
+    
+    /* Extract object and method call (after =) */
+    const char* rhs = eq + 1;
+    while (*rhs == ' ' || *rhs == '\t') rhs++;
+    
+    /* Extract object name (before .) */
+    const char* dot = strchr(rhs, '.');
+    if (!dot) return;
+    
+    j = 0;
+    const char* obj_start = rhs;
+    while (obj_start < dot && *obj_start != ' ' && *obj_start != '\t' && j < 63) {
+        obj_name[j++] = *obj_start++;
+    }
+    obj_name[j] = '\0';
+    
+    /* Trim whitespace */
+    char* obj_trim = obj_name;
+    while (*obj_trim == ' ' || *obj_trim == '\t') obj_trim++;
+    size_t obj_len = strlen(obj_trim);
+    while (obj_len > 0 && (obj_trim[obj_len-1] == ' ' || obj_trim[obj_len-1] == '\t')) {
+        obj_trim[--obj_len] = '\0';
+    }
+    
+    /* Extract method call (after .) */
+    const char* method_start = dot + 1;
+    strncpy(method_call, method_start, sizeof(method_call) - 1);
+    method_call[sizeof(method_call) - 1] = '\0';
+    
+    /* Convert method call to C function call */
+    char c_call[512] = {0};
+    translator_convert_method_call_advanced(obj_trim, NULL, method_call, c_call, sizeof(c_call));
+    
+    /* Output assignment */
+    translator_write_indent(translator);
+    if (strlen(result_type) > 0) {
+        /* Declaration with type: int32_t result = Type_method(obj, args); */
+        fprintf(translator->output, "%s %s = %s;\n", result_type, var_trim, c_call);
+    } else {
+        /* Just assignment: result = Type_method(obj, args); */
+        fprintf(translator->output, "%s = %s;\n", var_trim, c_call);
+    }
+}
+
+/* Helper: Check if line contains standalone method call (no assignment) */
+static bool translator_is_standalone_method_call(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: obj.method(args); (no assignment) */
+    if (strchr(line, '=')) return false;  /* Has assignment */
+    
+    /* Check for obj.method( pattern */
+    const char* dot = strchr(line, '.');
+    if (!dot) return false;
+    
+    const char* paren = strchr(dot, '(');
+    if (!paren) return false;
+    
+    /* Check if it ends with ); */
+    size_t len = strlen(line);
+    if (len >= 2 && line[len-2] == ')' && line[len-1] == ';') {
+        return true;
+    }
+    
+    return false;
+}
+
+/* Helper: Translate standalone method call */
+static void translator_translate_standalone_method_call(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Extract object and method call */
+    char obj_name[64] = {0};
+    char method_call[256] = {0};
+    
+    /* Skip leading whitespace */
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract object name (before .) */
+    const char* dot = strchr(p, '.');
+    if (!dot) return;
+    
+    int j = 0;
+    const char* obj_start = p;
+    while (obj_start < dot && *obj_start != ' ' && *obj_start != '\t' && j < 63) {
+        obj_name[j++] = *obj_start++;
+    }
+    obj_name[j] = '\0';
+    
+    /* Trim whitespace */
+    char* obj_trim = obj_name;
+    while (*obj_trim == ' ' || *obj_trim == '\t') obj_trim++;
+    size_t obj_len = strlen(obj_trim);
+    while (obj_len > 0 && (obj_trim[obj_len-1] == ' ' || obj_trim[obj_len-1] == '\t')) {
+        obj_trim[--obj_len] = '\0';
+    }
+    
+    /* Extract method call (after .) */
+    const char* method_start = dot + 1;
+    strncpy(method_call, method_start, sizeof(method_call) - 1);
+    method_call[sizeof(method_call) - 1] = '\0';
+    
+    /* Remove trailing ; if present */
+    size_t method_len = strlen(method_call);
+    if (method_len > 0 && method_call[method_len-1] == ';') {
+        method_call[method_len-1] = '\0';
+    }
+    
+    /* Convert method call to C function call */
+    char c_call[512] = {0};
+    translator_convert_method_call_advanced(obj_trim, NULL, method_call, c_call, sizeof(c_call));
+    
+    /* Output function call */
+    translator_write_indent(translator);
+    fprintf(translator->output, "%s;\n", c_call);
+}
+
 /* Translate statement */
 void translator_translate_statement(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
@@ -1583,6 +1828,18 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for method call with assignment */
+    if (translator_is_method_call_assignment(line)) {
+        translator_translate_method_call_assignment(translator, line);
+        return;
+    }
+    
+    /* Check for standalone method call */
+    if (translator_is_standalone_method_call(line)) {
+        translator_translate_standalone_method_call(translator, line);
+        return;
+    }
     
     /* Check for string concatenation */
     if (translator_is_string_concat(line)) {
