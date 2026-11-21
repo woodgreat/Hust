@@ -1039,7 +1039,7 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
         fprintf(translator->output, "%sVTable* vtable;  /* Interface vtable */\n", interface_name);
     }
     
-    /* Parse class body (multi-line) */
+    /* Parse class body (multi-line) - first pass: collect fields */
     /* Split node->value by newlines and process each line */
     char* body = strdup(node->value);
     if (body) {
@@ -1064,8 +1064,9 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
                 continue;
             }
             
-            /* Check if it's a field declaration */
-            if (translator_is_field_declaration(trimmed)) {
+            /* Check if it's a field declaration (not a method) */
+            if (translator_is_field_declaration(trimmed) && 
+                !translator_is_method_definition(trimmed)) {
                 /* Parse field: type name; or type name = value; */
                 char field_type[32] = {0};
                 char field_rest[256] = {0};
@@ -1100,8 +1101,45 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
                 }
                 fprintf(translator->output, "\n");
             }
+            
+            body_line = strtok_r(NULL, "\n", &saveptr);
+        }
+        
+        free(body);
+    }
+    
+    /* Close struct */
+    translator->indent_level--;
+    translator_write_indent(translator);
+    fprintf(translator->output, "} %s;\n", class_name);
+    fprintf(translator->output, "\n");
+    
+    /* Second pass: output methods outside struct */
+    body = strdup(node->value);
+    if (body) {
+        char* saveptr = NULL;
+        char* body_line = strtok_r(body, "\n", &saveptr);
+        bool first_line = true;
+        
+        while (body_line) {
+            /* Skip first line (class declaration) */
+            if (first_line) {
+                first_line = false;
+                body_line = strtok_r(NULL, "\n", &saveptr);
+                continue;
+            }
+            
+            /* Skip empty lines and closing brace */
+            char* trimmed = body_line;
+            while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+            
+            if (*trimmed == '\0' || *trimmed == '}') {
+                body_line = strtok_r(NULL, "\n", &saveptr);
+                continue;
+            }
+            
             /* Check if it's a method definition */
-            else if (translator_is_method_definition(trimmed)) {
+            if (translator_is_method_definition(trimmed)) {
                 /* Translate method to C function */
                 translator_translate_method(translator, trimmed, class_name);
             }
@@ -1111,11 +1149,6 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
         
         free(body);
     }
-    
-    translator->indent_level--;
-    translator_write_indent(translator);
-    fprintf(translator->output, "} %s;\n", class_name);
-    fprintf(translator->output, "\n");
     
     /* Output constructor with parent initialization */
     if (strlen(parent_class) > 0) {
@@ -1493,11 +1526,21 @@ static bool translator_is_string_concat(const char* line) {
     if (!line) return false;
     
     /* Look for pattern: String var = s1 + s2 or var = s1 + s2 */
-    /* Check if line contains + and String type or string variables */
-    if (strchr(line, '+') && (strstr(line, "String ") || strstr(line, "= "))) {
-        return true;
-    }
+    /* Check if line contains + and String type declaration */
+    if (!strchr(line, '+')) return false;
     
+    /* Must have assignment */
+    if (!strchr(line, '=')) return false;
+    
+    /* Check for String type declaration: "String " at start */
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    if (strncmp(p, "String ", 7) == 0) return true;
+    
+    /* Check for array subscript - if present, not string concat */
+    if (strchr(line, '[') && strchr(line, ']')) return false;
+    
+    /* Otherwise, not string concat (conservative) */
     return false;
 }
 
