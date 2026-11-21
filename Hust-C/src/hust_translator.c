@@ -637,6 +637,12 @@ static bool translator_is_interface_definition(const char* line) {
     return (strncmp(line, "interface ", 10) == 0);
 }
 
+/* Helper: Check if line is an enum definition */
+static bool translator_is_enum_definition(const char* line) {
+    if (!line) return false;
+    return (strncmp(line, "enum ", 5) == 0);
+}
+
 /* Helper: Extract class name from class definition line */
 static bool translator_extract_class_name(const char* line, char* class_name, size_t name_size) {
     if (!line || !class_name || name_size == 0) return false;
@@ -1243,6 +1249,135 @@ void translator_translate_interface(Translator* translator, ASTNode* node) {
     translator_write_indent(translator);
     fprintf(translator->output, "} %sVTable;\n", interface_name);
     fprintf(translator->output, "\n");
+}
+
+/* Translate enum definition */
+void translator_translate_enum(Translator* translator, ASTNode* node) {
+    if (!translator || !node || !node->value) return;
+    
+    const char* line = node->value;
+    
+    /* Skip leading whitespace */
+    while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for enum definition */
+    if (!translator_is_enum_definition(line)) {
+        /* Not an enum, copy as-is */
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", line);
+        return;
+    }
+    
+    /* Extract enum name */
+    char enum_name[64] = {0};
+    const char* p = line + 5;  /* Skip "enum " */
+    while (*p == ' ' || *p == '\t') p++;
+    
+    int j = 0;
+    while (*p && *p != ' ' && *p != '\t' && *p != '{' && j < 63) {
+        enum_name[j++] = *p++;
+    }
+    enum_name[j] = '\0';
+    
+    /* Output enum comment */
+    translator_write_indent(translator);
+    fprintf(translator->output, "/* Enum: %s */\n", enum_name);
+    
+    /* Parse enum body and generate variants */
+    char* body = strdup(node->value);
+    if (body) {
+        char* saveptr = NULL;
+        char* body_line = strtok_r(body, "\n", &saveptr);
+        bool first_line = true;
+        bool first_variant = true;
+        
+        /* Start typedef enum */
+        translator_write_indent(translator);
+        fprintf(translator->output, "typedef enum {\n");
+        translator->indent_level++;
+        
+        while (body_line) {
+            /* Skip first line (enum declaration) */
+            if (first_line) {
+                first_line = false;
+                body_line = strtok_r(NULL, "\n", &saveptr);
+                continue;
+            }
+            
+            /* Skip empty lines and closing brace */
+            char* trimmed = body_line;
+            while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+            
+            if (*trimmed == '\0' || *trimmed == '}') {
+                body_line = strtok_r(NULL, "\n", &saveptr);
+                continue;
+            }
+            
+            /* Parse variant name (may have trailing comma) */
+            char variant_name[64] = {0};
+            int i = 0, k = 0;
+            
+            /* Skip whitespace */
+            while (trimmed[i] == ' ' || trimmed[i] == '\t') i++;
+            
+            /* Extract variant name */
+            while (trimmed[i] && trimmed[i] != ',' && trimmed[i] != ' ' && 
+                   trimmed[i] != '\t' && trimmed[i] != '\n' && k < 63) {
+                variant_name[k++] = trimmed[i++];
+            }
+            variant_name[k] = '\0';
+            
+            /* Skip trailing comma and whitespace */
+            while (trimmed[i] == ',' || trimmed[i] == ' ' || trimmed[i] == '\t') i++;
+            
+            /* Output variant with enum prefix */
+            if (strlen(variant_name) > 0) {
+                translator_write_indent(translator);
+                if (first_variant) {
+                    fprintf(translator->output, "%s_%s = 0", enum_name, variant_name);
+                    first_variant = false;
+                } else {
+                    fprintf(translator->output, "%s_%s", enum_name, variant_name);
+                }
+                
+                /* Check if there are more variants (next non-empty line) */
+                char* next = strtok_r(NULL, "\n", &saveptr);
+                bool has_more = false;
+                if (next) {
+                    char* next_trimmed = next;
+                    while (*next_trimmed == ' ' || *next_trimmed == '\t') next_trimmed++;
+                    if (*next_trimmed != '\0' && *next_trimmed != '}') {
+                        has_more = true;
+                    }
+                    /* Put back for next iteration */
+                    /* Note: strtok_r doesn't support putback, so we use a different approach */
+                }
+                
+                if (has_more) {
+                    fprintf(translator->output, ",\n");
+                } else {
+                    fprintf(translator->output, "\n");
+                }
+                
+                /* If no more variants, break */
+                if (!has_more) {
+                    break;
+                }
+                
+                body_line = next;
+                continue;
+            }
+            
+            body_line = strtok_r(NULL, "\n", &saveptr);
+        }
+        
+        translator->indent_level--;
+        translator_write_indent(translator);
+        fprintf(translator->output, "} %s;\n", enum_name);
+        fprintf(translator->output, "\n");
+        
+        free(body);
+    }
 }
 
 /* Helper: Check if line contains array length method call */
@@ -2076,6 +2211,12 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for enum definition */
+    if (translator_is_enum_definition(line)) {
+        translator_translate_enum(translator, node);
+        return;
+    }
     
     /* Check for import/use statement */
     if (translator_is_import_statement(line)) {
