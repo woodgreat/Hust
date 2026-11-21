@@ -310,12 +310,365 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     fprintf(translator->output, "\n");
 }
 
+/* ============================================
+ * Expression Translation Helpers
+ * ============================================ */
+
+/* Helper: Check if line contains a function call */
+static bool translator_is_function_call(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: identifier(...) */
+    /* Skip if it's a control flow keyword */
+    if (strncmp(line, "if", 2) == 0 ||
+        strncmp(line, "while", 5) == 0 ||
+        strncmp(line, "for", 3) == 0 ||
+        strncmp(line, "return", 6) == 0 ||
+        strncmp(line, "else", 4) == 0) {
+        return false;
+    }
+    
+    /* Look for identifier followed by ( */
+    const char* p = line;
+    while (*p) {
+        /* Skip whitespace */
+        while (*p == ' ' || *p == '\t') p++;
+        
+        /* Check for identifier start */
+        if (isalpha(*p) || *p == '_') {
+            /* Find end of identifier */
+            const char* id_start = p;
+            while (isalnum(*p) || *p == '_') p++;
+            const char* id_end = p;
+            
+            /* Skip whitespace */
+            while (*p == ' ' || *p == '\t') p++;
+            
+            /* Check if next char is ( */
+            if (*p == '(') {
+                /* Check if identifier is a type (i32, i64, etc.) */
+                char identifier[32] = {0};
+                size_t id_len = id_end - id_start;
+                if (id_len < 32) {
+                    strncpy(identifier, id_start, id_len);
+                    identifier[id_len] = '\0';
+                    
+                    /* Not a type, so it's a function call */
+                    if (get_c_type(identifier) == NULL) {
+                        return true;
+                    }
+                }
+            }
+        } else {
+            p++;
+        }
+    }
+    
+    return false;
+}
+
+/* Helper: Check if line contains a method call (obj.method(...)) */
+static bool translator_is_method_call(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: identifier.identifier(...) */
+    const char* p = line;
+    while (*p) {
+        /* Skip whitespace */
+        while (*p == ' ' || *p == '\t') p++;
+        
+        /* Check for identifier start */
+        if (isalpha(*p) || *p == '_') {
+            /* Find end of identifier */
+            while (isalnum(*p) || *p == '_') p++;
+            
+            /* Skip whitespace */
+            while (*p == ' ' || *p == '\t') p++;
+            
+            /* Check if next char is . */
+            if (*p == '.') {
+                p++;
+                
+                /* Skip whitespace */
+                while (*p == ' ' || *p == '\t') p++;
+                
+                /* Check for method name */
+                if (isalpha(*p) || *p == '_') {
+                    /* Find end of method name */
+                    while (isalnum(*p) || *p == '_') p++;
+                    
+                    /* Skip whitespace */
+                    while (*p == ' ' || *p == '\t') p++;
+                    
+                    /* Check if next char is ( */
+                    if (*p == '(') {
+                        return true;
+                    }
+                }
+            }
+        } else {
+            p++;
+        }
+    }
+    
+    return false;
+}
+
+/* Helper: Extract object name and method call from line */
+static bool translator_extract_method_call(const char* line, char* obj_name, size_t obj_size, char* method_call, size_t method_size) {
+    if (!line || !obj_name || !method_call || obj_size == 0 || method_size == 0) return false;
+    
+    /* Find pattern: obj.method(args) */
+    const char* dot = strchr(line, '.');
+    if (!dot) return false;
+    
+    /* Extract object name (before dot) */
+    const char* obj_start = line;
+    while (*obj_start == ' ' || *obj_start == '\t') obj_start++;
+    
+    size_t obj_len = dot - obj_start;
+    if (obj_len >= obj_size) obj_len = obj_size - 1;
+    strncpy(obj_name, obj_start, obj_len);
+    obj_name[obj_len] = '\0';
+    
+    /* Trim trailing whitespace from object name */
+    char* obj_end = obj_name + strlen(obj_name) - 1;
+    while (obj_end > obj_name && (*obj_end == ' ' || *obj_end == '\t')) {
+        *obj_end = '\0';
+        obj_end--;
+    }
+    
+    /* Extract method call (after dot) */
+    const char* method_start = dot + 1;
+    size_t method_len = strlen(method_start);
+    if (method_len >= method_size) method_len = method_size - 1;
+    memcpy(method_call, method_start, method_len);
+    method_call[method_len] = '\0';
+    
+    return true;
+}
+
+/* Helper: Convert method call to C function call */
+static void translator_convert_method_call(const char* obj_name, const char* method_call, char* c_call, size_t c_call_size) {
+    if (!obj_name || !method_call || !c_call || c_call_size == 0) return;
+    
+    /* Extract method name and args from method_call */
+    char method_name[64] = {0};
+    char args[256] = {0};
+    
+    int i = 0, j = 0;
+    while (method_call[i] && method_call[i] != '(' && j < 63) {
+        method_name[j++] = method_call[i++];
+    }
+    method_name[j] = '\0';
+    
+    /* Skip ( */
+    if (method_call[i] == '(') i++;
+    
+    /* Extract args */
+    j = 0;
+    while (method_call[i] && method_call[i] != ')' && j < 255) {
+        args[j++] = method_call[i++];
+    }
+    args[j] = '\0';
+    
+    /* Build C function call: Type_method(obj, args) */
+    /* For now, we use a generic naming convention: obj_method(args) */
+    /* TODO: Need type information to generate proper Type_method() call */
+    if (strlen(args) > 0) {
+        snprintf(c_call, c_call_size, "%s_%s(%s, %s)", obj_name, method_name, obj_name, args);
+    } else {
+        snprintf(c_call, c_call_size, "%s_%s(%s)", obj_name, method_name, obj_name);
+    }
+}
+
+/* Helper: Check if line is an array declaration */
+static bool translator_is_array_declaration(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: type[N] name or type[] name */
+    /* Check for [ after type */
+    const char* bracket = strchr(line, '[');
+    if (!bracket) return false;
+    
+    /* Check if it's a type declaration (starts with known type) */
+    if (strncmp(line, "i32", 3) == 0 ||
+        strncmp(line, "i64", 3) == 0 ||
+        strncmp(line, "f32", 3) == 0 ||
+        strncmp(line, "f64", 3) == 0 ||
+        strncmp(line, "bool", 4) == 0 ||
+        strncmp(line, "char", 4) == 0 ||
+        strncmp(line, "String", 6) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+/* Helper: Translate array declaration */
+static void translator_translate_array_decl(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Parse: type[N] name = {init}; or type[] name; */
+    char type[32] = {0};
+    char size[32] = {0};
+    char rest[256] = {0};
+    int i = 0, j = 0;
+    
+    /* Extract type */
+    while (line[i] && line[i] != '[' && j < 31) {
+        type[j++] = line[i++];
+    }
+    type[j] = '\0';
+    
+    /* Skip [ */
+    if (line[i] == '[') i++;
+    
+    /* Extract size (may be empty for dynamic arrays) */
+    j = 0;
+    while (line[i] && line[i] != ']' && j < 31) {
+        size[j++] = line[i++];
+    }
+    size[j] = '\0';
+    
+    /* Skip ] */
+    if (line[i] == ']') i++;
+    
+    /* Rest of line */
+    strncpy(rest, &line[i], sizeof(rest) - 1);
+    rest[sizeof(rest) - 1] = '\0';
+    
+    /* Get C type */
+    const char* c_type = get_c_type(type);
+    
+    /* Output C declaration */
+    translator_write_indent(translator);
+    
+    if (strlen(size) > 0) {
+        /* Fixed-size array: type name[N] = {init}; */
+        fprintf(translator->output, "%s %s", c_type, rest);
+        /* Insert size before rest */
+        /* Actually, we need to reconstruct: type name[size] = init; */
+        /* For now, simple approach: type name rest, and add size later */
+        /* Better approach: parse name and init from rest */
+    } else {
+        /* Dynamic array: HustVec_type* name; */
+        fprintf(translator->output, "HustVec_%s* %s", c_type, rest);
+    }
+    
+    /* Ensure semicolon */
+    if (!strchr(rest, ';')) {
+        fprintf(translator->output, ";");
+    }
+    
+    fprintf(translator->output, "\n");
+}
+
+/* Helper: Check if line is a string declaration */
+static bool translator_is_string_declaration(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: String name = "..." */
+    if (strncmp(line, "String ", 7) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+/* Helper: Translate string declaration */
+static void translator_translate_string_decl(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Parse: String name = "value"; or String name; */
+    char name[64] = {0};
+    char value[256] = {0};
+    int i = 7, j = 0;  /* Skip "String " */
+    
+    /* Extract name */
+    while (line[i] && line[i] != ' ' && line[i] != '\t' && line[i] != '=' && line[i] != ';' && j < 63) {
+        name[j++] = line[i++];
+    }
+    name[j] = '\0';
+    
+    /* Skip whitespace and = */
+    while (line[i] == ' ' || line[i] == '\t') i++;
+    if (line[i] == '=') i++;
+    while (line[i] == ' ' || line[i] == '\t') i++;
+    
+    /* Extract value (if any) */
+    if (line[i] == '"') {
+        i++;  /* Skip opening quote */
+        j = 0;
+        while (line[i] && line[i] != '"' && j < 255) {
+            value[j++] = line[i++];
+        }
+        value[j] = '\0';
+    }
+    
+    /* Output C declaration */
+    translator_write_indent(translator);
+    
+    if (strlen(value) > 0) {
+        /* String with initialization: HustString* name = HustString_new("value"); */
+        fprintf(translator->output, "HustString* %s = HustString_new(\"%s\");\n", name, value);
+    } else {
+        /* String without initialization: HustString* name = NULL; */
+        fprintf(translator->output, "HustString* %s = NULL;\n", name);
+    }
+}
+
 /* Translate statement */
 void translator_translate_statement(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
     
+    const char* line = node->value;
+    
+    /* Skip leading whitespace */
+    while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for string declaration */
+    if (translator_is_string_declaration(line)) {
+        translator_translate_string_decl(translator, line);
+        return;
+    }
+    
+    /* Check for array declaration */
+    if (translator_is_array_declaration(line)) {
+        translator_translate_array_decl(translator, line);
+        return;
+    }
+    
+    /* Check for method call */
+    if (translator_is_method_call(line)) {
+        char obj_name[64] = {0};
+        char method_call[256] = {0};
+        char c_call[512] = {0};
+        
+        if (translator_extract_method_call(line, obj_name, sizeof(obj_name), method_call, sizeof(method_call))) {
+            translator_convert_method_call(obj_name, method_call, c_call, sizeof(c_call));
+            translator_write_indent(translator);
+            fprintf(translator->output, "%s;\n", c_call);
+            return;
+        }
+    }
+    
+    /* Check for function call */
+    if (translator_is_function_call(line)) {
+        /* Function calls in Hust and C have the same syntax */
+        /* Just copy as-is, but ensure semicolon */
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s", line);
+        if (!strchr(line, ';')) {
+            fprintf(translator->output, ";");
+        }
+        fprintf(translator->output, "\n");
+        return;
+    }
+    
+    /* Default: copy as-is */
     translator_write_indent(translator);
-    fprintf(translator->output, "%s\n", node->value);
+    fprintf(translator->output, "%s\n", line);
 }
 
 /* ============================================
