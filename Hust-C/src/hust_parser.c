@@ -191,6 +191,49 @@ static bool parser_is_variable_decl(const char* line) {
     return !parser_has_balanced_parens(line);
 }
 
+/* Helper: Check if line is a class definition */
+static bool parser_is_class_definition(const char* line) {
+    if (!line) return false;
+    return (strncmp(line, "class ", 6) == 0);
+}
+
+/* Helper: Check if line is an interface definition */
+static bool parser_is_interface_definition(const char* line) {
+    if (!line) return false;
+    return (strncmp(line, "interface ", 10) == 0);
+}
+
+/* Helper: Check if line is a method definition (inside class) */
+static bool parser_is_method_definition(const char* line) {
+    if (!line) return false;
+    
+    /* Method definitions have type + name + (params) pattern */
+    const char* p = line;
+    
+    /* Skip public prefix */
+    if (strncmp(p, "public ", 7) == 0) {
+        p += 7;
+    }
+    
+    /* Check for return type */
+    if (strncmp(p, "i32 ", 4) == 0 ||
+        strncmp(p, "i64 ", 4) == 0 ||
+        strncmp(p, "f32 ", 4) == 0 ||
+        strncmp(p, "f64 ", 4) == 0 ||
+        strncmp(p, "bool ", 5) == 0 ||
+        strncmp(p, "char ", 5) == 0 ||
+        strncmp(p, "String ", 7) == 0 ||
+        strncmp(p, "void ", 5) == 0) {
+        /* Look for ( after method name */
+        const char* paren = strchr(p, '(');
+        if (paren) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
 /* V2 node type detection - refactored with single responsibility */
 NodeType parser_detect_node_type_v2(const char* line) {
     if (!line || line[0] == '\0') return NODE_UNKNOWN;
@@ -202,6 +245,16 @@ NodeType parser_detect_node_type_v2(const char* line) {
     /* Check for block end */
     if (parser_is_block_end(stripped)) {
         return NODE_BLOCK;
+    }
+    
+    /* Check for class definition */
+    if (parser_is_class_definition(stripped)) {
+        return NODE_CLASS_DEF;
+    }
+    
+    /* Check for interface definition */
+    if (parser_is_interface_definition(stripped)) {
+        return NODE_CLASS_DEF;  /* Use CLASS_DEF for interface too */
     }
     
     /* Check for control flow */

@@ -70,6 +70,9 @@ void translator_translate_node(Translator* translator, ASTNode* node) {
         case NODE_CONTROL_FLOW:
             translator_translate_control_flow(translator, node);
             break;
+        case NODE_CLASS_DEF:
+            translator_translate_class(translator, node);
+            break;
         case NODE_RETURN:
         case NODE_STATEMENT:
             translator_translate_statement(translator, node);
@@ -616,6 +619,223 @@ static void translator_translate_string_decl(Translator* translator, const char*
         /* String without initialization: HustString* name = NULL; */
         fprintf(translator->output, "HustString* %s = NULL;\n", name);
     }
+}
+
+/* ============================================
+ * Class Translation
+ * ============================================ */
+
+/* Helper: Check if line is a class definition */
+static bool translator_is_class_definition(const char* line) {
+    if (!line) return false;
+    return (strncmp(line, "class ", 6) == 0);
+}
+
+/* Helper: Check if line is an interface definition */
+static bool translator_is_interface_definition(const char* line) {
+    if (!line) return false;
+    return (strncmp(line, "interface ", 10) == 0);
+}
+
+/* Helper: Extract class name from class definition line */
+static bool translator_extract_class_name(const char* line, char* class_name, size_t name_size) {
+    if (!line || !class_name || name_size == 0) return false;
+    
+    /* Skip "class " */
+    const char* p = line + 6;
+    
+    /* Skip whitespace */
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract name */
+    int j = 0;
+    while (*p && *p != ' ' && *p != '\t' && *p != '{' && j < (int)name_size - 1) {
+        class_name[j++] = *p++;
+    }
+    class_name[j] = '\0';
+    
+    return (j > 0);
+}
+
+/* Helper: Check if line is a field declaration (inside class) */
+static bool translator_is_field_declaration(const char* line) {
+    if (!line) return false;
+    
+    /* Check if line starts with a type */
+    return (strncmp(line, "i32 ", 4) == 0 ||
+            strncmp(line, "i64 ", 4) == 0 ||
+            strncmp(line, "f32 ", 4) == 0 ||
+            strncmp(line, "f64 ", 4) == 0 ||
+            strncmp(line, "bool ", 5) == 0 ||
+            strncmp(line, "char ", 5) == 0 ||
+            strncmp(line, "String ", 7) == 0);
+}
+
+/* Helper: Check if line is a method definition (inside class) */
+static bool translator_is_method_definition(const char* line) {
+    if (!line) return false;
+    
+    /* Method definitions have type + name + (params) pattern */
+    /* Similar to function definition but inside class */
+    
+    /* Check for return type */
+    const char* p = line;
+    
+    /* Skip public prefix */
+    if (strncmp(p, "public ", 7) == 0) {
+        p += 7;
+    }
+    
+    /* Check for type */
+    if (strncmp(p, "i32 ", 4) == 0 ||
+        strncmp(p, "i64 ", 4) == 0 ||
+        strncmp(p, "f32 ", 4) == 0 ||
+        strncmp(p, "f64 ", 4) == 0 ||
+        strncmp(p, "bool ", 5) == 0 ||
+        strncmp(p, "char ", 5) == 0 ||
+        strncmp(p, "String ", 7) == 0 ||
+        strncmp(p, "void ", 5) == 0) {
+        /* Look for ( after method name */
+        const char* paren = strchr(p, '(');
+        if (paren) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/* Helper: Translate class field to C struct member */
+static void translator_translate_field(Translator* translator, const char* line, FILE* struct_output) {
+    if (!translator || !line || !struct_output) return;
+    
+    /* Parse: type name; or type name = value; */
+    char type[32] = {0};
+    char rest[256] = {0};
+    int i = 0, j = 0;
+    
+    /* Skip public prefix */
+    if (strncmp(line, "public ", 7) == 0) {
+        i = 7;
+    }
+    
+    /* Extract type */
+    while (line[i] && line[i] != ' ' && line[i] != '\t' && j < 31) {
+        type[j++] = line[i++];
+    }
+    type[j] = '\0';
+    
+    /* Skip whitespace */
+    while (line[i] == ' ' || line[i] == '\t') i++;
+    
+    /* Rest of line */
+    strncpy(rest, &line[i], sizeof(rest) - 1);
+    rest[sizeof(rest) - 1] = '\0';
+    
+    /* Get C type */
+    const char* c_type = get_c_type(type);
+    
+    /* Output struct member */
+    fprintf(struct_output, "    %s %s", c_type, rest);
+    if (!strchr(rest, ';')) {
+        fprintf(struct_output, ";");
+    }
+    fprintf(struct_output, "\n");
+}
+
+/* Helper: Translate class method to C function */
+static void translator_translate_method(Translator* translator, const char* line, const char* class_name) {
+    if (!translator || !line || !class_name) return;
+    
+    /* For now, output method as comment */
+    /* TODO: Full method translation with self parameter */
+    translator_write_indent(translator);
+    fprintf(translator->output, "/* Method: %s */\n", line);
+}
+
+/* Translate class definition */
+void translator_translate_class(Translator* translator, ASTNode* node) {
+    if (!translator || !node || !node->value) return;
+    
+    const char* line = node->value;
+    
+    /* Skip leading whitespace */
+    while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for class definition */
+    if (!translator_is_class_definition(line)) {
+        /* Not a class, copy as-is */
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", line);
+        return;
+    }
+    
+    /* Extract class name */
+    char class_name[64] = {0};
+    if (!translator_extract_class_name(line, class_name, sizeof(class_name))) {
+        fprintf(stderr, "Error: Failed to extract class name\n");
+        return;
+    }
+    
+    /* Output struct definition */
+    translator_write_indent(translator);
+    fprintf(translator->output, "typedef struct {\n");
+    translator->indent_level++;
+    
+    /* TODO: Parse class body and generate struct members + method declarations */
+    /* For now, just output a placeholder */
+    translator_write_indent(translator);
+    fprintf(translator->output, "/* Class: %s */\n", class_name);
+    
+    translator->indent_level--;
+    translator_write_indent(translator);
+    fprintf(translator->output, "} %s;\n", class_name);
+    fprintf(translator->output, "\n");
+}
+
+/* Translate interface definition */
+void translator_translate_interface(Translator* translator, ASTNode* node) {
+    if (!translator || !node || !node->value) return;
+    
+    const char* line = node->value;
+    
+    /* Skip leading whitespace */
+    while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for interface definition */
+    if (!translator_is_interface_definition(line)) {
+        /* Not an interface, copy as-is */
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", line);
+        return;
+    }
+    
+    /* Extract interface name */
+    char interface_name[64] = {0};
+    const char* p = line + 10;  /* Skip "interface " */
+    while (*p == ' ' || *p == '\t') p++;
+    
+    int j = 0;
+    while (*p && *p != ' ' && *p != '\t' && *p != '{' && j < 63) {
+        interface_name[j++] = *p++;
+    }
+    interface_name[j] = '\0';
+    
+    /* Output vtable struct */
+    translator_write_indent(translator);
+    fprintf(translator->output, "/* Interface vtable: %s */\n", interface_name);
+    translator_write_indent(translator);
+    fprintf(translator->output, "typedef struct {\n");
+    translator->indent_level++;
+    
+    /* TODO: Parse interface body and generate vtable entries */
+    translator_write_indent(translator);
+    fprintf(translator->output, "/* vtable entries */\n");
+    
+    translator->indent_level--;
+    translator_write_indent(translator);
+    fprintf(translator->output, "} %s_vtable;\n", interface_name);
+    fprintf(translator->output, "\n");
 }
 
 /* Translate statement */

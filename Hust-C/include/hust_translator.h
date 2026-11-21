@@ -27,5 +27,11 @@ void translator_translate_function(Translator* translator, ASTNode* node);
 void translator_translate_variable(Translator* translator, ASTNode* node);
 void translator_translate_statement(Translator* translator, ASTNode* node);
 void translator_translate_control_flow(Translator* translator, ASTNode* node);
+void translator_translate_class(Translator* translator, ASTNode* node);
+void translator_translate_interface(Translator* translator, ASTNode* node);
+void translator_translate_class(Translator* translator, ASTNode* node);
+void translator_translate_interface(Translator* translator, ASTNode* node);
+void translator_translate_class(Translator* translator, ASTNode* node);
+void translator_translate_interface(Translator* translator, ASTNode* node);
 
 #endif /* HUST_TRANSLATOR_H */
