@@ -1047,6 +1047,113 @@ void translator_translate_interface(Translator* translator, ASTNode* node) {
     fprintf(translator->output, "\n");
 }
 
+/* Helper: Check if line contains array length method call */
+static bool translator_is_array_length_call(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: arr.len() or arr.length() */
+    if (strstr(line, ".len()") || strstr(line, ".length()")) {
+        return true;
+    }
+    
+    return false;
+}
+
+/* Helper: Translate array length call */
+static void translator_translate_array_length(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Extract array name from arr.len() or arr.length() */
+    char arr_name[64] = {0};
+    const char* p = line;
+    
+    /* Skip leading whitespace */
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract array name (before .len() or .length()) */
+    int j = 0;
+    while (*p && *p != '.' && *p != ' ' && *p != '\t' && j < 63) {
+        arr_name[j++] = *p++;
+    }
+    arr_name[j] = '\0';
+    
+    /* Check if this is an assignment: x = arr.len(); */
+    const char* eq = strchr(line, '=');
+    if (eq) {
+        /* Extract left side */
+        char left[64] = {0};
+        const char* left_start = line;
+        while (*left_start == ' ' || *left_start == '\t') left_start++;
+        
+        int k = 0;
+        while (left_start < eq && *left_start != ' ' && *left_start != '\t' && k < 63) {
+            left[k++] = *left_start++;
+        }
+        left[k] = '\0';
+        
+        /* Output: sizeof(arr)/sizeof(arr[0]) */
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s = sizeof(%s)/sizeof(%s[0]);\n", left, arr_name, arr_name);
+    } else {
+        /* Just output the expression */
+        translator_write_indent(translator);
+        fprintf(translator->output, "sizeof(%s)/sizeof(%s[0])\n", arr_name, arr_name);
+    }
+}
+
+/* Helper: Check if line contains array push method call */
+static bool translator_is_array_push_call(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: arr.push(value) */
+    if (strstr(line, ".push(")) {
+        return true;
+    }
+    
+    return false;
+}
+
+/* Helper: Translate array push call */
+static void translator_translate_array_push(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Extract array name and value from arr.push(value) */
+    char arr_name[64] = {0};
+    char value[256] = {0};
+    const char* p = line;
+    
+    /* Skip leading whitespace */
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract array name (before .push) */
+    int j = 0;
+    while (*p && *p != '.' && *p != ' ' && *p != '\t' && j < 63) {
+        arr_name[j++] = *p++;
+    }
+    arr_name[j] = '\0';
+    
+    /* Skip .push( */
+    const char* push_pos = strstr(line, ".push(");
+    if (!push_pos) return;
+    
+    push_pos += 6;  /* Skip ".push(" */
+    
+    /* Extract value */
+    j = 0;
+    while (*push_pos && *push_pos != ')' && j < 255) {
+        value[j++] = *push_pos++;
+    }
+    value[j] = '\0';
+    
+    /* Trim whitespace from value */
+    char* val_trim = value;
+    while (*val_trim == ' ' || *val_trim == '\t') val_trim++;
+    
+    /* For now, output as comment (need HustVec implementation) */
+    translator_write_indent(translator);
+    fprintf(translator->output, "/* TODO: %s.push(%s) - requires HustVec implementation */\n", arr_name, val_trim);
+}
+
 /* Translate statement */
 void translator_translate_statement(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
@@ -1055,6 +1162,18 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for array length method call */
+    if (translator_is_array_length_call(line)) {
+        translator_translate_array_length(translator, line);
+        return;
+    }
+    
+    /* Check for array push method call */
+    if (translator_is_array_push_call(line)) {
+        translator_translate_array_push(translator, line);
+        return;
+    }
     
     /* Check for string declaration */
     if (translator_is_string_declaration(line)) {
