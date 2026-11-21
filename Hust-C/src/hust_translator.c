@@ -318,11 +318,226 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     fprintf(translator->output, "%s\n", node->value);
 }
 
+/* ============================================
+ * Control Flow Translation Helpers
+ * ============================================ */
+
+/* Helper: Extract condition from control flow statement */
+static bool translator_extract_condition(const char* line, const char* keyword, char* condition, size_t cond_size) {
+    if (!line || !keyword || !condition || cond_size == 0) return false;
+    
+    /* Find keyword */
+    const char* kw_pos = strstr(line, keyword);
+    if (!kw_pos) return false;
+    
+    /* Skip keyword and whitespace */
+    kw_pos += strlen(keyword);
+    while (*kw_pos == ' ' || *kw_pos == '\t') kw_pos++;
+    
+    /* Expect opening paren */
+    if (*kw_pos != '(') return false;
+    kw_pos++;
+    
+    /* Find closing paren (matching) */
+    int paren_count = 1;
+    const char* end = kw_pos;
+    while (*end && paren_count > 0) {
+        if (*end == '(') paren_count++;
+        else if (*end == ')') paren_count--;
+        if (paren_count > 0) end++;
+    }
+    
+    if (paren_count != 0) return false;  /* Unbalanced parens */
+    
+    /* Extract condition */
+    size_t len = end - kw_pos;
+    if (len >= cond_size) len = cond_size - 1;
+    strncpy(condition, kw_pos, len);
+    condition[len] = '\0';
+    
+    return true;
+}
+
+/* Helper: Convert Hust types in condition to C types */
+static void translator_convert_condition_types(char* condition, size_t cond_size) {
+    if (!condition || cond_size == 0) return;
+    
+    /* For now, handle simple type conversions in condition */
+    /* TODO: More sophisticated type conversion */
+    (void)cond_size;  /* Unused for now */
+}
+
+/* Helper: Translate if statement */
+static void translator_translate_if(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    char condition[256] = {0};
+    if (!translator_extract_condition(line, "if", condition, sizeof(condition))) {
+        /* Fallback: copy as-is */
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", line);
+        return;
+    }
+    
+    translator_convert_condition_types(condition, sizeof(condition));
+    
+    translator_write_indent(translator);
+    fprintf(translator->output, "if (%s) {\n", condition);
+    translator->indent_level++;
+}
+
+/* Helper: Translate while statement */
+static void translator_translate_while(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    char condition[256] = {0};
+    if (!translator_extract_condition(line, "while", condition, sizeof(condition))) {
+        /* Fallback: copy as-is */
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", line);
+        return;
+    }
+    
+    translator_convert_condition_types(condition, sizeof(condition));
+    
+    translator_write_indent(translator);
+    fprintf(translator->output, "while (%s) {\n", condition);
+    translator->indent_level++;
+}
+
+/* Helper: Translate for statement */
+static void translator_translate_for(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Extract the three parts of for loop: init; condition; increment */
+    const char* for_pos = strstr(line, "for");
+    if (!for_pos) {
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", line);
+        return;
+    }
+    
+    /* Skip 'for' and whitespace */
+    for_pos += 3;
+    while (*for_pos == ' ' || *for_pos == '\t') for_pos++;
+    
+    /* Expect opening paren */
+    if (*for_pos != '(') {
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", line);
+        return;
+    }
+    for_pos++;
+    
+    /* Find the three parts separated by semicolons */
+    char init[128] = {0};
+    char condition[128] = {0};
+    char increment[128] = {0};
+    
+    int part = 0;
+    int j = 0;
+    const char* p = for_pos;
+    
+    while (*p && *p != ')' && part < 3) {
+        if (*p == ';') {
+            part++;
+            j = 0;
+            p++;
+            continue;
+        }
+        
+        if (part == 0 && j < 127) {
+            init[j++] = *p;
+        } else if (part == 1 && j < 127) {
+            condition[j++] = *p;
+        } else if (part == 2 && j < 127) {
+            increment[j++] = *p;
+        }
+        p++;
+    }
+    
+    /* Null terminate */
+    if (part >= 0) init[strlen(init)] = '\0';
+    if (part >= 1) condition[strlen(condition)] = '\0';
+    if (part >= 2) increment[strlen(increment)] = '\0';
+    
+    /* Trim whitespace */
+    char* init_trim = init;
+    char* cond_trim = condition;
+    char* incr_trim = increment;
+    
+    while (*init_trim == ' ' || *init_trim == '\t') init_trim++;
+    while (*cond_trim == ' ' || *cond_trim == '\t') cond_trim++;
+    while (*incr_trim == ' ' || *incr_trim == '\t') incr_trim++;
+    
+    /* Convert init part (may contain type declaration) */
+    char c_init[256] = {0};
+    if (strlen(init_trim) > 0) {
+        /* Check if it starts with a type */
+        if (strncmp(init_trim, "i32 ", 4) == 0) {
+            snprintf(c_init, sizeof(c_init), "int32_t %s", init_trim + 4);
+        } else if (strncmp(init_trim, "i64 ", 4) == 0) {
+            snprintf(c_init, sizeof(c_init), "int64_t %s", init_trim + 4);
+        } else if (strncmp(init_trim, "f32 ", 4) == 0) {
+            snprintf(c_init, sizeof(c_init), "float %s", init_trim + 4);
+        } else if (strncmp(init_trim, "f64 ", 4) == 0) {
+            snprintf(c_init, sizeof(c_init), "double %s", init_trim + 4);
+        } else if (strncmp(init_trim, "bool ", 5) == 0) {
+            snprintf(c_init, sizeof(c_init), "bool %s", init_trim + 5);
+        } else if (strncmp(init_trim, "char ", 5) == 0) {
+            snprintf(c_init, sizeof(c_init), "char %s", init_trim + 5);
+        } else {
+            strncpy(c_init, init_trim, sizeof(c_init) - 1);
+        }
+    }
+    
+    /* Output for loop */
+    translator_write_indent(translator);
+    fprintf(translator->output, "for (%s; %s; %s) {\n", c_init, cond_trim, incr_trim);
+    translator->indent_level++;
+}
+
 /* Translate control flow */
 void translator_translate_control_flow(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
     
-    /* For now, just copy the line */
-    translator_write_indent(translator);
-    fprintf(translator->output, "%s\n", node->value);
+    const char* line = node->value;
+    
+    /* Skip leading whitespace */
+    while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for else */
+    if (strncmp(line, "else", 4) == 0) {
+        translator->indent_level--;
+        translator_write_indent(translator);
+        
+        /* Check for else if */
+        if (strncmp(line, "else if", 7) == 0) {
+            /* Handle as if with else prefix */
+            char condition[256] = {0};
+            if (translator_extract_condition(line, "if", condition, sizeof(condition))) {
+                fprintf(translator->output, "else if (%s) {\n", condition);
+                translator->indent_level++;
+                return;
+            }
+        } else {
+            /* Plain else */
+            fprintf(translator->output, "else {\n");
+            translator->indent_level++;
+            return;
+        }
+    }
+    
+    /* Dispatch to specific control flow translators */
+    if (strncmp(line, "if", 2) == 0) {
+        translator_translate_if(translator, line);
+    } else if (strncmp(line, "while", 5) == 0) {
+        translator_translate_while(translator, line);
+    } else if (strncmp(line, "for", 3) == 0) {
+        translator_translate_for(translator, line);
+    } else {
+        /* Fallback: copy as-is */
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", line);
+    }
 }
