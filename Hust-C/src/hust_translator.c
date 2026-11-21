@@ -938,6 +938,55 @@ static bool translator_extract_class_info(const char* line, char* class_name, si
     return (j > 0);
 }
 
+/* Check if class implements interface */
+static bool translator_class_implements_interface(const char* line, char* interface_name, size_t interface_size) {
+    if (!line || !interface_name || interface_size == 0) return false;
+    
+    const char* impl = strstr(line, "implements");
+    if (!impl) return false;
+    
+    impl += 10;  /* Skip "implements" */
+    while (*impl == ' ' || *impl == '\t') impl++;
+    
+    int j = 0;
+    while (*impl && *impl != ' ' && *impl != '\t' && *impl != '{' && j < (int)interface_size - 1) {
+        interface_name[j++] = *impl++;
+    }
+    interface_name[j] = '\0';
+    
+    return (j > 0);
+}
+
+/* Extract class name, parent class, and interface from class definition */
+static bool translator_extract_class_full_info(const char* line, 
+    char* class_name, size_t class_size,
+    char* parent_class, size_t parent_size,
+    char* interface_name, size_t interface_size) {
+    if (!line || !class_name || !parent_class || !interface_name || 
+        class_size == 0 || parent_size == 0 || interface_size == 0) return false;
+    
+    /* Skip "class " */
+    const char* p = line + 6;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract class name */
+    int j = 0;
+    while (*p && *p != ' ' && *p != '\t' && *p != '{' && j < (int)class_size - 1) {
+        class_name[j++] = *p++;
+    }
+    class_name[j] = '\0';
+    
+    /* Check for extends */
+    parent_class[0] = '\0';
+    translator_class_has_extends(line, parent_class, parent_size);
+    
+    /* Check for implements */
+    interface_name[0] = '\0';
+    translator_class_implements_interface(line, interface_name, interface_size);
+    
+    return (j > 0);
+}
+
 /* Translate class definition with inheritance support */
 void translator_translate_class(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
@@ -955,10 +1004,13 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
         return;
     }
     
-    /* Extract class name and parent class */
+    /* Extract class name, parent class, and interface */
     char class_name[64] = {0};
     char parent_class[64] = {0};
-    if (!translator_extract_class_info(line, class_name, sizeof(class_name), parent_class, sizeof(parent_class))) {
+    char interface_name[64] = {0};
+    if (!translator_extract_class_full_info(line, class_name, sizeof(class_name), 
+                                            parent_class, sizeof(parent_class),
+                                            interface_name, sizeof(interface_name))) {
         fprintf(stderr, "Error: Failed to extract class name\n");
         return;
     }
@@ -972,6 +1024,12 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
     if (strlen(parent_class) > 0) {
         translator_write_indent(translator);
         fprintf(translator->output, "%s %s;  /* Parent class */\n", parent_class, parent_class);
+    }
+    
+    /* If implements interface, add vtable pointer */
+    if (strlen(interface_name) > 0) {
+        translator_write_indent(translator);
+        fprintf(translator->output, "%sVTable* vtable;  /* Interface vtable */\n", interface_name);
     }
     
     /* Parse class body (multi-line) */
