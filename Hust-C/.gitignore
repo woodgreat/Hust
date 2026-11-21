@@ -1,0 +1,22 @@
+# Hust-C .gitignore
+# Exclude build artifacts and backup files
+
+# Compiled binaries
+hust_c
+*.o
+
+# Backup files
+.backup_rust/
+*.bak
+
+# Test output files
+tests/**/*.c
+!tests/**/*.expected.c
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,29 @@
+//! Basic variable declaration test
+//! Hust source:
+
+void main() {
+    i32 x = 42;
+    i32 y;
+    i64 big = 1000000;
+    f32 pi = 3.14;
+    f64 e = 2.71828;
+    bool flag = true;
+    char c = 'A';
+}
+
+//! Expected C output:
+//! #include <stdio.h>
+//! #include <stdlib.h>
+//! #include <string.h>
+//! #include <stdbool.h>
+//! #include <stdint.h>
+//!
+//! void main(void) {
+//!     int32_t x = 42;
+//!     int32_t y;
+//!     int64_t big = 1000000;
+//!     float pi = 3.14;
+//!     double e = 2.71828;
+//!     bool flag = true;
+//!     char c = 'A';
+//! }
