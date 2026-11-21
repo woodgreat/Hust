@@ -1154,6 +1154,427 @@ static void translator_translate_array_push(Translator* translator, const char* 
     fprintf(translator->output, "/* TODO: %s.push(%s) - requires HustVec implementation */\n", arr_name, val_trim);
 }
 
+/* Helper: Check if line contains string concatenation */
+static bool translator_is_string_concat(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: String var = s1 + s2 or var = s1 + s2 */
+    /* Check if line contains + and String type or string variables */
+    if (strchr(line, '+') && (strstr(line, "String ") || strstr(line, "= "))) {
+        return true;
+    }
+    
+    return false;
+}
+
+/* Helper: Translate string concatenation */
+static void translator_translate_string_concat(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Parse: String result = s1 + s2 + s3... */
+    /* or: result = s1 + s2 */
+    
+    char result_var[64] = {0};
+    
+    /* Check if this is a declaration or assignment */
+    const char* eq = strchr(line, '=');
+    if (!eq) return;
+    
+    /* Extract result variable */
+    const char* var_start = line;
+    while (*var_start == ' ' || *var_start == '\t') var_start++;
+    
+    /* Skip "String " if present */
+    if (strncmp(var_start, "String ", 7) == 0) {
+        var_start += 7;
+    }
+    
+    int j = 0;
+    while (var_start < eq && *var_start != ' ' && *var_start != '\t' && j < 63) {
+        result_var[j++] = *var_start++;
+    }
+    result_var[j] = '\0';
+    
+    /* Extract operands (after =) */
+    const char* op_start = eq + 1;
+    while (*op_start == ' ' || *op_start == '\t') op_start++;
+    
+    /* Parse operands separated by + */
+    /* For now, simple approach: split by + and create nested concat calls */
+    
+    /* Count operands */
+    int operand_count = 1;
+    for (const char* p = op_start; *p; p++) {
+        if (*p == '+') operand_count++;
+    }
+    
+    /* Build concat expression */
+    /* For 2 operands: HustString_concat(s1, s2) */
+    /* For 3+ operands: HustString_concat(HustString_concat(s1, s2), s3) */
+    
+    char concat_expr[512] = {0};
+    char* expr_ptr = concat_expr;
+    size_t remaining = sizeof(concat_expr) - 1;
+    
+    /* Parse first operand */
+    char operand[64] = {0};
+    j = 0;
+    const char* p = op_start;
+    while (*p && *p != '+' && *p != ';' && j < 63) {
+        operand[j++] = *p++;
+    }
+    operand[j] = '\0';
+    
+    /* Trim whitespace */
+    char* op_trim = operand;
+    while (*op_trim == ' ' || *op_trim == '\t') op_trim++;
+    size_t op_len = strlen(op_trim);
+    while (op_len > 0 && (op_trim[op_len-1] == ' ' || op_trim[op_len-1] == '\t')) {
+        op_trim[--op_len] = '\0';
+    }
+    
+    /* Check if operand is a string literal */
+    if (op_trim[0] == '"') {
+        snprintf(expr_ptr, remaining, "HustString_new(%s)", op_trim);
+    } else {
+        snprintf(expr_ptr, remaining, "%s", op_trim);
+    }
+    
+    expr_ptr += strlen(expr_ptr);
+    remaining -= strlen(expr_ptr);
+    
+    /* Process remaining operands */
+    while (*p && *p != ';') {
+        if (*p == '+') {
+            p++;
+            while (*p == ' ' || *p == '\t') p++;
+            
+            /* Parse next operand */
+            j = 0;
+            while (*p && *p != '+' && *p != ';' && j < 63) {
+                operand[j++] = *p++;
+            }
+            operand[j] = '\0';
+            
+            /* Trim whitespace */
+            op_trim = operand;
+            while (*op_trim == ' ' || *op_trim == '\t') op_trim++;
+            op_len = strlen(op_trim);
+            while (op_len > 0 && (op_trim[op_len-1] == ' ' || op_trim[op_len-1] == '\t')) {
+                op_trim[--op_len] = '\0';
+            }
+            
+            /* Build concat call */
+            char temp[512] = {0};
+            if (op_trim[0] == '"') {
+                snprintf(temp, sizeof(temp), "HustString_concat(%s, HustString_new(%s))", concat_expr, op_trim);
+            } else {
+                snprintf(temp, sizeof(temp), "HustString_concat(%s, %s)", concat_expr, op_trim);
+            }
+            strncpy(concat_expr, temp, sizeof(concat_expr) - 1);
+            concat_expr[sizeof(concat_expr) - 1] = '\0';
+            expr_ptr = concat_expr + strlen(concat_expr);
+            remaining = sizeof(concat_expr) - 1 - strlen(concat_expr);
+        } else {
+            p++;
+        }
+    }
+    
+    /* Output declaration/assignment */
+    translator_write_indent(translator);
+    
+    /* Check if this is a new declaration */
+    if (strstr(line, "String ") && strstr(line, "String ") < eq) {
+        /* New declaration: HustString* result = concat_expr; */
+        fprintf(translator->output, "HustString* %s = %s;\n", result_var, concat_expr);
+    } else {
+        /* Assignment: result = concat_expr; */
+        fprintf(translator->output, "%s = %s;\n", result_var, concat_expr);
+    }
+}
+
+/* Helper: Check if line contains string comparison */
+static bool translator_is_string_comparison(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: s1 == s2 or s1 != s2 */
+    if ((strstr(line, "==") || strstr(line, "!=")) && !strstr(line, "String ")) {
+        return true;
+    }
+    
+    return false;
+}
+
+/* Helper: Translate string comparison */
+static void translator_translate_string_comparison(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Parse: if (s1 == s2) or bool eq = (s1 == s2) */
+    /* Convert to: HustString_equals(s1, s2) */
+    
+    /* Find == or != */
+    const char* op = strstr(line, "==");
+    bool is_equal = true;
+    if (!op) {
+        op = strstr(line, "!=");
+        is_equal = false;
+    }
+    if (!op) return;
+    
+    /* Extract left operand */
+    char left[64] = {0};
+    const char* left_start = line;
+    while (*left_start == ' ' || *left_start == '\t') left_start++;
+    
+    /* Skip if( if present */
+    if (strncmp(left_start, "if (", 4) == 0) {
+        left_start += 4;
+    } else if (strncmp(left_start, "if(", 3) == 0) {
+        left_start += 3;
+    }
+    
+    int j = 0;
+    while (left_start < op && *left_start != ' ' && *left_start != '\t' && *left_start != '(' && j < 63) {
+        left[j++] = *left_start++;
+    }
+    left[j] = '\0';
+    
+    /* Extract right operand */
+    char right[64] = {0};
+    const char* right_start = op + 2;
+    while (*right_start == ' ' || *right_start == '\t') right_start++;
+    
+    j = 0;
+    while (*right_start && *right_start != ')' && *right_start != ' ' && *right_start != '\t' && *right_start != ';' && *right_start != '{' && j < 63) {
+        right[j++] = *right_start++;
+    }
+    right[j] = '\0';
+    
+    /* Trim whitespace */
+    char* left_trim = left;
+    while (*left_trim == ' ' || *left_trim == '\t') left_trim++;
+    size_t left_len = strlen(left_trim);
+    while (left_len > 0 && (left_trim[left_len-1] == ' ' || left_trim[left_len-1] == '\t')) {
+        left_trim[--left_len] = '\0';
+    }
+    
+    char* right_trim = right;
+    while (*right_trim == ' ' || *right_trim == '\t') right_trim++;
+    size_t right_len = strlen(right_trim);
+    while (right_len > 0 && (right_trim[right_len-1] == ' ' || right_trim[right_len-1] == '\t')) {
+        right_trim[--right_len] = '\0';
+    }
+    
+    /* Build comparison expression */
+    translator_write_indent(translator);
+    
+    /* Check if this is an if statement */
+    if (strstr(line, "if") && strstr(line, "if") < op) {
+        /* if statement: if (HustString_equals(s1, s2)) { */
+        if (is_equal) {
+            fprintf(translator->output, "if (HustString_equals(%s, %s)) {\n", left_trim, right_trim);
+        } else {
+            fprintf(translator->output, "if (!HustString_equals(%s, %s)) {\n", left_trim, right_trim);
+        }
+        translator->indent_level++;
+    } else {
+        /* Assignment: bool eq = HustString_equals(s1, s2); */
+        /* Extract result variable if present */
+        const char* eq_sign = strchr(line, '=');
+        if (eq_sign && eq_sign < op) {
+            char result_var[64] = {0};
+            const char* var_start = line;
+            while (*var_start == ' ' || *var_start == '\t') var_start++;
+            
+            /* Skip bool or other type */
+            while (*var_start && *var_start != ' ' && *var_start != '\t') var_start++;
+            while (*var_start == ' ' || *var_start == '\t') var_start++;
+            
+            j = 0;
+            while (var_start < eq_sign && *var_start != ' ' && *var_start != '\t' && j < 63) {
+                result_var[j++] = *var_start++;
+            }
+            result_var[j] = '\0';
+            
+            if (strlen(result_var) > 0) {
+                if (is_equal) {
+                    fprintf(translator->output, "bool %s = HustString_equals(%s, %s);\n", result_var, left_trim, right_trim);
+                } else {
+                    fprintf(translator->output, "bool %s = !HustString_equals(%s, %s);\n", result_var, left_trim, right_trim);
+                }
+            } else {
+                /* Just output the expression */
+                if (is_equal) {
+                    fprintf(translator->output, "HustString_equals(%s, %s);\n", left_trim, right_trim);
+                } else {
+                    fprintf(translator->output, "!HustString_equals(%s, %s);\n", left_trim, right_trim);
+                }
+            }
+        } else {
+            /* Just output the expression */
+            if (is_equal) {
+                fprintf(translator->output, "HustString_equals(%s, %s);\n", left_trim, right_trim);
+            } else {
+                fprintf(translator->output, "!HustString_equals(%s, %s);\n", left_trim, right_trim);
+            }
+        }
+    }
+}
+
+/* Helper: Check if line contains string method call */
+static bool translator_is_string_method_call(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: str.method() or str.method(args) */
+    /* Common string methods: length, to_upper, to_lower, trim, etc. */
+    
+    const char* dot = strchr(line, '.');
+    if (!dot) return false;
+    
+    /* Check for known string methods */
+    if (strstr(line, ".length()") ||
+        strstr(line, ".len()") ||
+        strstr(line, ".to_upper()") ||
+        strstr(line, ".to_lower()") ||
+        strstr(line, ".trim()") ||
+        strstr(line, ".is_empty()")) {
+        return true;
+    }
+    
+    return false;
+}
+
+/* Helper: Translate string method call */
+static void translator_translate_string_method(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Extract string variable and method name */
+    char str_var[64] = {0};
+    char method_name[64] = {0};
+    
+    const char* dot = strchr(line, '.');
+    if (!dot) return;
+    
+    /* Extract string variable (before dot) */
+    const char* var_start = line;
+    while (*var_start == ' ' || *var_start == '\t') var_start++;
+    
+    /* Skip if( if present */
+    if (strncmp(var_start, "if (", 4) == 0) {
+        var_start += 4;
+    } else if (strncmp(var_start, "if(", 3) == 0) {
+        var_start += 3;
+    }
+    
+    /* Skip type declarations */
+    if (strncmp(var_start, "bool ", 5) == 0) {
+        var_start += 5;
+    } else if (strncmp(var_start, "i32 ", 4) == 0) {
+        var_start += 4;
+    } else if (strncmp(var_start, "String ", 7) == 0) {
+        var_start += 7;
+    }
+    
+    /* Skip assignment if present */
+    const char* eq = strchr(var_start, '=');
+    if (eq && eq < dot) {
+        var_start = eq + 1;
+        while (*var_start == ' ' || *var_start == '\t') var_start++;
+    }
+    
+    int j = 0;
+    while (var_start < dot && *var_start != ' ' && *var_start != '\t' && j < 63) {
+        str_var[j++] = *var_start++;
+    }
+    str_var[j] = '\0';
+    
+    /* Trim whitespace */
+    char* var_trim = str_var;
+    while (*var_trim == ' ' || *var_trim == '\t') var_trim++;
+    size_t var_len = strlen(var_trim);
+    while (var_len > 0 && (var_trim[var_len-1] == ' ' || var_trim[var_len-1] == '\t')) {
+        var_trim[--var_len] = '\0';
+    }
+    
+    /* Extract method name (after dot, before () */
+    const char* method_start = dot + 1;
+    j = 0;
+    while (*method_start && *method_start != '(' && *method_start != ')' && j < 63) {
+        method_name[j++] = *method_start++;
+    }
+    method_name[j] = '\0';
+    
+    /* Map method name to C function */
+    const char* c_function = NULL;
+    if (strcmp(method_name, "length") == 0 || strcmp(method_name, "len") == 0) {
+        c_function = "HustString_length";
+    } else if (strcmp(method_name, "to_upper") == 0) {
+        c_function = "HustString_to_upper";
+    } else if (strcmp(method_name, "to_lower") == 0) {
+        c_function = "HustString_to_lower";
+    } else if (strcmp(method_name, "trim") == 0) {
+        c_function = "HustString_trim";
+    } else if (strcmp(method_name, "is_empty") == 0) {
+        c_function = "HustString_is_empty";
+    }
+    
+    if (!c_function) {
+        /* Unknown method, output as comment */
+        translator_write_indent(translator);
+        fprintf(translator->output, "/* TODO: %s.%s() */\n", var_trim, method_name);
+        return;
+    }
+    
+    /* Check if this is an if statement */
+    if (strstr(line, "if") && strstr(line, "if") < dot) {
+        /* if statement: if (HustString_length(s) > 0) { */
+        /* For now, just output the function call */
+        translator_write_indent(translator);
+        fprintf(translator->output, "if (%s(%s)) {\n", c_function, var_trim);
+        translator->indent_level++;
+    } else {
+        /* Assignment or expression */
+        /* Check for result variable */
+        const char* eq_sign = strchr(line, '=');
+        if (eq_sign && eq_sign < dot) {
+            /* Extract result variable */
+            char result_var[64] = {0};
+            const char* var_start2 = line;
+            while (*var_start2 == ' ' || *var_start2 == '\t') var_start2++;
+            
+            /* Skip type */
+            while (*var_start2 && *var_start2 != ' ' && *var_start2 != '\t') var_start2++;
+            while (*var_start2 == ' ' || *var_start2 == '\t') var_start2++;
+            
+            j = 0;
+            while (var_start2 < eq_sign && *var_start2 != ' ' && *var_start2 != '\t' && j < 63) {
+                result_var[j++] = *var_start2++;
+            }
+            result_var[j] = '\0';
+            
+            /* Determine result type */
+            const char* result_type = "int32_t";  /* Default for length */
+            if (strcmp(method_name, "to_upper") == 0 || strcmp(method_name, "to_lower") == 0 || strcmp(method_name, "trim") == 0) {
+                result_type = "HustString*";
+            } else if (strcmp(method_name, "is_empty") == 0) {
+                result_type = "bool";
+            }
+            
+            if (strlen(result_var) > 0) {
+                translator_write_indent(translator);
+                fprintf(translator->output, "%s %s = %s(%s);\n", result_type, result_var, c_function, var_trim);
+            } else {
+                translator_write_indent(translator);
+                fprintf(translator->output, "%s(%s);\n", c_function, var_trim);
+            }
+        } else {
+            /* Just the expression */
+            translator_write_indent(translator);
+            fprintf(translator->output, "%s(%s);\n", c_function, var_trim);
+        }
+    }
+}
+
 /* Translate statement */
 void translator_translate_statement(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
@@ -1162,6 +1583,24 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for string concatenation */
+    if (translator_is_string_concat(line)) {
+        translator_translate_string_concat(translator, line);
+        return;
+    }
+    
+    /* Check for string comparison */
+    if (translator_is_string_comparison(line)) {
+        translator_translate_string_comparison(translator, line);
+        return;
+    }
+    
+    /* Check for string method call */
+    if (translator_is_string_method_call(line)) {
+        translator_translate_string_method(translator, line);
+        return;
+    }
     
     /* Check for array length method call */
     if (translator_is_array_length_call(line)) {
