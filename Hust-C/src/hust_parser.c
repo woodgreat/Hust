@@ -294,13 +294,60 @@ ASTNode* parser_parse_program_v2(Parser* parser) {
     if (!program) return NULL;
     
     /* Parse each line */
-    for (int i = 0; i < parser->preprocessor->line_count; i++) {
+    int i = 0;
+    while (i < parser->preprocessor->line_count) {
         const char* line = parser->preprocessor->lines[i];
         NodeType type = parser_detect_node_type_v2(line);
         
-        ASTNode* node = ast_create_node(type, line);
-        if (node) {
-            ast_add_child(program, node);
+        /* Check if this is a class definition */
+        if (type == NODE_CLASS_DEF) {
+            /* Parse class body (may span multiple lines) */
+            ASTNode* class_node = ast_create_node(NODE_CLASS_DEF, line);
+            if (class_node) {
+                /* Collect all lines until closing brace */
+                int brace_count = 0;
+                bool first_line = true;
+                
+                while (i < parser->preprocessor->line_count) {
+                    const char* class_line = parser->preprocessor->lines[i];
+                    
+                    /* Count braces */
+                    for (const char* p = class_line; *p; p++) {
+                        if (*p == '{') brace_count++;
+                        else if (*p == '}') brace_count--;
+                    }
+                    
+                    /* Add line to class node value (concatenate) */
+                    if (!first_line) {
+                        /* Append to existing value */
+                        size_t old_len = class_node->value ? strlen(class_node->value) : 0;
+                        size_t new_len = strlen(class_line);
+                        char* new_value = realloc(class_node->value, old_len + new_len + 2);
+                        if (new_value) {
+                            strcat(new_value, "\n");
+                            strcat(new_value, class_line);
+                            class_node->value = new_value;
+                        }
+                    }
+                    
+                    first_line = false;
+                    i++;
+                    
+                    /* Check if class body is complete */
+                    if (brace_count <= 0 && !first_line) {
+                        break;
+                    }
+                }
+                
+                ast_add_child(program, class_node);
+            }
+        } else {
+            /* Regular line */
+            ASTNode* node = ast_create_node(type, line);
+            if (node) {
+                ast_add_child(program, node);
+            }
+            i++;
         }
     }
     

@@ -782,10 +782,80 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
     fprintf(translator->output, "typedef struct {\n");
     translator->indent_level++;
     
-    /* TODO: Parse class body and generate struct members + method declarations */
-    /* For now, just output a placeholder */
-    translator_write_indent(translator);
-    fprintf(translator->output, "/* Class: %s */\n", class_name);
+    /* Parse class body (multi-line) */
+    /* Split node->value by newlines and process each line */
+    char* body = strdup(node->value);
+    if (body) {
+        char* saveptr = NULL;
+        char* body_line = strtok_r(body, "\n", &saveptr);
+        bool first_line = true;
+        
+        while (body_line) {
+            /* Skip first line (class declaration) */
+            if (first_line) {
+                first_line = false;
+                body_line = strtok_r(NULL, "\n", &saveptr);
+                continue;
+            }
+            
+            /* Skip empty lines and closing brace */
+            char* trimmed = body_line;
+            while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+            
+            if (*trimmed == '\0' || *trimmed == '}') {
+                body_line = strtok_r(NULL, "\n", &saveptr);
+                continue;
+            }
+            
+            /* Check if it's a field declaration */
+            if (translator_is_field_declaration(trimmed)) {
+                /* Parse field: type name; or type name = value; */
+                char field_type[32] = {0};
+                char field_rest[256] = {0};
+                int i = 0, j = 0;
+                
+                /* Skip public prefix */
+                if (strncmp(trimmed, "public ", 7) == 0) {
+                    i = 7;
+                }
+                
+                /* Extract type */
+                while (trimmed[i] && trimmed[i] != ' ' && trimmed[i] != '\t' && j < 31) {
+                    field_type[j++] = trimmed[i++];
+                }
+                field_type[j] = '\0';
+                
+                /* Skip whitespace */
+                while (trimmed[i] == ' ' || trimmed[i] == '\t') i++;
+                
+                /* Rest of line */
+                strncpy(field_rest, &trimmed[i], sizeof(field_rest) - 1);
+                field_rest[sizeof(field_rest) - 1] = '\0';
+                
+                /* Get C type */
+                const char* c_type = get_c_type(field_type);
+                
+                /* Output struct member */
+                translator_write_indent(translator);
+                fprintf(translator->output, "%s %s", c_type, field_rest);
+                if (!strchr(field_rest, ';')) {
+                    fprintf(translator->output, ";");
+                }
+                fprintf(translator->output, "\n");
+            }
+            /* Check if it's a method definition */
+            else if (translator_is_method_definition(trimmed)) {
+                /* For now, output method as comment */
+                /* TODO: Full method translation with self parameter */
+                translator_write_indent(translator);
+                fprintf(translator->output, "/* Method: %s */\n", trimmed);
+            }
+            
+            body_line = strtok_r(NULL, "\n", &saveptr);
+        }
+        
+        free(body);
+    }
     
     translator->indent_level--;
     translator_write_indent(translator);
