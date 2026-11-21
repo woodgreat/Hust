@@ -1,0 +1,46 @@
+// Test: Pointer operations
+// Expected: Pointers compile to C pointers
+
+void main() {
+    // Basic pointer
+    i32 x = 42;
+    i32* ptr = &x;
+    
+    // Dereference
+    i32 val = *ptr;
+    
+    // Modify through pointer
+    *ptr = 100;
+    
+    // Pointer arithmetic
+    i32 arr[5] = {1, 2, 3, 4, 5};
+    i32* arr_ptr = arr;
+    
+    i32 first = *arr_ptr;        // arr[0]
+    i32 second = *(arr_ptr + 1); // arr[1]
+    
+    // Pointer to pointer
+    i32** ptr2 = &ptr;
+    i32 val2 = **ptr2;
+    
+    // Null pointer check
+    i32* null_ptr = null;
+    if (null_ptr == null) {
+        printf("Pointer is null\n");
+    }
+    
+    // Dynamic allocation
+    i32* heap_ptr = malloc(sizeof(i32));
+    *heap_ptr = 200;
+    i32 heap_val = *heap_ptr;
+    free(heap_ptr);
+    
+    // Array of pointers
+    i32* ptr_arr[3];
+    i32 a = 1, b = 2, c = 3;
+    ptr_arr[0] = &a;
+    ptr_arr[1] = &b;
+    ptr_arr[2] = &c;
+    
+    i32 sum = *ptr_arr[0] + *ptr_arr[1] + *ptr_arr[2];
+}

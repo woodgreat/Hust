@@ -1,0 +1,39 @@
+// Test: String operations
+// Expected: String type and operations compile correctly
+
+void main() {
+    // String declaration
+    String s1 = "Hello";
+    String s2 = "World";
+    
+    // String concatenation
+    String s3 = s1 + " " + s2;
+    
+    // String length
+    i32 len = s3.length();
+    
+    // String comparison
+    bool equal = (s1 == s2);
+    bool not_equal = (s1 != s2);
+    
+    // String access
+    char first_char = s1[0];
+    
+    // String methods
+    String upper = s1.to_upper();
+    String lower = s2.to_lower();
+    
+    // String formatting
+    String formatted = format("Value: %d, Pi: %.2f", 42, 3.14159);
+    
+    // Print string
+    printf("%s\n", s3);
+    
+    // String conversion
+    i32 num = 123;
+    String num_str = num.to_string();
+    
+    // String parsing
+    String parse_str = "456";
+    i32 parsed = parse_str.to_i32();
+}

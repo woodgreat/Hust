@@ -1,0 +1,26 @@
+// Test: Basic variable declarations
+// Expected: All basic types compile correctly
+
+void main() {
+    // Integer types
+    i32 x = 42;
+    i32 y;
+    i64 big = 1000000;
+    
+    // Floating point types
+    f32 pi = 3.14;
+    f64 e = 2.71828;
+    
+    // Boolean type
+    bool flag = true;
+    bool other = false;
+    
+    // Character type
+    char c = 'A';
+    
+    // String type
+    String name = "Hello";
+    
+    // Multiple declarations
+    i32 a = 1, b = 2, c = 3;
+}

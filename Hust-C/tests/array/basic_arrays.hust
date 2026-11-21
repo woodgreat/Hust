@@ -1,0 +1,51 @@
+// Test: Array operations
+// Expected: Fixed and dynamic arrays compile correctly
+
+void main() {
+    // Fixed-size array
+    i32 arr[5] = {1, 2, 3, 4, 5};
+    
+    // Array access
+    i32 first = arr[0];
+    i32 last = arr[4];
+    
+    // Array modification
+    arr[2] = 10;
+    
+    // Array iteration
+    for (i32 i = 0; i < 5; i++) {
+        printf("arr[%d] = %d\n", i, arr[i]);
+    }
+    
+    // Dynamic array
+    i32[] dynamic_arr = new i32[10];
+    
+    // Dynamic array access
+    dynamic_arr[0] = 100;
+    dynamic_arr[9] = 200;
+    
+    // Dynamic array iteration
+    for (i32 i = 0; i < 10; i++) {
+        printf("dynamic_arr[%d] = %d\n", i, dynamic_arr[i]);
+    }
+    
+    // Free dynamic array
+    free(dynamic_arr);
+    
+    // 2D array
+    i32 matrix[3][3] = {
+        {1, 2, 3},
+        {4, 5, 6},
+        {7, 8, 9}
+    };
+    
+    // 2D array access
+    i32 val = matrix[1][1];  // Should be 5
+    
+    // 2D array iteration
+    for (i32 i = 0; i < 3; i++) {
+        for (i32 j = 0; j < 3; j++) {
+            printf("matrix[%d][%d] = %d\n", i, j, matrix[i][j]);
+        }
+    }
+}

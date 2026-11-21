@@ -1,0 +1,59 @@
+// Test: Control flow statements
+// Expected: if/else/while/for compile correctly
+
+void main() {
+    i32 x = 10;
+    
+    // If statement
+    if (x > 5) {
+        printf("x is greater than 5\n");
+    }
+    
+    // If-else statement
+    if (x > 15) {
+        printf("x is greater than 15\n");
+    } else {
+        printf("x is not greater than 15\n");
+    }
+    
+    // If-else if-else chain
+    if (x > 20) {
+        printf("x > 20\n");
+    } else if (x > 15) {
+        printf("x > 15\n");
+    } else if (x > 10) {
+        printf("x > 10\n");
+    } else {
+        printf("x <= 10\n");
+    }
+    
+    // While loop
+    i32 i = 0;
+    while (i < 5) {
+        printf("i = %d\n", i);
+        i++;
+    }
+    
+    // For loop
+    for (i32 j = 0; j < 5; j++) {
+        printf("j = %d\n", j);
+    }
+    
+    // Nested loops
+    for (i32 a = 0; a < 3; a++) {
+        for (i32 b = 0; b < 3; b++) {
+            printf("a=%d, b=%d\n", a, b);
+        }
+    }
+    
+    // Break and continue
+    for (i32 k = 0; k < 10; k++) {
+        if (k == 5) {
+            break;
+        }
+        if (k % 2 == 0) {
+            continue;
+        }
+        printf("k = %d\n", k);
+    }
+}

@@ -1,0 +1,57 @@
+// Test: C library integration
+// Expected: C standard library functions compile correctly
+
+// Include C headers (Hust syntax)
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include <string.h>
+// #include <math.h>
+
+void main() {
+    // stdio.h functions
+    printf("Hello, World!\n");
+    i32 num = 42;
+    printf("Number: %d\n", num);
+    
+    // scanf (if supported)
+    // i32 input;
+    // scanf("%d", &input);
+    
+    // stdlib.h functions
+    i32* ptr = malloc(sizeof(i32));
+    *ptr = 100;
+    free(ptr);
+    
+    i32 abs_val = abs(-10);
+    i32 rand_val = rand();
+    
+    // string.h functions
+    String s1 = "Hello";
+    String s2 = "World";
+    i32 len = strlen(s1);
+    
+    // String concatenation (C style)
+    char dest[50];
+    strcpy(dest, s1);
+    strcat(dest, " ");
+    strcat(dest, s2);
+    
+    // String comparison
+    i32 cmp = strcmp(s1, s2);
+    if (cmp == 0) {
+        printf("Strings are equal\n");
+    }
+    
+    // math.h functions (if linked with -lm)
+    // f64 sqrt_val = sqrt(16.0);
+    // f64 pow_val = pow(2.0, 3.0);
+    // f64 sin_val = sin(3.14159 / 2);
+    
+    // Memory functions
+    i32 arr1[5] = {1, 2, 3, 4, 5};
+    i32 arr2[5];
+    memcpy(arr2, arr1, sizeof(arr1));
+    
+    i32 zero_arr[10];
+    memset(zero_arr, 0, sizeof(zero_arr));
+}

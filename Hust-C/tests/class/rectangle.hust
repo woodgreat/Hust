@@ -1,0 +1,51 @@
+// Test: Class definition and usage
+// Expected: Class maps to C struct with functions
+
+class Rectangle {
+    // Fields
+    i32 width;
+    i32 height;
+    
+    // Constructor
+    Rectangle(i32 w, i32 h) {
+        this.width = w;
+        this.height = h;
+    }
+    
+    // Method
+    i32 area() {
+        return this.width * this.height;
+    }
+    
+    // Method with parameter
+    void scale(f32 factor) {
+        this.width = (i32)(this.width * factor);
+        this.height = (i32)(this.height * factor);
+    }
+    
+    // Static method
+    static Rectangle square(i32 size) {
+        return Rectangle(size, size);
+    }
+}
+
+void main() {
+    // Create object
+    Rectangle rect = Rectangle(10, 20);
+    
+    // Access fields
+    i32 w = rect.width;
+    i32 h = rect.height;
+    
+    // Call method
+    i32 a = rect.area();
+    
+    // Modify object
+    rect.scale(1.5);
+    
+    // Static method call
+    Rectangle sq = Rectangle::square(5);
+    
+    // Print result
+    printf("Area: %d\n", a);
+}

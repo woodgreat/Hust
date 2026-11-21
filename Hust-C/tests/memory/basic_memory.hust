@@ -1,0 +1,43 @@
+// Test: Memory management
+// Expected: malloc/free/new/delete compile correctly
+
+void main() {
+    // malloc/free for primitive types
+    i32* int_ptr = malloc(sizeof(i32));
+    *int_ptr = 42;
+    free(int_ptr);
+    
+    // malloc/free for arrays
+    i32* arr = malloc(10 * sizeof(i32));
+    for (i32 i = 0; i < 10; i++) {
+        arr[i] = i * 2;
+    }
+    free(arr);
+    
+    // new/delete for objects (if supported)
+    // String* str = new String("Hello");
+    // delete str;
+    
+    // Memory management with structs
+    struct Point {
+        i32 x;
+        i32 y;
+    };
+    
+    struct Point* p = malloc(sizeof(struct Point));
+    p->x = 10;
+    p->y = 20;
+    free(p);
+    
+    // Memory leak prevention (automatic in Hust)
+    {
+        i32* temp = malloc(sizeof(i32));
+        *temp = 100;
+        free(temp);  // Explicit free
+    }  // Or automatic cleanup at end of scope
+    
+    // realloc for resizing
+    i32* buffer = malloc(5 * sizeof(i32));
+    buffer = realloc(buffer, 10 * sizeof(i32));
+    free(buffer);
+}

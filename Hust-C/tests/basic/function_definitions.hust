@@ -1,0 +1,33 @@
+// Test: Function definitions
+// Expected: Various function signatures compile correctly
+
+// Simple function with no parameters
+void greet() {
+    printf("Hello\n");
+}
+
+// Function with parameters and return value
+i32 add(i32 a, i32 b) {
+    return a + b;
+}
+
+// Function with multiple parameters
+f32 calculate(i32 x, f32 y, bool flag) {
+    if (flag) {
+        return y * x;
+    }
+    return y / x;
+}
+
+// Function returning String
+String get_name() {
+    return "Hust-C";
+}
+
+// Main function
+void main() {
+    greet();
+    i32 result = add(1, 2);
+    f32 val = calculate(10, 3.14, true);
+    String name = get_name();
+}
