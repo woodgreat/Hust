@@ -10,7 +10,8 @@ SRCS = src/hust_ast.c \
        src/hust_preprocessor.c \
        src/hust_parser.c \
        src/hust_mappings.c \
-       src/hust_translator.c
+       src/hust_translator.c \
+       src/hust_error.c
 
 OBJS = $(SRCS:.c=.o)
 

@@ -45,6 +45,7 @@ int translator_translate(Translator* translator) {
     fprintf(translator->output, "#include <stdio.h>\n");
     fprintf(translator->output, "#include <stdlib.h>\n");
     fprintf(translator->output, "#include <string.h>\n");
+    fprintf(translator->output, "#include \"hust_error.h\"\n");
     fprintf(translator->output, "\n");
     
     /* Translate root node */
