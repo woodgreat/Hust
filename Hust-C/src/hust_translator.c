@@ -1967,6 +1967,56 @@ static bool translator_is_standalone_method_call(const char* line) {
     return false;
 }
 
+/* Helper: Check if line is an import/use statement */
+static bool translator_is_import_statement(const char* line) {
+    if (!line) return false;
+    
+    /* Skip leading whitespace */
+    while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for "import " or "use " */
+    if (strncmp(line, "import ", 7) == 0) return true;
+    if (strncmp(line, "use ", 4) == 0) return true;
+    
+    return false;
+}
+
+/* Helper: Translate import/use statement to #include */
+static void translator_translate_import(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Skip leading whitespace */
+    while (*line == ' ' || *line == '\t') line++;
+    
+    /* Skip "import " or "use " */
+    const char* p = line;
+    if (strncmp(p, "import ", 7) == 0) {
+        p += 7;
+    } else if (strncmp(p, "use ", 4) == 0) {
+        p += 4;
+    }
+    
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract module name (may contain :: for submodules) */
+    char module_name[128] = {0};
+    int j = 0;
+    while (*p && *p != ';' && *p != ' ' && *p != '\t' && j < 127) {
+        /* Convert :: to _ for C compatibility */
+        if (*p == ':' && *(p+1) == ':') {
+            module_name[j++] = '_';
+            p += 2;
+        } else {
+            module_name[j++] = *p++;
+        }
+    }
+    module_name[j] = '\0';
+    
+    /* Output #include directive */
+    translator_write_indent(translator);
+    fprintf(translator->output, "#include \"%s.h\"\n", module_name);
+}
+
 /* Helper: Translate standalone method call */
 static void translator_translate_standalone_method_call(Translator* translator, const char* line) {
     if (!translator || !line) return;
@@ -2026,6 +2076,12 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
+    
+    /* Check for import/use statement */
+    if (translator_is_import_statement(line)) {
+        translator_translate_import(translator, line);
+        return;
+    }
     
     /* Check for method call with assignment */
     if (translator_is_method_call_assignment(line)) {
