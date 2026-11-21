@@ -894,7 +894,51 @@ static void translator_translate_method(Translator* translator, const char* line
     translator->indent_level++;
 }
 
-/* Translate class definition */
+/* Helper: Check if class has extends clause */
+static bool translator_class_has_extends(const char* line, char* parent_class, size_t parent_size) {
+    if (!line || !parent_class || parent_size == 0) return false;
+    
+    /* Look for "extends" keyword */
+    const char* extends_pos = strstr(line, "extends");
+    if (!extends_pos) return false;
+    
+    /* Skip "extends" and whitespace */
+    extends_pos += 7;
+    while (*extends_pos == ' ' || *extends_pos == '\t') extends_pos++;
+    
+    /* Extract parent class name */
+    int j = 0;
+    while (*extends_pos && *extends_pos != ' ' && *extends_pos != '\t' && *extends_pos != '{' && j < (int)parent_size - 1) {
+        parent_class[j++] = *extends_pos++;
+    }
+    parent_class[j] = '\0';
+    
+    return (j > 0);
+}
+
+/* Helper: Extract class name and parent class from class definition */
+static bool translator_extract_class_info(const char* line, char* class_name, size_t class_size, char* parent_class, size_t parent_size) {
+    if (!line || !class_name || !parent_class || class_size == 0 || parent_size == 0) return false;
+    
+    /* Skip "class " */
+    const char* p = line + 6;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract class name */
+    int j = 0;
+    while (*p && *p != ' ' && *p != '\t' && *p != '{' && j < (int)class_size - 1) {
+        class_name[j++] = *p++;
+    }
+    class_name[j] = '\0';
+    
+    /* Check for extends */
+    parent_class[0] = '\0';
+    translator_class_has_extends(line, parent_class, parent_size);
+    
+    return (j > 0);
+}
+
+/* Translate class definition with inheritance support */
 void translator_translate_class(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
     
@@ -911,9 +955,10 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
         return;
     }
     
-    /* Extract class name */
+    /* Extract class name and parent class */
     char class_name[64] = {0};
-    if (!translator_extract_class_name(line, class_name, sizeof(class_name))) {
+    char parent_class[64] = {0};
+    if (!translator_extract_class_info(line, class_name, sizeof(class_name), parent_class, sizeof(parent_class))) {
         fprintf(stderr, "Error: Failed to extract class name\n");
         return;
     }
@@ -922,6 +967,12 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
     translator_write_indent(translator);
     fprintf(translator->output, "typedef struct {\n");
     translator->indent_level++;
+    
+    /* If has parent class, embed parent struct as first member */
+    if (strlen(parent_class) > 0) {
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s %s;  /* Parent class */\n", parent_class, parent_class);
+    }
     
     /* Parse class body (multi-line) */
     /* Split node->value by newlines and process each line */
@@ -1000,6 +1051,26 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
     translator_write_indent(translator);
     fprintf(translator->output, "} %s;\n", class_name);
     fprintf(translator->output, "\n");
+    
+    /* Output constructor with parent initialization */
+    if (strlen(parent_class) > 0) {
+        translator_write_indent(translator);
+        fprintf(translator->output, "/* Constructor with parent initialization */\n");
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s* %s_new() {\n", class_name, class_name);
+        translator->indent_level++;
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s* self = malloc(sizeof(%s));\n", class_name, class_name);
+        translator_write_indent(translator);
+        fprintf(translator->output, "/* Initialize parent */\n");
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s_init(&self->%s);\n", parent_class, parent_class);
+        translator_write_indent(translator);
+        fprintf(translator->output, "return self;\n");
+        translator->indent_level--;
+        translator_write_indent(translator);
+        fprintf(translator->output, "}\n\n");
+    }
 }
 
 /* Translate interface definition */
