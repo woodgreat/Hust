@@ -747,10 +747,151 @@ static void translator_translate_field(Translator* translator, const char* line,
 static void translator_translate_method(Translator* translator, const char* line, const char* class_name) {
     if (!translator || !line || !class_name) return;
     
-    /* For now, output method as comment */
-    /* TODO: Full method translation with self parameter */
+    /* Parse method signature: [public] return_type method_name(params) { */
+    char return_type[32] = {0};
+    char method_name[64] = {0};
+    char params[256] = {0};
+    int i = 0, j = 0;
+    
+    /* Skip public prefix */
+    if (strncmp(line, "public ", 7) == 0) {
+        i = 7;
+    }
+    
+    /* Extract return type */
+    while (line[i] && line[i] != ' ' && line[i] != '\t' && j < 31) {
+        return_type[j++] = line[i++];
+    }
+    return_type[j] = '\0';
+    
+    /* Skip whitespace */
+    while (line[i] == ' ' || line[i] == '\t') i++;
+    
+    /* Extract method name */
+    j = 0;
+    while (line[i] && line[i] != '(' && line[i] != ' ' && line[i] != '\t' && j < 63) {
+        method_name[j++] = line[i++];
+    }
+    method_name[j] = '\0';
+    
+    /* Skip ( */
+    if (line[i] == '(') i++;
+    
+    /* Extract params */
+    j = 0;
+    while (line[i] && line[i] != ')' && j < 255) {
+        params[j++] = line[i++];
+    }
+    params[j] = '\0';
+    
+    /* Check if this is a constructor (method name == class name) */
+    bool is_constructor = (strcmp(method_name, class_name) == 0);
+    
+    /* Convert return type */
+    const char* c_return_type = get_c_type(return_type);
+    
+    /* Build C function signature */
     translator_write_indent(translator);
-    fprintf(translator->output, "/* Method: %s */\n", line);
+    
+    if (is_constructor) {
+        /* Constructor: ClassName* ClassName_new(params) */
+        fprintf(translator->output, "%s* %s_new(%s* self", class_name, class_name, class_name);
+        
+        /* Add params if any */
+        if (strlen(params) > 0) {
+            /* Parse and convert params */
+            char param_copy[256];
+            strncpy(param_copy, params, sizeof(param_copy) - 1);
+            param_copy[sizeof(param_copy) - 1] = '\0';
+            
+            char* token = strtok(param_copy, ",");
+            while (token) {
+                /* Trim whitespace */
+                while (*token == ' ' || *token == '\t') token++;
+                
+                /* Parse type and name */
+                char p_type[32] = {0};
+                char p_name[32] = {0};
+                int k = 0, l = 0;
+                
+                /* Extract type */
+                while (token[k] && token[k] != ' ' && token[k] != '\t' && l < 31) {
+                    p_type[l++] = token[k++];
+                }
+                p_type[l] = '\0';
+                
+                /* Skip whitespace */
+                while (token[k] == ' ' || token[k] == '\t') k++;
+                
+                /* Extract name */
+                l = 0;
+                while (token[k] && token[k] != ' ' && token[k] != '\t' && token[k] != ',' && l < 31) {
+                    p_name[l++] = token[k++];
+                }
+                p_name[l] = '\0';
+                
+                /* Convert type */
+                const char* c_type = get_c_type(p_type);
+                
+                /* Add param */
+                fprintf(translator->output, ", %s %s", c_type, p_name);
+                
+                token = strtok(NULL, ",");
+            }
+        }
+        
+        fprintf(translator->output, ") {\n");
+    } else {
+        /* Regular method: return_type ClassName_methodName(ClassName* self, params) */
+        fprintf(translator->output, "%s %s_%s(%s* self", c_return_type, class_name, method_name, class_name);
+        
+        /* Add params if any */
+        if (strlen(params) > 0) {
+            /* Parse and convert params */
+            char param_copy[256];
+            strncpy(param_copy, params, sizeof(param_copy) - 1);
+            param_copy[sizeof(param_copy) - 1] = '\0';
+            
+            char* token = strtok(param_copy, ",");
+            while (token) {
+                /* Trim whitespace */
+                while (*token == ' ' || *token == '\t') token++;
+                
+                /* Parse type and name */
+                char p_type[32] = {0};
+                char p_name[32] = {0};
+                int k = 0, l = 0;
+                
+                /* Extract type */
+                while (token[k] && token[k] != ' ' && token[k] != '\t' && l < 31) {
+                    p_type[l++] = token[k++];
+                }
+                p_type[l] = '\0';
+                
+                /* Skip whitespace */
+                while (token[k] == ' ' || token[k] == '\t') k++;
+                
+                /* Extract name */
+                l = 0;
+                while (token[k] && token[k] != ' ' && token[k] != '\t' && token[k] != ',' && l < 31) {
+                    p_name[l++] = token[k++];
+                }
+                p_name[l] = '\0';
+                
+                /* Convert type */
+                const char* c_type = get_c_type(p_type);
+                
+                /* Add param */
+                fprintf(translator->output, ", %s %s", c_type, p_name);
+                
+                token = strtok(NULL, ",");
+            }
+        }
+        
+        fprintf(translator->output, ") {\n");
+    }
+    
+    translator->indent_level++;
 }
 
 /* Translate class definition */
@@ -845,10 +986,8 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
             }
             /* Check if it's a method definition */
             else if (translator_is_method_definition(trimmed)) {
-                /* For now, output method as comment */
-                /* TODO: Full method translation with self parameter */
-                translator_write_indent(translator);
-                fprintf(translator->output, "/* Method: %s */\n", trimmed);
+                /* Translate method to C function */
+                translator_translate_method(translator, trimmed, class_name);
             }
             
             body_line = strtok_r(NULL, "\n", &saveptr);
