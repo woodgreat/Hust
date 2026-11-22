@@ -2918,6 +2918,8 @@ static void translator_translate_for(Translator* translator, const char* line) {
             snprintf(c_init, sizeof(c_init), "int32_t %s", init_trim + 4);
         } else if (strncmp(init_trim, "i64 ", 4) == 0) {
             snprintf(c_init, sizeof(c_init), "int64_t %s", init_trim + 4);
+        } else if (strncmp(init_trim, "i16 ", 4) == 0) {
+            snprintf(c_init, sizeof(c_init), "int16_t %s", init_trim + 4);
         } else if (strncmp(init_trim, "f32 ", 4) == 0) {
             snprintf(c_init, sizeof(c_init), "float %s", init_trim + 4);
         } else if (strncmp(init_trim, "f64 ", 4) == 0) {
@@ -2931,9 +2933,38 @@ static void translator_translate_for(Translator* translator, const char* line) {
         }
     }
     
+    /* Clean up condition: remove outer parens if they wrap the whole condition */
+    char c_condition[256] = {0};
+    strncpy(c_condition, cond_trim, sizeof(c_condition) - 1);
+    
+    /* Simple approach: just copy condition as-is, C compiler can handle extra parens */
+    /* The issue is unbalanced parens from parsing, so let's fix that */
+    size_t cond_len = strlen(c_condition);
+    
+    /* Count open and close parens */
+    int open_parens = 0;
+    int close_parens = 0;
+    for (size_t k = 0; k < cond_len; k++) {
+        if (c_condition[k] == '(') open_parens++;
+        else if (c_condition[k] == ')') close_parens++;
+    }
+    
+    /* Add missing close parens */
+    while (open_parens > close_parens && strlen(c_condition) < sizeof(c_condition) - 2) {
+        strcat(c_condition, ")");
+        close_parens++;
+    }
+    
+    /* Remove extra close parens at the end */
+    while (close_parens > open_parens && cond_len > 0 && c_condition[cond_len - 1] == ')') {
+        c_condition[cond_len - 1] = '\0';
+        cond_len--;
+        close_parens--;
+    }
+    
     /* Output for loop */
     translator_write_indent(translator);
-    fprintf(translator->output, "for (%s; %s; %s) {\n", c_init, cond_trim, incr_trim);
+    fprintf(translator->output, "for (%s; %s; %s) {\n", c_init, c_condition, incr_trim);
     translator->indent_level++;
 }
 
