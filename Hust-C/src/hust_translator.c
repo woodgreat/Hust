@@ -355,6 +355,49 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     /* Get C type */
     const char* c_type = get_c_type(base_type);
     
+    /* Check for array element access in value: type var = arr[i]; */
+    if (strchr(rest, '[') && strchr(rest, ']') && !strstr(rest, "[]")) {
+        /* Extract variable name */
+        char var_name[64] = {0};
+        int k = 0;
+        while (rest[k] && rest[k] != ' ' && rest[k] != '\t' && rest[k] != '=' && rest[k] != ';' && k < 63) {
+            var_name[k] = rest[k];
+            k++;
+        }
+        var_name[k] = '\0';
+        
+        /* Find = and extract array access */
+        const char* eq = strchr(rest, '=');
+        if (eq) {
+            const char* val_start = eq + 1;
+            while (*val_start == ' ' || *val_start == '\t') val_start++;
+            
+            /* Extract array name and index from arr[i] */
+            char arr_name[64] = {0};
+            char index[64] = {0};
+            int j = 0;
+            while (val_start[j] && val_start[j] != '[' && j < 63) {
+                arr_name[j] = val_start[j];
+                j++;
+            }
+            arr_name[j] = '\0';
+            
+            /* Skip [ */
+            if (val_start[j] == '[') j++;
+            
+            /* Extract index */
+            int idx = 0;
+            while (val_start[j] && val_start[j] != ']' && idx < 63) {
+                index[idx++] = val_start[j++];
+            }
+            index[idx] = '\0';
+            
+            /* Output: type var = arr.data[index]; */
+            fprintf(translator->output, "%s %s = %s.data[%s];\n", c_type, var_name, arr_name, index);
+            return;
+        }
+    }
+    
     /* Output C declaration */
     translator_write_indent(translator);
     if (is_dynamic_array) {
@@ -1902,13 +1945,13 @@ static void translator_translate_array_length(Translator* translator, const char
         }
         left[k] = '\0';
         
-        /* Output: sizeof(arr)/sizeof(arr[0]) */
+        /* Output: HustVec_i32_len(&arr) for dynamic arrays */
         translator_write_indent(translator);
-        fprintf(translator->output, "%s = sizeof(%s)/sizeof(%s[0]);\n", left, arr_name, arr_name);
+        fprintf(translator->output, "%s = HustVec_i32_len(&%s);\n", left, arr_name);
     } else {
         /* Just output the expression */
         translator_write_indent(translator);
-        fprintf(translator->output, "sizeof(%s)/sizeof(%s[0])\n", arr_name, arr_name);
+        fprintf(translator->output, "HustVec_i32_len(&%s)\n", arr_name);
     }
 }
 
@@ -2553,6 +2596,18 @@ static void translator_translate_method_call_assignment(Translator* translator, 
     strncpy(method_call, method_start, sizeof(method_call) - 1);
     method_call[sizeof(method_call) - 1] = '\0';
     
+    /* Check for array length method call: arr.len() */
+    if (strstr(method_call, "len()") || strstr(method_call, "length()")) {
+        /* Output: type result = HustVec_i32_len(&arr); */
+        translator_write_indent(translator);
+        if (strlen(result_type) > 0) {
+            fprintf(translator->output, "%s %s = HustVec_i32_len(&%s);\n", result_type, var_trim, obj_trim);
+        } else {
+            fprintf(translator->output, "%s = HustVec_i32_len(&%s);\n", var_trim, obj_trim);
+        }
+        return;
+    }
+    
     /* Convert method call to C function call */
     char c_call[512] = {0};
     translator_convert_method_call_advanced(obj_trim, NULL, method_call, c_call, sizeof(c_call));
@@ -2770,9 +2825,6 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
         return;
     }
     
-    /* BINARY SEARCH DEBUG POINT 2: Before array length */
-    fprintf(stderr, "DEBUG: before array length check: '%s'\n", line);
-    
     /* Check for array length method call */
     if (translator_is_array_length_call(line)) {
         translator_translate_array_length(translator, line);
@@ -2787,8 +2839,77 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     
     /* Check for array element access (arr[i]) */
     if (strstr(line, "[") && strstr(line, "]") && !strstr(line, "[]")) {
-        fprintf(stderr, "DEBUG: array element access detected: '%s'\n", line);
-        /* TODO: Translate arr[i] to arr.data[i] */
+        /* Extract array name and index from arr[i] */
+        char arr_name[64] = {0};
+        char index[64] = {0};
+        const char* p = line;
+        
+        /* Skip leading whitespace */
+        while (*p == ' ' || *p == '\t') p++;
+        
+        /* Extract array name (before [) */
+        int j = 0;
+        while (*p && *p != '[' && *p != ' ' && *p != '\t' && j < 63) {
+            arr_name[j++] = *p++;
+        }
+        arr_name[j] = '\0';
+        
+        /* Skip [ */
+        if (*p == '[') p++;
+        
+        /* Extract index (until ]) */
+        j = 0;
+        while (*p && *p != ']' && j < 63) {
+            index[j++] = *p++;
+        }
+        index[j] = '\0';
+        
+        /* Check if this is an assignment: x = arr[i]; */
+        const char* eq = strchr(line, '=');
+        if (eq) {
+            /* Extract left side */
+            char left[64] = {0};
+            const char* left_start = line;
+            while (*left_start == ' ' || *left_start == '\t') left_start++;
+            
+            int k = 0;
+            while (left_start < eq && *left_start != ' ' && *left_start != '\t' && k < 63) {
+                left[k++] = *left_start++;
+            }
+            left[k] = '\0';
+            
+            /* Extract type if present */
+            char left_type[32] = {0};
+            if (strncmp(left, "i32 ", 4) == 0) {
+                strncpy(left_type, "int32_t", sizeof(left_type) - 1);
+                memmove(left, left + 4, strlen(left + 4) + 1);
+            } else if (strncmp(left, "i64 ", 4) == 0) {
+                strncpy(left_type, "int64_t", sizeof(left_type) - 1);
+                memmove(left, left + 4, strlen(left + 4) + 1);
+            } else if (strncmp(left, "f32 ", 4) == 0) {
+                strncpy(left_type, "float", sizeof(left_type) - 1);
+                memmove(left, left + 4, strlen(left + 4) + 1);
+            } else if (strncmp(left, "f64 ", 4) == 0) {
+                strncpy(left_type, "double", sizeof(left_type) - 1);
+                memmove(left, left + 4, strlen(left + 4) + 1);
+            } else if (strncmp(left, "bool ", 5) == 0) {
+                strncpy(left_type, "bool", sizeof(left_type) - 1);
+                memmove(left, left + 5, strlen(left + 5) + 1);
+            }
+            
+            /* Output: type result = arr.data[index]; */
+            translator_write_indent(translator);
+            if (strlen(left_type) > 0) {
+                fprintf(translator->output, "%s %s = %s.data[%s];\n", left_type, left, arr_name, index);
+            } else {
+                fprintf(translator->output, "%s = %s.data[%s];\n", left, arr_name, index);
+            }
+        } else {
+            /* Just output the expression */
+            translator_write_indent(translator);
+            fprintf(translator->output, "%s.data[%s]\n", arr_name, index);
+        }
+        return;
     }
     
     /* Check for string declaration */
