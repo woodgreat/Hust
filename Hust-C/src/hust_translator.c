@@ -782,18 +782,26 @@ static bool translator_is_method_definition(const char* line) {
         p += 7;
     }
     
-    /* Check for type */
-    if (strncmp(p, "i32 ", 4) == 0 ||
-        strncmp(p, "i64 ", 4) == 0 ||
-        strncmp(p, "f32 ", 4) == 0 ||
-        strncmp(p, "f64 ", 4) == 0 ||
-        strncmp(p, "bool ", 5) == 0 ||
-        strncmp(p, "char ", 5) == 0 ||
-        strncmp(p, "String ", 7) == 0 ||
-        strncmp(p, "void ", 5) == 0) {
-        /* Look for ( after method name */
-        const char* paren = strchr(p, '(');
-        if (paren) {
+    /* Check for constructor pattern: ClassName(...) */
+    /* Constructor has no return type, just ClassName(params) */
+    const char* paren = strchr(p, '(');
+    if (paren) {
+        /* Check if there's a type before the method name */
+        const char* space = strchr(p, ' ');
+        if (space && space < paren) {
+            /* Has return type - check if it's a known type */
+            if (strncmp(p, "i32 ", 4) == 0 ||
+                strncmp(p, "i64 ", 4) == 0 ||
+                strncmp(p, "f32 ", 4) == 0 ||
+                strncmp(p, "f64 ", 4) == 0 ||
+                strncmp(p, "bool ", 5) == 0 ||
+                strncmp(p, "char ", 5) == 0 ||
+                strncmp(p, "String ", 7) == 0 ||
+                strncmp(p, "void ", 5) == 0) {
+                return true;
+            }
+        } else {
+            /* No return type - this is a constructor */
             return true;
         }
     }
@@ -843,7 +851,8 @@ static void translator_translate_field(Translator* translator, const char* line,
 static void translator_translate_method(Translator* translator, const char* line, const char* class_name) {
     if (!translator || !line || !class_name) return;
     
-    /* Parse method signature: [public] return_type method_name(params) { */
+    /* Parse method signature: [public] [return_type] method_name(params) { */
+    /* Constructor: [public] ClassName(params) { */
     char return_type[32] = {0};
     char method_name[64] = {0};
     char params[256] = {0};
@@ -854,21 +863,56 @@ static void translator_translate_method(Translator* translator, const char* line
         i = 7;
     }
     
-    /* Extract return type */
-    while (line[i] && line[i] != ' ' && line[i] != '\t' && j < 31) {
-        return_type[j++] = line[i++];
-    }
-    return_type[j] = '\0';
+    /* Check if this is a constructor: ClassName(...) with no return type */
+    /* Look ahead to see if there's a space before ( */
+    const char* paren = strchr(line + i, '(');
+    const char* space = strchr(line + i, ' ');
     
-    /* Skip whitespace */
-    while (line[i] == ' ' || line[i] == '\t') i++;
-    
-    /* Extract method name */
-    j = 0;
-    while (line[i] && line[i] != '(' && line[i] != ' ' && line[i] != '\t' && j < 63) {
-        method_name[j++] = line[i++];
+    bool is_constructor = false;
+    if (paren && (!space || space > paren)) {
+        /* No space before ( - this is constructor: ClassName(...) */
+        is_constructor = true;
+    } else if (paren && space && space < paren) {
+        /* Check if the word before ( is the class name (constructor) or a type */
+        char first_word[64] = {0};
+        const char* p = line + i;
+        j = 0;
+        while (*p && *p != ' ' && *p != '\t' && *p != '(' && j < 63) {
+            first_word[j++] = *p++;
+        }
+        first_word[j] = '\0';
+        
+        /* If first word is class name, it's a constructor */
+        if (strcmp(first_word, class_name) == 0) {
+            is_constructor = true;
+        }
     }
-    method_name[j] = '\0';
+    
+    if (is_constructor) {
+        /* Constructor: no return type, method name is class name */
+        strcpy(return_type, "");  /* Empty return type for constructor */
+        strcpy(method_name, class_name);
+        
+        /* Skip to ( */
+        while (line[i] && line[i] != '(') i++;
+    } else {
+        /* Regular method: extract return type */
+        j = 0;  /* Reset j for return_type extraction */
+        while (line[i] && line[i] != ' ' && line[i] != '\t' && j < 31) {
+            return_type[j++] = line[i++];
+        }
+        return_type[j] = '\0';
+        
+        /* Skip whitespace */
+        while (line[i] == ' ' || line[i] == '\t') i++;
+        
+        /* Extract method name */
+        j = 0;  /* Reset j for method_name extraction */
+        while (line[i] && line[i] != '(' && line[i] != ' ' && line[i] != '\t' && j < 63) {
+            method_name[j++] = line[i++];
+        }
+        method_name[j] = '\0';
+    }
     
     /* Skip ( */
     if (line[i] == '(') i++;
@@ -880,9 +924,6 @@ static void translator_translate_method(Translator* translator, const char* line
     }
     params[j] = '\0';
     
-    /* Check if this is a constructor (method name == class name) */
-    bool is_constructor = (strcmp(method_name, class_name) == 0);
-    
     /* Convert return type */
     const char* c_return_type = get_c_type(return_type);
     
@@ -890,8 +931,8 @@ static void translator_translate_method(Translator* translator, const char* line
     translator_write_indent(translator);
     
     if (is_constructor) {
-        /* Constructor: ClassName* ClassName_new(params) */
-        fprintf(translator->output, "%s* %s_new(%s* self", class_name, class_name, class_name);
+        /* Constructor: ClassName* ClassName_new(params) - no self param */
+        fprintf(translator->output, "%s* %s_new(", class_name, class_name);
         
         /* Add params if any */
         if (strlen(params) > 0) {
@@ -900,37 +941,53 @@ static void translator_translate_method(Translator* translator, const char* line
             strncpy(param_copy, params, sizeof(param_copy) - 1);
             param_copy[sizeof(param_copy) - 1] = '\0';
             
+            /* Remove trailing ) if present */
+            char* rparen = strrchr(param_copy, ')');
+            if (rparen) *rparen = '\0';
+            
+            /* Remove trailing { if present */
+            char* brace = strrchr(param_copy, '{');
+            if (brace) *brace = '\0';
+            
             char* token = strtok(param_copy, ",");
+            bool first = true;
             while (token) {
                 /* Trim whitespace */
                 while (*token == ' ' || *token == '\t') token++;
                 
-                /* Parse type and name */
-                char p_type[32] = {0};
-                char p_name[32] = {0};
-                int k = 0, l = 0;
-                
-                /* Extract type */
-                while (token[k] && token[k] != ' ' && token[k] != '\t' && l < 31) {
-                    p_type[l++] = token[k++];
+                if (strlen(token) > 0) {
+                    if (!first) {
+                        fprintf(translator->output, ", ");
+                    }
+                    
+                    /* Parse type and name */
+                    char p_type[32] = {0};
+                    char p_name[32] = {0};
+                    int k = 0, l = 0;
+                    
+                    /* Extract type */
+                    while (token[k] && token[k] != ' ' && token[k] != '\t' && l < 31) {
+                        p_type[l++] = token[k++];
+                    }
+                    p_type[l] = '\0';
+                    
+                    /* Skip whitespace */
+                    while (token[k] == ' ' || token[k] == '\t') k++;
+                    
+                    /* Extract name */
+                    l = 0;
+                    while (token[k] && token[k] != ' ' && token[k] != '\t' && token[k] != ',' && l < 31) {
+                        p_name[l++] = token[k++];
+                    }
+                    p_name[l] = '\0';
+                    
+                    /* Convert type */
+                    const char* c_type = get_c_type(p_type);
+                    
+                    /* Add param */
+                    fprintf(translator->output, "%s %s", c_type, p_name);
+                    first = false;
                 }
-                p_type[l] = '\0';
-                
-                /* Skip whitespace */
-                while (token[k] == ' ' || token[k] == '\t') k++;
-                
-                /* Extract name */
-                l = 0;
-                while (token[k] && token[k] != ' ' && token[k] != '\t' && token[k] != ',' && l < 31) {
-                    p_name[l++] = token[k++];
-                }
-                p_name[l] = '\0';
-                
-                /* Convert type */
-                const char* c_type = get_c_type(p_type);
-                
-                /* Add param */
-                fprintf(translator->output, ", %s %s", c_type, p_name);
                 
                 token = strtok(NULL, ",");
             }
