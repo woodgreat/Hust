@@ -160,7 +160,8 @@ static bool parser_is_control_flow(const char* line) {
     return (starts_with_keyword(line, "if") ||
             starts_with_keyword(line, "while") ||
             starts_with_keyword(line, "for") ||
-            starts_with_keyword(line, "else"));
+            starts_with_keyword(line, "else") ||
+            starts_with_keyword(line, "match"));
 }
 
 /* Helper: Check if line is a return statement */
@@ -289,6 +290,26 @@ NodeType parser_detect_node_type_v2(const char* line) {
     /* Check for control flow */
     if (parser_is_control_flow(stripped)) {
         return NODE_CONTROL_FLOW;
+    }
+    
+    /* Check for match case (contains : and looks like a case pattern) */
+    if (strchr(stripped, ':') && !strchr(stripped, '=')) {
+        /* Check if it's a match case (not a regular statement with :) */
+        const char* colon = strchr(stripped, ':');
+        if (colon && colon != stripped) {
+            /* Check if line starts with a case pattern (not a type keyword) */
+            if (strncmp(stripped, "i32 ", 4) != 0 &&
+                strncmp(stripped, "i64 ", 4) != 0 &&
+                strncmp(stripped, "f32 ", 4) != 0 &&
+                strncmp(stripped, "f64 ", 4) != 0 &&
+                strncmp(stripped, "bool ", 5) != 0 &&
+                strncmp(stripped, "char ", 5) != 0 &&
+                strncmp(stripped, "String ", 7) != 0 &&
+                strncmp(stripped, "void ", 5) != 0 &&
+                strncmp(stripped, "return ", 7) != 0) {
+                return NODE_MATCH_CASE;
+            }
+        }
     }
     
     /* Check for return */

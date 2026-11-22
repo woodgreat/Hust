@@ -33,6 +33,7 @@ typedef enum {
     NODE_CLASS_DEF,     /* Class definition */
     NODE_METHOD_DEF,    /* Method definition */
     NODE_ENUM_DEF,      /* Enum definition */
+    NODE_MATCH_CASE,    /* Match case (pattern : statement) */
     NODE_UNKNOWN        /* Unknown/placeholder */
 } NodeType;
 

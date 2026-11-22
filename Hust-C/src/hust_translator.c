@@ -55,6 +55,10 @@ int translator_translate(Translator* translator) {
 }
 
 /* Translate a single AST node */
+/* Forward declarations for match translation helpers */
+static void translator_translate_match_case(Translator* translator, const char* line);
+static void translator_translate_match_case_body(Translator* translator, const char* line);
+
 void translator_translate_node(Translator* translator, ASTNode* node) {
     if (!translator || !node) return;
     
@@ -76,6 +80,10 @@ void translator_translate_node(Translator* translator, ASTNode* node) {
             break;
         case NODE_ENUM_DEF:
             translator_translate_enum(translator, node);
+            break;
+        case NODE_MATCH_CASE:
+            translator_translate_match_case(translator, node->value);
+            translator_translate_match_case_body(translator, node->value);
             break;
         case NODE_RETURN:
         case NODE_STATEMENT:
@@ -812,6 +820,154 @@ static bool translator_is_method_definition(const char* line) {
     }
     
     return false;
+}
+
+/* Helper: Translate match statement to switch */
+static void translator_translate_match(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Parse: match expr { */
+    char expr[128] = {0};
+    const char* p = line + 5;  /* Skip "match" */
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract expression until { */
+    int j = 0;
+    while (*p && *p != '{' && j < 127) {
+        expr[j++] = *p++;
+    }
+    expr[j] = '\0';
+    
+    /* Trim trailing whitespace from expr */
+    char* end = expr + strlen(expr) - 1;
+    while (end > expr && (*end == ' ' || *end == '\t')) {
+        *end-- = '\0';
+    }
+    
+    /* Output switch statement */
+    translator_write_indent(translator);
+    fprintf(translator->output, "switch (%s) {\n", expr);
+    translator->indent_level++;
+}
+
+/* Helper: Translate match case to switch case */
+static void translator_translate_match_case(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Parse: Pattern : statement */
+    char pattern[128] = {0};
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract pattern until : */
+    int j = 0;
+    while (*p && *p != ':' && j < 127) {
+        pattern[j++] = *p++;
+    }
+    pattern[j] = '\0';
+    
+    /* Trim trailing whitespace from pattern */
+    char* end = pattern + strlen(pattern) - 1;
+    while (end > pattern && (*end == ' ' || *end == '\t')) {
+        *end-- = '\0';
+    }
+    
+    /* Convert enum pattern (Color.Red) to C enum value (Color_Red) */
+    char c_pattern[128] = {0};
+    const char* dot = strstr(pattern, ".");
+    if (dot) {
+        /* Replace . with _ */
+        strncpy(c_pattern, pattern, dot - pattern);
+        strcat(c_pattern, "_");
+        strcat(c_pattern, dot + 1);
+    } else {
+        strcpy(c_pattern, pattern);
+    }
+    
+    /* Check for default case */
+    if (strcmp(c_pattern, "default") == 0) {
+        translator_write_indent(translator);
+        fprintf(translator->output, "default:\n");
+    } else {
+        translator_write_indent(translator);
+        fprintf(translator->output, "case %s:\n", c_pattern);
+    }
+    translator->indent_level++;
+}
+
+/* Helper: Translate match case body (statement after :) */
+static void translator_translate_match_case_body(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    /* Find : in line */
+    const char* colon = strchr(line, ':');
+    if (!colon) return;
+    
+    /* Skip : and whitespace */
+    colon++;
+    while (*colon == ' ' || *colon == '\t') colon++;
+    
+    /* Output the statement (e.g., println!("Red");) */
+    translator_write_indent(translator);
+    fprintf(translator->output, "%s\n", colon);
+    
+    /* Add break; after case body */
+    translator->indent_level--;
+    translator_write_indent(translator);
+    fprintf(translator->output, "break;\n");
+}
+
+/* Helper: Close match/switch block */
+static void translator_translate_match_end(Translator* translator) {
+    if (!translator) return;
+    translator->indent_level--;
+    translator_write_indent(translator);
+    fprintf(translator->output, "}\n");
+}
+
+/* Helper: Check if line is a match case */
+static bool translator_is_match_case(const char* line) {
+    if (!line) return false;
+    
+    /* Match case pattern: something : something */
+    const char* colon = strchr(line, ':');
+    if (!colon) return false;
+    
+    /* Check if it looks like a case (not a regular statement with :) */
+    /* Case patterns: Color.Red, default, Number, etc. */
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Should not start with common statement keywords */
+    if (strncmp(p, "i32 ", 4) == 0 ||
+        strncmp(p, "i64 ", 4) == 0 ||
+        strncmp(p, "f32 ", 4) == 0 ||
+        strncmp(p, "f64 ", 4) == 0 ||
+        strncmp(p, "bool ", 5) == 0 ||
+        strncmp(p, "char ", 5) == 0 ||
+        strncmp(p, "String ", 7) == 0 ||
+        strncmp(p, "void ", 5) == 0 ||
+        strncmp(p, "return ", 7) == 0) {
+        return false;
+    }
+    
+    return true;
+}
+
+/* Helper: Check if line is match statement */
+static bool translator_is_match_statement(const char* line) {
+    if (!line) return false;
+    return (strncmp(line, "match ", 6) == 0);
+}
+
+/* Helper: Check if line is match end (closing brace) */
+static bool translator_is_match_end(const char* line) {
+    if (!line) return false;
+    
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    return (*p == '}' && (p[1] == '\0' || p[1] == ' ' || p[1] == '\t' || p[1] == ';'));
 }
 
 /* Helper: Translate class field to C struct member */
@@ -2802,7 +2958,9 @@ void translator_translate_control_flow(Translator* translator, ASTNode* node) {
     }
     
     /* Dispatch to specific control flow translators */
-    if (strncmp(line, "if", 2) == 0) {
+    if (strncmp(line, "match ", 6) == 0) {
+        translator_translate_match(translator, line);
+    } else if (strncmp(line, "if", 2) == 0) {
         translator_translate_if(translator, line);
     } else if (strncmp(line, "while", 5) == 0) {
         translator_translate_while(translator, line);
