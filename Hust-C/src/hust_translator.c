@@ -1406,17 +1406,21 @@ void translator_translate_enum(Translator* translator, ASTNode* node) {
     /* Parse enum body and generate variants */
     char* body = strdup(node->value);
     if (body) {
+        /* Debug: print raw node value */
+        fprintf(stderr, "DEBUG: node->value = '%s'\n", node->value);
+        
         char* saveptr = NULL;
         char* body_line = strtok_r(body, "\n", &saveptr);
         bool first_line = true;
-        bool first_variant = true;
         
-        /* Start typedef enum */
-        translator_write_indent(translator);
-        fprintf(translator->output, "typedef enum {\n");
-        translator->indent_level++;
+        /* Collect all variant names first */
+        char variants[64][64] = {0};  /* Max 64 variants, 64 chars each */
+        int variant_count = 0;
         
-        while (body_line) {
+        while (body_line && variant_count < 64) {
+            /* Debug: print each line */
+            fprintf(stderr, "DEBUG: line = '%s'\n", body_line);
+            
             /* Skip first line (enum declaration) */
             if (first_line) {
                 first_line = false;
@@ -1447,48 +1451,36 @@ void translator_translate_enum(Translator* translator, ASTNode* node) {
             }
             variant_name[k] = '\0';
             
-            /* Skip trailing comma and whitespace */
-            while (trimmed[i] == ',' || trimmed[i] == ' ' || trimmed[i] == '\t') i++;
-            
-            /* Output variant with enum prefix */
+            /* Store variant if valid */
             if (strlen(variant_name) > 0) {
-                translator_write_indent(translator);
-                if (first_variant) {
-                    fprintf(translator->output, "%s_%s = 0", enum_name, variant_name);
-                    first_variant = false;
-                } else {
-                    fprintf(translator->output, "%s_%s", enum_name, variant_name);
-                }
-                
-                /* Check if there are more variants (next non-empty line) */
-                char* next = strtok_r(NULL, "\n", &saveptr);
-                bool has_more = false;
-                if (next) {
-                    char* next_trimmed = next;
-                    while (*next_trimmed == ' ' || *next_trimmed == '\t') next_trimmed++;
-                    if (*next_trimmed != '\0' && *next_trimmed != '}') {
-                        has_more = true;
-                    }
-                    /* Put back for next iteration */
-                    /* Note: strtok_r doesn't support putback, so we use a different approach */
-                }
-                
-                if (has_more) {
-                    fprintf(translator->output, ",\n");
-                } else {
-                    fprintf(translator->output, "\n");
-                }
-                
-                /* If no more variants, break */
-                if (!has_more) {
-                    break;
-                }
-                
-                body_line = next;
-                continue;
+                strncpy(variants[variant_count], variant_name, 63);
+                variants[variant_count][63] = '\0';
+                variant_count++;
             }
             
             body_line = strtok_r(NULL, "\n", &saveptr);
+        }
+        
+        /* Output typedef enum with all variants */
+        translator_write_indent(translator);
+        fprintf(translator->output, "typedef enum {\n");
+        translator->indent_level++;
+        
+        for (int v = 0; v < variant_count; v++) {
+            translator_write_indent(translator);
+            if (v == 0) {
+                /* First variant gets explicit value 0 */
+                fprintf(translator->output, "%s_%s = 0", enum_name, variants[v]);
+            } else {
+                fprintf(translator->output, "%s_%s", enum_name, variants[v]);
+            }
+            
+            /* Add comma if not last variant */
+            if (v < variant_count - 1) {
+                fprintf(translator->output, ",\n");
+            } else {
+                fprintf(translator->output, "\n");
+            }
         }
         
         translator->indent_level--;
