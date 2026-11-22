@@ -1,0 +1,6 @@
+// B4: usize variable declaration
+void main() {
+    usize head = 0;
+    usize tail = 10;
+    println!("head = {}, tail = {}", head, tail);
+}

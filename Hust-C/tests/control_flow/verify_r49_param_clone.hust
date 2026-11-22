@@ -1,0 +1,56 @@
+// verify_r49_param_clone.hust - r49 对象传参默认 clone 语义验证
+// 规则（r49, V0.1.35）：对象赋值/传参默认 clone，显式 .moveit() 才 move
+// 本测试验证：类对象作为函数实参后，调用方变量仍可继续使用
+
+class Counter {
+    i32 n;
+
+    public Counter() {
+        this.n = 0;
+    }
+
+    public void bump() {
+        this.n = this.n + 1;
+    }
+
+    public readonly i32 value() {
+        return this.n;
+    }
+}
+
+// 接收方按值拿一个副本
+i32 peek(Counter c) {
+    return c.value();
+}
+
+// 接收方修改自己的副本，不应影响调用方
+i32 peekAndBump(Counter c) {
+    c.bump();
+    return c.value();
+}
+
+void main() {
+    Counter c = new Counter();
+    c.bump();
+
+    i32 v1 = peek(c);
+    // 若 c 已被 move 走，下面这行会编译失败（E0382）
+    c.bump();
+    i32 v2 = peek(c);
+
+    // 副本修改不影响原件
+    i32 v3 = peekAndBump(c);
+    i32 v4 = peek(c);
+
+    println!("v1={} v2={} v3={} v4={}", v1, v2, v3, v4);
+    if (v1 == 1 && v2 == 2) {
+        println!("  [PASS] 传参后调用方变量仍可用");
+    } else {
+        println!("  [FAIL] v1/v2 期望 1/2，实际 {}/{}", v1, v2);
+    }
+    if (v3 == 3 && v4 == 2) {
+        println!("  [PASS] 被调方修改副本不影响原件");
+    } else {
+        println!("  [FAIL] v3/v4 期望 3/2，实际 {}/{}", v3, v4);
+    }
+}

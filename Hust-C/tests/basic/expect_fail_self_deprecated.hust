@@ -1,0 +1,21 @@
+// expect_fail_self_deprecated.hust — 负向测试：已弃用的 self 关键字必须被拒绝编译
+// This should trigger a friendly error message
+
+class Point {
+    i32 x;
+    i32 y;
+    
+    public Point(i32 x, i32 y) {
+        this.x = x;
+        this.y = y;
+    }
+    
+    public i32 get_x() {
+        return self.x;  // ❌ Deprecated: should use 'this' instead
+    }
+}
+
+void main() {
+    Point p = new Point(10, 20);
+    println!("x = {}", p.get_x());
+}

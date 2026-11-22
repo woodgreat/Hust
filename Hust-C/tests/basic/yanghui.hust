@@ -1,0 +1,25 @@
+void main() {
+    i32 n = 6;
+    i32 i = 0;
+    
+    while (i < n) {
+        // Print spaces
+        i32 space = 0;
+        while (space < n - i - 1) {
+            print!("  ");
+            space = space + 1;
+        }
+        
+        // Calculate and print numbers
+        i32 num = 1;
+        i32 j = 0;
+        while (j <= i) {
+            print!("{:4}", num);
+            num = num * (i - j) / (j + 1);
+            j = j + 1;
+        }
+        
+        println!("");
+        i = i + 1;
+    }
+}

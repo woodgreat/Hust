@@ -1,0 +1,24 @@
+// Test file for Bug fixes from Dragon Shrimp's report
+
+void main() {
+    // Bug 1: const variable transpilation
+    const i32 a = 10;
+    i32 b = 20;
+
+    // Bug 2: C-style for loop (i = i + 1 style)
+    for (i32 i = 0; i < 4; i = i + 1) {
+        // body
+    }
+
+    // Bug 3: C-style for loop (i++ style)
+    for (i32 j = 0; j < 3; j++) {
+        // body
+    }
+
+    // Bug 4: Nested for loop
+    for (i32 x = 0; x < 2; x = x + 1) {
+        for (i32 y = 0; y < 2; y++) {
+            // nested body
+        }
+    }
+}

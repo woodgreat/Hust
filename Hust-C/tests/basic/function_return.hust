@@ -1,0 +1,15 @@
+i32 add(i32 a, i32 b) {
+    return a + b;
+}
+
+i32 multiply(i32 x, i32 y) {
+    return x * y;
+}
+
+void main() {
+    i32 sum = add(3, 4);
+    i32 product = multiply(5, 6);
+    
+    println!("sum: {}", sum);
+    println!("product: {}", product);
+}

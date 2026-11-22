@@ -1,0 +1,6 @@
+// B1: system namespace use statement
+use RUST.IO;
+
+void main() {
+    println!("B1 test");
+}

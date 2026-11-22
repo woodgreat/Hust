@@ -1,0 +1,9 @@
+void main() {
+    i16 count = 0;
+
+    // 测试简单的单语句更新
+    for(i16 i=0; i<5; i++) {
+        println!("i = {}, count = {}", i, count);
+        count = count + 1;
+    }
+}

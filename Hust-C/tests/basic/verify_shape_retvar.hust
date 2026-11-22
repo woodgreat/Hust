@@ -1,0 +1,17 @@
+// Shape interface with return variable name
+interface MoveGenerator {
+    public backString generate();  // backString = return variable name, type blank
+}
+
+class Level1 implements MoveGenerator {
+    public String generate() { return "L1"; }  // String fills backString
+}
+
+class Level3 implements MoveGenerator {
+    public String generate() { return "L3"; }
+}
+
+void main() {
+    MoveGenerator ai = new Level1();
+    println!("ai = {}", ai.generate());
+}

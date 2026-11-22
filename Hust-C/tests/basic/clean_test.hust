@@ -1,0 +1,6 @@
+void main() {
+    // 简单测试
+    for(i16 i=0; i<3; i++) {
+        println!("i = {}", i);
+    }
+}

@@ -1,0 +1,59 @@
+// verify_r1_replaceit.hust - Test .replaceit() method with return code
+// 2026-10-17: Verify R1 feature - array element replacement with return code
+
+public void main() {
+    // Test 1: Basic replacement with return code
+    println!("=== Test 1: Basic replacement with return code ===");
+    i32[] numbers;
+    numbers.push(10);
+    numbers.push(20);
+    numbers.push(30);
+    
+    println!("Array length: {}", numbers.len());
+    println!("Before: numbers[1] = {}", numbers[1]);
+    
+    i32 rc = numbers.replaceit(1, 99);
+    println!("Return code: {} (expected 1)", rc);
+    println!("After:  numbers[1] = {}", numbers[1]);
+    // Expected: rc=1, numbers[1]=99
+    
+    // Test 2: Out of bounds - return 0
+    println!("=== Test 2: Out of bounds returns 0 ===");
+    i32 rc2 = numbers.replaceit(10, 999);
+    println!("Return code: {} (expected 0)", rc2);
+    // Expected: rc2=0 (index 10 out of bounds)
+    
+    // Test 3: Standalone call (no return code check)
+    println!("=== Test 3: Standalone call ===");
+    println!("Before: numbers[0] = {}", numbers[0]);
+    numbers.replaceit(0, 111);
+    println!("After:  numbers[0] = {}", numbers[0]);
+    // Expected: numbers[0]=111
+    
+    // Test 4: Multiple replacements with checks
+    println!("=== Test 4: Multiple replacements with checks ===");
+    i32[] data;
+    data.push(1);
+    data.push(2);
+    data.push(3);
+    
+    i32 success_count = 0;
+    
+    i32 r1 = data.replaceit(0, 100);
+    if (r1 > 0) { success_count = success_count + 1; }
+    
+    i32 r2 = data.replaceit(1, 200);
+    if (r2 > 0) { success_count = success_count + 1; }
+    
+    i32 r3 = data.replaceit(2, 300);
+    if (r3 > 0) { success_count = success_count + 1; }
+    
+    i32 r4 = data.replaceit(3, 400);  // OOB
+    if (r4 > 0) { success_count = success_count + 1; }
+    
+    println!("Success count: {} (expected 3)", success_count);
+    println!("Data: {},{},{}", data[0], data[1], data[2]);
+    // Expected: success_count=3, data=100,200,300
+    
+    println!("=== All tests completed ===");
+}

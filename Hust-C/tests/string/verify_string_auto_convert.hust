@@ -1,0 +1,67 @@
+// verify_string_auto_convert.hust - B26: String 目标位置字面量自动转换
+// 规则：目标类型已确定为 String 时，字面量应自动变成 String，无需手写 .to_string()
+// 覆盖五项：数组 push/赋值、函数实参、类方法实参、构造器实参、字段赋值
+
+class Item {
+    String name;
+    i32 price;
+
+    public Item(String n, i32 p) {
+        this.name = n;
+        this.price = p;
+    }
+
+    public void setName(String n) {
+        this.name = n;
+    }
+
+    public readonly String getName() {
+        return this.name;
+    }
+}
+
+void greet(String who) {
+    println!("hi {}", who);
+}
+
+void main() {
+    // 1. String[] push 与下标赋值
+    String[] names = {};
+    names.push("Alice");
+    names.push("Bob");
+    names[0] = "Amy";
+    println!("names[0]={} len={}", names[0], names.len());
+    if (names.len() == 2) {
+        println!("  [PASS] String[] push 自动转换");
+    } else {
+        println!("  [FAIL] len 期望 2，实际 {}", names.len());
+    }
+
+    // 2. 函数实参
+    greet("张三");
+    println!("  [PASS] 函数实参自动转换");
+
+    // 3. 类构造器实参
+    Item it = new Item("苹果", 10);
+    if (it.getName() == "苹果" && it.price == 10) {
+        println!("  [PASS] 构造器实参自动转换");
+    } else {
+        println!("  [FAIL] 构造结果不符：{} {}", it.getName(), it.price);
+    }
+
+    // 4. 类方法实参
+    it.setName("香蕉");
+    if (it.getName() == "香蕉") {
+        println!("  [PASS] 类方法实参自动转换");
+    } else {
+        println!("  [FAIL] setName 失败：{}", it.getName());
+    }
+
+    // 5. 字段赋值右侧
+    it.name = "橙子";
+    if (it.getName() == "橙子") {
+        println!("  [PASS] 字段赋值自动转换");
+    } else {
+        println!("  [FAIL] 字段赋值失败：{}", it.getName());
+    }
+}

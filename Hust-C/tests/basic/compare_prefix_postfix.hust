@@ -1,0 +1,11 @@
+void main() {
+    // Test prefix increment
+    for(i16 i=0; i<5; ++i) {
+        println!("prefix i = {}", i);
+    }
+
+    // Test postfix increment
+    for(i16 j=0; j<5; j++) {
+        println!("postfix j = {}", j);
+    }
+}

@@ -1,0 +1,13 @@
+// Step 2: 2 params + return variable name
+interface Shape2 {
+    public areaSize area(width, height);  // 3 blanks: AreaSize, Width, Height
+}
+
+class Rect2 implements Shape2 {
+    public f64 area(f64 width, f64 height) { return width * height; }
+}
+
+void main() {
+    Shape2 s = new Rect2();
+    println!("area = {}", s.area(3.0, 4.0));
+}

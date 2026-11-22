@@ -1,0 +1,70 @@
+// Go board class test
+// 2026-10-05: Verify Hust supports OOP for Go engine
+
+class Board {
+    i32[19][19] grid;
+    i32 size;
+    
+    public Board() {
+        this.size = 19;
+        // Initialize empty board
+        for (i32 i = 0; i < 19; i = i + 1) {
+            for (i32 j = 0; j < 19; j = j + 1) {
+                this.grid[i][j] = 0;
+            }
+        }
+    }
+    
+    public bool is_valid(i32 x, i32 y) {
+        return x >= 0 && x < this.size && y >= 0 && y < this.size;
+    }
+    
+    public bool place_stone(i32 x, i32 y, i32 color) {
+        if (!this.is_valid(x, y)) {
+            return false;
+        }
+        if (this.grid[x][y] != 0) {
+            return false;
+        }
+        this.grid[x][y] = color;
+        return true;
+    }
+    
+    public i32 get(i32 x, i32 y) {
+        if (!this.is_valid(x, y)) {
+            return -1;
+        }
+        return this.grid[x][y];
+    }
+    
+    public void print_board() {
+        for (i32 i = 0; i < this.size; i = i + 1) {
+            for (i32 j = 0; j < this.size; j = j + 1) {
+                if (this.grid[i][j] == 0) {
+                    print!(". ");
+                } else if (this.grid[i][j] == 1) {
+                    print!("B ");
+                } else {
+                    print!("W ");
+                }
+            }
+            println!("");
+        }
+    }
+}
+
+void main() {
+    Board board = new Board();
+    
+    // Place some stones
+    board.place_stone(3, 3, 1);  // Black
+    board.place_stone(4, 4, 2);  // White
+    board.place_stone(3, 4, 1);  // Black
+    
+    // Test invalid placement
+    bool ok = board.place_stone(3, 3, 2);  // Already occupied
+    println!("Place on occupied: {}", ok);
+    
+    // Print board
+    board.print_board();
+}
