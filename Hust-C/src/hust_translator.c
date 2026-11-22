@@ -776,14 +776,42 @@ static bool translator_extract_class_name(const char* line, char* class_name, si
 static bool translator_is_field_declaration(const char* line) {
     if (!line) return false;
     
-    /* Check if line starts with a type */
-    return (strncmp(line, "i32 ", 4) == 0 ||
-            strncmp(line, "i64 ", 4) == 0 ||
-            strncmp(line, "f32 ", 4) == 0 ||
-            strncmp(line, "f64 ", 4) == 0 ||
-            strncmp(line, "bool ", 5) == 0 ||
-            strncmp(line, "char ", 5) == 0 ||
-            strncmp(line, "String ", 7) == 0);
+    /* Check if line starts with a type (including array types like i32[3][3]) */
+    /* Must have a space after type/array dimensions, followed by field name */
+    const char* p = line;
+    
+    /* Skip public prefix */
+    if (strncmp(p, "public ", 7) == 0) {
+        p += 7;
+    }
+    
+    /* Check for array type pattern: type[dims] fieldname */
+    /* First check base type */
+    if (strncmp(p, "i32", 3) == 0 ||
+        strncmp(p, "i64", 3) == 0 ||
+        strncmp(p, "f32", 3) == 0 ||
+        strncmp(p, "f64", 3) == 0 ||
+        strncmp(p, "bool", 4) == 0 ||
+        strncmp(p, "char", 4) == 0 ||
+        strncmp(p, "String", 6) == 0) {
+        
+        /* Skip type characters */
+        while (*p && (isalnum(*p) || *p == '_')) p++;
+        
+        /* Skip array dimensions [num][num]... */
+        while (*p == '[') {
+            p++;
+            while (*p && *p != ']') p++;
+            if (*p == ']') p++;
+        }
+        
+        /* Check if next char is space or tab (field name follows) */
+        if (*p == ' ' || *p == '\t') {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 /* Helper: Check if line is a method definition (inside class) */
@@ -1397,7 +1425,9 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
             if (translator_is_field_declaration(trimmed) && 
                 !translator_is_method_definition(trimmed)) {
                 /* Parse field: type name; or type name = value; */
+                /* Also handle array: type[dims] name; */
                 char field_type[32] = {0};
+                char field_dims[64] = {0};
                 char field_rest[256] = {0};
                 int i = 0, j = 0;
                 
@@ -1406,26 +1436,56 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
                     i = 7;
                 }
                 
-                /* Extract type */
-                while (trimmed[i] && trimmed[i] != ' ' && trimmed[i] != '\t' && j < 31) {
+                /* Extract base type (without array dims) */
+                while (trimmed[i] && (isalnum(trimmed[i]) || trimmed[i] == '_') && j < 31) {
                     field_type[j++] = trimmed[i++];
                 }
                 field_type[j] = '\0';
                 
+                /* Extract array dimensions [dim1][dim2]... */
+                j = 0;
+                while (trimmed[i] == '[') {
+                    field_dims[j++] = trimmed[i++];
+                    while (trimmed[i] && trimmed[i] != ']' && j < 63) {
+                        field_dims[j++] = trimmed[i++];
+                    }
+                    if (trimmed[i] == ']') {
+                        field_dims[j++] = trimmed[i++];
+                    }
+                }
+                field_dims[j] = '\0';
+                
                 /* Skip whitespace */
                 while (trimmed[i] == ' ' || trimmed[i] == '\t') i++;
                 
-                /* Rest of line */
+                /* Rest of line (field name, initialization, etc.) */
                 strncpy(field_rest, &trimmed[i], sizeof(field_rest) - 1);
                 field_rest[sizeof(field_rest) - 1] = '\0';
                 
                 /* Get C type */
                 const char* c_type = get_c_type(field_type);
                 
-                /* Output struct member */
+                /* Output struct member: type name[dims]; */
                 translator_write_indent(translator);
-                fprintf(translator->output, "%s %s", c_type, field_rest);
-                if (!strchr(field_rest, ';')) {
+                
+                /* Extract field name from field_rest */
+                char field_name[64] = {0};
+                int k = 0;
+                while (field_rest[k] && field_rest[k] != ' ' && field_rest[k] != '\t' && 
+                       field_rest[k] != '=' && field_rest[k] != ';' && k < 63) {
+                    field_name[k] = field_rest[k];
+                    k++;
+                }
+                field_name[k] = '\0';
+                
+                /* Output: type name[dims] rest; */
+                fprintf(translator->output, "%s %s%s", c_type, field_name, field_dims);
+                
+                /* Add rest after field name (initialization, etc.) */
+                const char* after_name = field_rest + k;
+                fprintf(translator->output, "%s", after_name);
+                
+                if (!strchr(after_name, ';')) {
                     fprintf(translator->output, ";");
                 }
                 fprintf(translator->output, "\n");
