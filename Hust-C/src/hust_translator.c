@@ -306,9 +306,10 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     
     /* Check if it's an array type like i32[5] or i32[] (dynamic) */
     char base_type[32] = {0};
-    char array_dims[64] = {0};  /* Store all dimensions like [9][9] or [] */
+    char array_dims[128] = {0};  /* Store all dimensions like [2][3][4][5] or [][] */
     bool is_array = false;
     bool is_dynamic_array = false;  /* i32[] without size */
+    int array_dim_count = 0;  /* Number of dimensions */
     
     char* bracket = strchr(type, '[');
     if (bracket) {
@@ -317,32 +318,80 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
         strncpy(base_type, type, base_len);
         base_type[base_len] = '\0';
         
-        /* Check if dynamic array: [] with no size */
-        if (bracket[1] == ']') {
-            is_dynamic_array = true;
-            strcpy(array_dims, "[]");
-        } else {
-            /* Extract all dimensions [size1][size2]... */
-            char* p = bracket;
-            int dims_len = 0;
-            while (*p == '[') {
-                char* close = strchr(p, ']');
-                if (!close) break;
-                
-                /* Copy [size] to array_dims */
-                size_t dim_size = close - p + 1;
-                if (dims_len + dim_size < (int)sizeof(array_dims) - 1) {
-                    strncpy(array_dims + dims_len, p, dim_size);
-                    dims_len += dim_size;
-                    array_dims[dims_len] = '\0';
-                }
-                
-                is_array = true;
-                p = close + 1;
+        /* Extract all dimensions [size1][size2]... or [][]... */
+        char* p = bracket;
+        int dims_len = 0;
+        while (*p == '[') {
+            char* close = strchr(p, ']');
+            if (!close) break;
+            
+            /* Copy [size] or [] to array_dims */
+            size_t dim_size = close - p + 1;
+            if (dims_len + dim_size < (int)sizeof(array_dims) - 1) {
+                strncpy(array_dims + dims_len, p, dim_size);
+                dims_len += dim_size;
+                array_dims[dims_len] = '\0';
             }
+            
+            /* Check if this dimension has a size */
+            if (dim_size == 2) {  /* [] - no size */
+                is_dynamic_array = true;
+            } else {
+                is_array = true;
+            }
+            
+            array_dim_count++;
+            p = close + 1;
         }
     } else {
         strncpy(base_type, type, sizeof(base_type) - 1);
+    }
+    
+    /* Debug: print parsed array info */
+    fprintf(stderr, "DEBUG: base_type='%s', array_dims='%s', is_array=%d, is_dynamic=%d, dims=%d\n",
+            base_type, array_dims, is_array, is_dynamic_array, array_dim_count);
+    
+    /* Check for new expression: type var = new type[size1][size2]... */
+    if (strstr(rest, "new ")) {
+        /* Extract new expression dimensions */
+        char* new_pos = strstr(rest, "new ");
+        if (new_pos) {
+            char* new_type_start = new_pos + 4;  /* Skip "new " */
+            char* new_bracket = strchr(new_type_start, '[');
+            if (new_bracket) {
+                /* Extract all dimensions from new expression */
+                char new_dims[128] = {0};
+                int new_dims_len = 0;
+                char* p = new_bracket;
+                int new_dim_count = 0;
+                while (*p == '[') {
+                    char* close = strchr(p, ']');
+                    if (!close) break;
+                    
+                    /* Copy [size] to new_dims */
+                    size_t dim_size = close - p + 1;
+                    if (new_dims_len + dim_size < (int)sizeof(new_dims) - 1) {
+                        strncpy(new_dims + new_dims_len, p, dim_size);
+                        new_dims_len += dim_size;
+                        new_dims[new_dims_len] = '\0';
+                    }
+                    
+                    new_dim_count++;
+                    p = close + 1;
+                }
+                
+                fprintf(stderr, "DEBUG: new_dims='%s', new_dim_count=%d\n", new_dims, new_dim_count);
+                
+                /* Update array_dims and array_dim_count with new expression dimensions */
+                if (new_dim_count > 0) {
+                    strcpy(array_dims, new_dims);
+                    array_dim_count = new_dim_count;
+                    is_array = true;
+                    is_dynamic_array = false;
+                    fprintf(stderr, "DEBUG: updated array_dims='%s', dims=%d\n", array_dims, array_dim_count);
+                }
+            }
+        }
     }
     
     /* Skip whitespace */
