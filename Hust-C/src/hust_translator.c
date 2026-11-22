@@ -304,9 +304,9 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     }
     type[j] = '\0';
     
-    /* Check if it's an array type like i32[5] */
+    /* Check if it's an array type like i32[5] or i32[9][9] */
     char base_type[32] = {0};
-    char array_size[16] = {0};
+    char array_dims[64] = {0};  /* Store all dimensions like [9][9] */
     bool is_array = false;
     
     char* bracket = strchr(type, '[');
@@ -316,13 +316,23 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
         strncpy(base_type, type, base_len);
         base_type[base_len] = '\0';
         
-        /* Extract array size */
-        char* close = strchr(bracket, ']');
-        if (close) {
-            size_t size_len = close - bracket - 1;
-            strncpy(array_size, bracket + 1, size_len);
-            array_size[size_len] = '\0';
+        /* Extract all dimensions [size1][size2]... */
+        char* p = bracket;
+        int dims_len = 0;
+        while (*p == '[') {
+            char* close = strchr(p, ']');
+            if (!close) break;
+            
+            /* Copy [size] to array_dims */
+            size_t dim_size = close - p + 1;
+            if (dims_len + dim_size < (int)sizeof(array_dims) - 1) {
+                strncpy(array_dims + dims_len, p, dim_size);
+                dims_len += dim_size;
+                array_dims[dims_len] = '\0';
+            }
+            
             is_array = true;
+            p = close + 1;
         }
     } else {
         strncpy(base_type, type, sizeof(base_type) - 1);
@@ -341,7 +351,7 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     /* Output C declaration */
     translator_write_indent(translator);
     if (is_array) {
-        /* Array declaration: type name[size] = {init}; */
+        /* Array declaration: type name[dims] = {init}; */
         /* Extract variable name from rest */
         char var_name[64] = {0};
         int k = 0;
@@ -351,7 +361,8 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
         }
         var_name[k] = '\0';
         
-        fprintf(translator->output, "%s %s[%s]", c_type, var_name, array_size);
+        /* Output: type name[dims] */
+        fprintf(translator->output, "%s %s%s", c_type, var_name, array_dims);
         
         /* Add rest after variable name (initialization, etc.) */
         const char* after_var = rest + k;
