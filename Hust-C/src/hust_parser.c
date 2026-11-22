@@ -139,7 +139,19 @@ static const char* parser_skip_prefix(const char* line) {
 /* Helper: Check if line is a block end (closing brace) */
 static bool parser_is_block_end(const char* line) {
     if (!line) return false;
-    return (line[0] == '}' && (line[1] == '\0' || line[1] == ' ' || line[1] == '\t' || line[1] == ';'));
+    
+    /* Must start with } */
+    if (line[0] != '}') return false;
+    
+    /* Check if it's followed by else (} else {) - not a block end */
+    const char* rest = line + 1;
+    while (*rest == ' ' || *rest == '\t') rest++;
+    if (strncmp(rest, "else", 4) == 0) {
+        return false;  /* This is } else {, not a block end */
+    }
+    
+    /* Check if it's a pure block end: }, }, ;, or end of line */
+    return (line[1] == '\0' || line[1] == ' ' || line[1] == '\t' || line[1] == ';');
 }
 
 /* Helper: Check if line is a control flow statement */
@@ -147,7 +159,8 @@ static bool parser_is_control_flow(const char* line) {
     if (!line) return false;
     return (starts_with_keyword(line, "if") ||
             starts_with_keyword(line, "while") ||
-            starts_with_keyword(line, "for"));
+            starts_with_keyword(line, "for") ||
+            starts_with_keyword(line, "else"));
 }
 
 /* Helper: Check if line is a return statement */
@@ -251,6 +264,11 @@ NodeType parser_detect_node_type_v2(const char* line) {
     /* Check for block end */
     if (parser_is_block_end(stripped)) {
         return NODE_BLOCK;
+    }
+    
+    /* Check for else (must be before control flow) */
+    if (starts_with_keyword(stripped, "else")) {
+        return NODE_CONTROL_FLOW;
     }
     
     /* Check for class definition */
