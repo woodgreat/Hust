@@ -203,6 +203,12 @@ static bool parser_is_interface_definition(const char* line) {
     return (strncmp(line, "interface ", 10) == 0);
 }
 
+/* Helper: Check if line is an enum definition */
+static bool parser_is_enum_definition(const char* line) {
+    if (!line) return false;
+    return (strncmp(line, "enum ", 5) == 0);
+}
+
 /* Helper: Check if line is a method definition (inside class) */
 static bool parser_is_method_definition(const char* line) {
     if (!line) return false;
@@ -250,6 +256,11 @@ NodeType parser_detect_node_type_v2(const char* line) {
     /* Check for class definition */
     if (parser_is_class_definition(stripped)) {
         return NODE_CLASS_DEF;
+    }
+    
+    /* Check for enum definition */
+    if (parser_is_enum_definition(stripped)) {
+        return NODE_ENUM_DEF;
     }
     
     /* Check for interface definition */
@@ -340,6 +351,47 @@ ASTNode* parser_parse_program_v2(Parser* parser) {
                 }
                 
                 ast_add_child(program, class_node);
+            }
+        } else if (type == NODE_ENUM_DEF) {
+            /* Parse enum body (may span multiple lines) */
+            ASTNode* enum_node = ast_create_node(NODE_ENUM_DEF, line);
+            if (enum_node) {
+                /* Collect all lines until closing brace */
+                int brace_count = 0;
+                bool first_line = true;
+                
+                while (i < parser->preprocessor->line_count) {
+                    const char* enum_line = parser->preprocessor->lines[i];
+                    
+                    /* Count braces */
+                    for (const char* p = enum_line; *p; p++) {
+                        if (*p == '{') brace_count++;
+                        else if (*p == '}') brace_count--;
+                    }
+                    
+                    /* Add line to enum node value (concatenate) */
+                    if (!first_line) {
+                        /* Append to existing value */
+                        size_t old_len = enum_node->value ? strlen(enum_node->value) : 0;
+                        size_t new_len = strlen(enum_line);
+                        char* new_value = realloc(enum_node->value, old_len + new_len + 2);
+                        if (new_value) {
+                            strcat(new_value, "\n");
+                            strcat(new_value, enum_line);
+                            enum_node->value = new_value;
+                        }
+                    }
+                    
+                    first_line = false;
+                    i++;
+                    
+                    /* Check if enum body is complete */
+                    if (brace_count <= 0 && !first_line) {
+                        break;
+                    }
+                }
+                
+                ast_add_child(program, enum_node);
             }
         } else {
             /* Regular line */

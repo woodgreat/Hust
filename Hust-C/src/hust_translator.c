@@ -74,6 +74,9 @@ void translator_translate_node(Translator* translator, ASTNode* node) {
         case NODE_CLASS_DEF:
             translator_translate_class(translator, node);
             break;
+        case NODE_ENUM_DEF:
+            translator_translate_enum(translator, node);
+            break;
         case NODE_RETURN:
         case NODE_STATEMENT:
             translator_translate_statement(translator, node);
@@ -1406,9 +1409,6 @@ void translator_translate_enum(Translator* translator, ASTNode* node) {
     /* Parse enum body and generate variants */
     char* body = strdup(node->value);
     if (body) {
-        /* Debug: print raw node value */
-        fprintf(stderr, "DEBUG: node->value = '%s'\n", node->value);
-        
         char* saveptr = NULL;
         char* body_line = strtok_r(body, "\n", &saveptr);
         bool first_line = true;
@@ -1418,9 +1418,6 @@ void translator_translate_enum(Translator* translator, ASTNode* node) {
         int variant_count = 0;
         
         while (body_line && variant_count < 64) {
-            /* Debug: print each line */
-            fprintf(stderr, "DEBUG: line = '%s'\n", body_line);
-            
             /* Skip first line (enum declaration) */
             if (first_line) {
                 first_line = false;

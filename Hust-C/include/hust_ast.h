@@ -32,6 +32,7 @@ typedef enum {
     NODE_RETURN,        /* Return statement */
     NODE_CLASS_DEF,     /* Class definition */
     NODE_METHOD_DEF,    /* Method definition */
+    NODE_ENUM_DEF,      /* Enum definition */
     NODE_UNKNOWN        /* Unknown/placeholder */
 } NodeType;
 
