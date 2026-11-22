@@ -1092,6 +1092,12 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
     
+    /* Check if this is actually an interface */
+    if (translator_is_interface_definition(line)) {
+        translator_translate_interface(translator, node);
+        return;
+    }
+    
     /* Check for class definition */
     if (!translator_is_class_definition(line)) {
         /* Not a class, copy as-is */
@@ -1319,27 +1325,55 @@ void translator_translate_interface(Translator* translator, ASTNode* node) {
                 continue;
             }
             
-            /* Parse method signature: return_type method_name(params); */
+            /* Parse method signature: [public] [return_type] method_name(params); */
             char ret_type[32] = {0};
             char method_name[64] = {0};
             char params[256] = {0};
             int i = 0, j = 0;
             
-            /* Extract return type */
-            while (trimmed[i] && trimmed[i] != ' ' && trimmed[i] != '\t' && j < 31) {
-                ret_type[j++] = trimmed[i++];
+            /* Skip public prefix */
+            if (strncmp(trimmed, "public ", 7) == 0) {
+                i = 7;
             }
-            ret_type[j] = '\0';
             
             /* Skip whitespace */
             while (trimmed[i] == ' ' || trimmed[i] == '\t') i++;
             
-            /* Extract method name */
+            /* Check if there's a return type (identifier before method name) */
+            const char* p = trimmed + i;
+            char first_word[32] = {0};
             j = 0;
-            while (trimmed[i] && trimmed[i] != '(' && trimmed[i] != ' ' && trimmed[i] != '\t' && j < 63) {
-                method_name[j++] = trimmed[i++];
+            while (*p && *p != ' ' && *p != '\t' && *p != '(' && j < 31) {
+                first_word[j++] = *p++;
             }
-            method_name[j] = '\0';
+            first_word[j] = '\0';
+            
+            /* Check if next non-space char is '(' - if so, no return type (void) */
+            const char* after_first = p;
+            while (*after_first == ' ' || *after_first == '\t') after_first++;
+            
+            if (*after_first == '(') {
+                /* No return type, default to void */
+                strcpy(ret_type, "void");
+                strcpy(method_name, first_word);
+                i = after_first - trimmed;
+            } else {
+                /* Has return type - first_word is return type, now get method name */
+                strcpy(ret_type, first_word);
+                
+                /* Skip whitespace after return type */
+                while (*p == ' ' || *p == '\t') p++;
+                
+                /* Extract method name */
+                j = 0;
+                while (*p && *p != '(' && *p != ' ' && *p != '\t' && *p != ';' && j < 63) {
+                    method_name[j++] = *p++;
+                }
+                method_name[j] = '\0';
+                
+                /* Update i to point to after method name */
+                i = p - trimmed;
+            }
             
             /* Skip to parameters */
             while (trimmed[i] && trimmed[i] != '(') i++;
@@ -1352,13 +1386,34 @@ void translator_translate_interface(Translator* translator, ASTNode* node) {
             }
             params[j] = '\0';
             
-            /* Get C return type */
+            /* Get C return type - handle special interface types */
             const char* c_ret_type = get_c_type(ret_type);
             
+            /* Check if type was mapped (get_c_type returns input for unknown types) */
+            if (strcmp(c_ret_type, ret_type) == 0) {
+                /* Type was not mapped - check for special interface types */
+                if (strcmp(ret_type, "areaSize") == 0 ||
+                    strcmp(ret_type, "indexNumber") == 0 ||
+                    strcmp(ret_type, "faceArea") == 0) {
+                    c_ret_type = "int32_t";  /* Default to i32 for size types */
+                } else if (strcmp(ret_type, "void") != 0) {
+                    /* Unknown non-void type, default to int32_t */
+                    c_ret_type = "int32_t";
+                }
+            }
+            
             /* Generate function pointer: return_type (*method_name)(self, params) */
-            translator_write_indent(translator);
+            /* Parse and convert parameter types */
+            char c_params[256] = {0};
             if (strlen(params) > 0) {
-                fprintf(translator->output, "%s (*%s)(void* self, %s);\n", c_ret_type, method_name, params);
+                /* Simple param type mapping - assume int32_t for unknown types */
+                /* TODO: Proper param type parsing */
+                snprintf(c_params, sizeof(c_params), "int32_t %s", params);
+            }
+            
+            translator_write_indent(translator);
+            if (strlen(c_params) > 0) {
+                fprintf(translator->output, "%s (*%s)(void* self, %s);\n", c_ret_type, method_name, c_params);
             } else {
                 fprintf(translator->output, "%s (*%s)(void* self);\n", c_ret_type, method_name);
             }
