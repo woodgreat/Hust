@@ -782,6 +782,11 @@ static bool translator_is_method_definition(const char* line) {
         p += 7;
     }
     
+    /* Exclude macro calls like println!(...) */
+    if (strstr(p, "!(")) {
+        return false;
+    }
+    
     /* Check for constructor pattern: ClassName(...) */
     /* Constructor has no return type, just ClassName(params) */
     const char* paren = strchr(p, '(');
