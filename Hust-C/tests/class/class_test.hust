@@ -1,0 +1,52 @@
+// Class test - V0.6
+
+interface Shape {
+    public areaSize area();
+    public draw();
+}
+
+class Rectangle implements Shape {
+    f64 width;
+    f64 height;
+    
+    public Rectangle() {}
+    
+    public f64 area() {
+        return this.width * this.height;
+    }
+    
+    public void draw() {
+        println!("Drawing rectangle");
+    }
+}
+
+class Circle implements Shape {
+    f64 radius;
+    
+    public Circle() {}
+    
+    public f64 area() {
+        return 3.14159 * this.radius * this.radius;
+    }
+    
+    public void draw() {
+        println!("Drawing circle");
+    }
+}
+
+void main() {
+    Rectangle r = new Rectangle();
+    r.width = 10.0;
+    r.height = 5.0;
+    
+    Circle c = new Circle();
+    c.radius = 3.0;
+    
+    println!("Rectangle area: {}", r.area());
+    println!("Circle area: {}", c.area());
+    
+    r.draw();
+    c.draw();
+    
+    println!("Class test passed!");
+}

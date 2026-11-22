@@ -1,0 +1,34 @@
+// verify_array_element_clone.hust - B39 regression
+// Hust: Item it = holder.items[i];
+//   ->  Rust: let mut it: Item = holder.items[(i) as usize].clone();
+// Rust cannot move a value out of an index, so the element must be cloned.
+// Found by the Phoenix project (GroupManager group iteration).
+//
+// Note: a dynamic array field is empty when declared. Do NOT write
+//       `this.items = [];` - that is not Hust syntax (rejected since B40).
+
+class Item {
+    i32 value;
+    public Item() { this.value = 0; }
+    public i32 get() { return this.value; }
+}
+
+class Box {
+    Item[] items;
+    public Box() {
+        Item a = new Item();
+        a.value = 10;
+        this.items.push(a);
+        Item b = new Item();
+        b.value = 20;
+        this.items.push(b);
+    }
+}
+
+void main() {
+    Box holder = new Box();
+    for (i32 i = 0; i < holder.items.len(); i = i + 1) {
+        Item it = holder.items[i];
+        println!("item {} = {}", i, it.get());
+    }
+}
