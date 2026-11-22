@@ -304,10 +304,11 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     }
     type[j] = '\0';
     
-    /* Check if it's an array type like i32[5] or i32[9][9] */
+    /* Check if it's an array type like i32[5] or i32[] (dynamic) */
     char base_type[32] = {0};
-    char array_dims[64] = {0};  /* Store all dimensions like [9][9] */
+    char array_dims[64] = {0};  /* Store all dimensions like [9][9] or [] */
     bool is_array = false;
+    bool is_dynamic_array = false;  /* i32[] without size */
     
     char* bracket = strchr(type, '[');
     if (bracket) {
@@ -316,23 +317,29 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
         strncpy(base_type, type, base_len);
         base_type[base_len] = '\0';
         
-        /* Extract all dimensions [size1][size2]... */
-        char* p = bracket;
-        int dims_len = 0;
-        while (*p == '[') {
-            char* close = strchr(p, ']');
-            if (!close) break;
-            
-            /* Copy [size] to array_dims */
-            size_t dim_size = close - p + 1;
-            if (dims_len + dim_size < (int)sizeof(array_dims) - 1) {
-                strncpy(array_dims + dims_len, p, dim_size);
-                dims_len += dim_size;
-                array_dims[dims_len] = '\0';
+        /* Check if dynamic array: [] with no size */
+        if (bracket[1] == ']') {
+            is_dynamic_array = true;
+            strcpy(array_dims, "[]");
+        } else {
+            /* Extract all dimensions [size1][size2]... */
+            char* p = bracket;
+            int dims_len = 0;
+            while (*p == '[') {
+                char* close = strchr(p, ']');
+                if (!close) break;
+                
+                /* Copy [size] to array_dims */
+                size_t dim_size = close - p + 1;
+                if (dims_len + dim_size < (int)sizeof(array_dims) - 1) {
+                    strncpy(array_dims + dims_len, p, dim_size);
+                    dims_len += dim_size;
+                    array_dims[dims_len] = '\0';
+                }
+                
+                is_array = true;
+                p = close + 1;
             }
-            
-            is_array = true;
-            p = close + 1;
         }
     } else {
         strncpy(base_type, type, sizeof(base_type) - 1);
