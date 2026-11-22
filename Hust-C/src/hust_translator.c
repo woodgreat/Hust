@@ -1045,6 +1045,11 @@ static void translator_translate_method(Translator* translator, const char* line
     }
     
     translator->indent_level++;
+    
+    /* Close the method body with } */
+    translator->indent_level--;
+    translator_write_indent(translator);
+    fprintf(translator->output, "}\n\n");
 }
 
 /* Helper: Check if class has extends clause */
