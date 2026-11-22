@@ -2472,13 +2472,23 @@ static void translator_convert_method_call_advanced(const char* obj_name, const 
         args_trim[--args_len] = '\0';
     }
     
-    /* Build C function call: Type_method(obj, args) */
+    /* Build C function call: Type_method(obj, args) or vtable dispatch */
     if (obj_type && strlen(obj_type) > 0) {
-        /* Use provided type */
-        if (strlen(args_trim) > 0) {
-            snprintf(c_call, c_call_size, "%s_%s(%s, %s)", obj_type, method_name, obj_name, args_trim);
+        /* Check if this is an interface type (vtable dispatch) */
+        if (strstr(obj_type, "VTable") || strstr(obj_type, "Interface")) {
+            /* Interface method call: obj->vtable->method(obj, args) */
+            if (strlen(args_trim) > 0) {
+                snprintf(c_call, c_call_size, "%s->vtable->%s(%s, %s)", obj_name, method_name, obj_name, args_trim);
+            } else {
+                snprintf(c_call, c_call_size, "%s->vtable->%s(%s)", obj_name, method_name, obj_name);
+            }
         } else {
-            snprintf(c_call, c_call_size, "%s_%s(%s)", obj_type, method_name, obj_name);
+            /* Use provided type */
+            if (strlen(args_trim) > 0) {
+                snprintf(c_call, c_call_size, "%s_%s(%s, %s)", obj_type, method_name, obj_name, args_trim);
+            } else {
+                snprintf(c_call, c_call_size, "%s_%s(%s)", obj_type, method_name, obj_name);
+            }
         }
     } else {
         /* Fallback: use obj_name as type (not ideal but works for simple cases) */
@@ -2608,9 +2618,49 @@ static void translator_translate_method_call_assignment(Translator* translator, 
         return;
     }
     
-    /* Convert method call to C function call */
+    /* Convert method call to C function call with class name prefix */
     char c_call[512] = {0};
-    translator_convert_method_call_advanced(obj_trim, NULL, method_call, c_call, sizeof(c_call));
+    
+    /* Extract method name and args */
+    char method_name[64] = {0};
+    char args[256] = {0};
+    int idx = 0, m = 0;
+    while (method_call[idx] && method_call[idx] != '(' && m < 63) {
+        method_name[m++] = method_call[idx++];
+    }
+    method_name[m] = '\0';
+    
+    /* Skip ( */
+    if (method_call[idx] == '(') idx++;
+    
+    /* Extract args */
+    m = 0;
+    while (method_call[idx] && method_call[idx] != ')' && m < 255) {
+        args[m++] = method_call[idx++];
+    }
+    args[m] = '\0';
+    
+    /* Trim whitespace from args */
+    char* args_trim = args;
+    while (*args_trim == ' ' || *args_trim == '\t') args_trim++;
+    size_t args_len = strlen(args_trim);
+    while (args_len > 0 && (args_trim[args_len-1] == ' ' || args_trim[args_len-1] == '\t')) {
+        args_trim[--args_len] = '\0';
+    }
+    
+    /* Capitalize first letter of object name to get class name */
+    char class_name[64] = {0};
+    strncpy(class_name, obj_trim, sizeof(class_name) - 1);
+    if (class_name[0] >= 'a' && class_name[0] <= 'z') {
+        class_name[0] = class_name[0] - 'a' + 'A';
+    }
+    
+    /* Output: ClassName_method(&obj, args) */
+    if (strlen(args_trim) > 0) {
+        snprintf(c_call, sizeof(c_call), "%s_%s(&%s, %s)", class_name, method_name, obj_trim, args_trim);
+    } else {
+        snprintf(c_call, sizeof(c_call), "%s_%s(&%s)", class_name, method_name, obj_trim);
+    }
     
     /* Output assignment */
     translator_write_indent(translator);
@@ -2766,7 +2816,50 @@ static void translator_translate_standalone_method_call(Translator* translator, 
             snprintf(c_call, sizeof(c_call), "HustVec_i32_push(&%s, %s)", obj_trim, args_trim);
         }
     } else {
-        translator_convert_method_call_advanced(obj_trim, NULL, method_call, c_call, sizeof(c_call));
+        /* Check if object has vtable (interface dispatch) */
+        /* For now, use ClassName_method(obj, args) format */
+        /* TODO: Track variable types to determine if vtable dispatch is needed */
+        
+        /* Extract method name and args */
+        char method_name[64] = {0};
+        char args[256] = {0};
+        int i = 0, j = 0;
+        while (method_call[i] && method_call[i] != '(' && j < 63) {
+            method_name[j++] = method_call[i++];
+        }
+        method_name[j] = '\0';
+        
+        /* Skip ( */
+        if (method_call[i] == '(') i++;
+        
+        /* Extract args */
+        j = 0;
+        while (method_call[i] && method_call[i] != ')' && j < 255) {
+            args[j++] = method_call[i++];
+        }
+        args[j] = '\0';
+        
+        /* Trim whitespace from args */
+        char* args_trim = args;
+        while (*args_trim == ' ' || *args_trim == '\t') args_trim++;
+        size_t args_len = strlen(args_trim);
+        while (args_len > 0 && (args_trim[args_len-1] == ' ' || args_trim[args_len-1] == '\t')) {
+            args_trim[--args_len] = '\0';
+        }
+        
+        /* Capitalize first letter of object name to get class name */
+        char class_name[64] = {0};
+        strncpy(class_name, obj_trim, sizeof(class_name) - 1);
+        if (class_name[0] >= 'a' && class_name[0] <= 'z') {
+            class_name[0] = class_name[0] - 'a' + 'A';
+        }
+        
+        /* Output: ClassName_method(&obj, args) */
+        if (strlen(args_trim) > 0) {
+            snprintf(c_call, sizeof(c_call), "%s_%s(&%s, %s)", class_name, method_name, obj_trim, args_trim);
+        } else {
+            snprintf(c_call, sizeof(c_call), "%s_%s(&%s)", class_name, method_name, obj_trim);
+        }
     }
     
     /* Output function call */
@@ -2928,6 +3021,29 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     if (translator_is_new_expression(line)) {
         char class_name[64] = {0};
         if (translator_extract_new_class_name(line, class_name, sizeof(class_name))) {
+            /* Extract constructor args from new ClassName(args) */
+            char ctor_args[256] = {0};
+            char* args_trim = ctor_args;  /* Declare outside if block */
+            const char* new_pos = strstr(line, "new ");
+            if (new_pos) {
+                const char* paren = strchr(new_pos, '(');
+                if (paren) {
+                    paren++; /* Skip ( */
+                    int k = 0;
+                    while (*paren && *paren != ')' && k < 255) {
+                        ctor_args[k++] = *paren++;
+                    }
+                    ctor_args[k] = '\0';
+                    
+                    /* Trim whitespace */
+                    while (*args_trim == ' ' || *args_trim == '\t') args_trim++;
+                    size_t args_len = strlen(args_trim);
+                    while (args_len > 0 && (args_trim[args_len-1] == ' ' || args_trim[args_len-1] == '\t')) {
+                        args_trim[--args_len] = '\0';
+                    }
+                }
+            }
+            
             /* Check if this is an assignment: Type var = new Type() */
             const char* eq = strchr(line, '=');
             if (eq) {
@@ -2952,13 +3068,21 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
                 }
                 var_name[j] = '\0';
                 
-                /* Output: Type var = Type_new(); */
+                /* Output: Type var = Type_new(args); */
                 translator_write_indent(translator);
-                fprintf(translator->output, "%s %s = %s_new();\n", class_name, var_name, class_name);
+                if (strlen(args_trim) > 0) {
+                    fprintf(translator->output, "%s %s = %s_new(%s);\n", class_name, var_name, class_name, args_trim);
+                } else {
+                    fprintf(translator->output, "%s %s = %s_new();\n", class_name, var_name, class_name);
+                }
             } else {
-                /* Standalone: new Point() -> Point_new(); */
+                /* Standalone: new Point(args) -> Point_new(args); */
                 translator_write_indent(translator);
-                fprintf(translator->output, "%s_new();\n", class_name);
+                if (strlen(args_trim) > 0) {
+                    fprintf(translator->output, "%s_new(%s);\n", class_name, args_trim);
+                } else {
+                    fprintf(translator->output, "%s_new();\n", class_name);
+                }
             }
             return;
         }

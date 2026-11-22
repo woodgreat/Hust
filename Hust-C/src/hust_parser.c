@@ -195,6 +195,21 @@ static bool parser_has_balanced_parens(const char* line) {
 static bool parser_is_function_def(const char* line) {
     if (!line) return false;
     if (!is_var_type(line)) return false;
+    
+    /* Check if this is a method call assignment: type var = obj.method(args) */
+    const char* eq = strchr(line, '=');
+    if (eq) {
+        /* Check if there's a . after = (method call) */
+        const char* dot = strchr(eq, '.');
+        if (dot) {
+            /* Check if there's a ( after . */
+            const char* paren = strchr(dot, '(');
+            if (paren) {
+                return false; /* This is a method call assignment, not function def */
+            }
+        }
+    }
+    
     return parser_has_balanced_parens(line);
 }
 
@@ -202,6 +217,21 @@ static bool parser_is_function_def(const char* line) {
 static bool parser_is_variable_decl(const char* line) {
     if (!line) return false;
     if (!is_var_type(line)) return false;
+    
+    /* Check if this is a method call assignment: type var = obj.method(args) */
+    const char* eq = strchr(line, '=');
+    if (eq) {
+        /* Check if there's a . after = (method call) */
+        const char* dot = strchr(eq, '.');
+        if (dot) {
+            /* Check if there's a ( after . */
+            const char* paren = strchr(dot, '(');
+            if (paren) {
+                return false; /* This is a method call assignment, not variable decl */
+            }
+        }
+    }
+    
     return !parser_has_balanced_parens(line);
 }
 
@@ -325,6 +355,11 @@ NodeType parser_detect_node_type_v2(const char* line) {
     /* Check for variable declaration */
     if (parser_is_variable_decl(stripped)) {
         return NODE_VARIABLE_DECL;
+    }
+    
+    /* Check for method call assignment: type var = obj.method(args) */
+    if (strchr(stripped, '=') && strchr(stripped, '.') && strchr(stripped, '(')) {
+        return NODE_STATEMENT;
     }
     
     /* Check for method call (contains . but not declaration) */
