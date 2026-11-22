@@ -357,9 +357,20 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     
     /* Output C declaration */
     translator_write_indent(translator);
-    if (is_array) {
-        /* Array declaration: type name[dims] = {init}; */
-        /* Extract variable name from rest */
+    if (is_dynamic_array) {
+        /* Dynamic array: HustVec_type name = HustVec_type_new(); (no pointer!) */
+        char var_name[64] = {0};
+        int k = 0;
+        while (rest[k] && rest[k] != ' ' && rest[k] != '\t' && rest[k] != '=' && rest[k] != ';' && k < 63) {
+            var_name[k] = rest[k];
+            k++;
+        }
+        var_name[k] = '\0';
+        
+        /* Output: HustVec_i32 name = HustVec_i32_new(); (no *) */
+        fprintf(translator->output, "HustVec_%s %s = HustVec_%s_new();\n", base_type, var_name, base_type);
+    } else if (is_array) {
+        /* Static array declaration: type name[dims] = {init}; */
         char var_name[64] = {0};
         int k = 0;
         while (rest[k] && rest[k] != ' ' && rest[k] != '\t' && rest[k] != '=' && rest[k] != ';' && k < 63) {
@@ -374,16 +385,18 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
         /* Add rest after variable name (initialization, etc.) */
         const char* after_var = rest + k;
         fprintf(translator->output, "%s", after_var);
+        
+        if (!strchr(after_var, ';')) {
+            fprintf(translator->output, ";");
+        }
+        fprintf(translator->output, "\n");
     } else {
         fprintf(translator->output, "%s %s", c_type, rest);
+        if (!strchr(rest, ';')) {
+            fprintf(translator->output, ";");
+        }
+        fprintf(translator->output, "\n");
     }
-    
-    /* Ensure semicolon */
-    if (!strchr(rest, ';')) {
-        fprintf(translator->output, ";");
-    }
-    
-    fprintf(translator->output, "\n");
 }
 
 /* ============================================
@@ -1905,6 +1918,7 @@ static bool translator_is_array_push_call(const char* line) {
     
     /* Look for pattern: arr.push(value) */
     if (strstr(line, ".push(")) {
+        fprintf(stderr, "DEBUG: push call detected: '%s'\n", line);
         return true;
     }
     
@@ -1947,9 +1961,9 @@ static void translator_translate_array_push(Translator* translator, const char* 
     char* val_trim = value;
     while (*val_trim == ' ' || *val_trim == '\t') val_trim++;
     
-    /* For now, output as comment (need HustVec implementation) */
+    /* Output: HustVec_i32_push(&arr, value); (pass by reference) */
     translator_write_indent(translator);
-    fprintf(translator->output, "/* TODO: %s.push(%s) - requires HustVec implementation */\n", arr_name, val_trim);
+    fprintf(translator->output, "HustVec_i32_push(&%s, %s);\n", arr_name, val_trim);
 }
 
 /* Helper: Check if line contains string concatenation */
@@ -2671,7 +2685,34 @@ static void translator_translate_standalone_method_call(Translator* translator, 
     
     /* Convert method call to C function call */
     char c_call[512] = {0};
-    translator_convert_method_call_advanced(obj_trim, NULL, method_call, c_call, sizeof(c_call));
+    
+    /* Check for array push method call */
+    if (strstr(method_call, "push(")) {
+        /* Extract args from push(value) */
+        const char* paren = strchr(method_call, '(');
+        if (paren) {
+            char args[256] = {0};
+            int k = 0;
+            paren++; /* Skip ( */
+            while (*paren && *paren != ')' && k < 255) {
+                args[k++] = *paren++;
+            }
+            args[k] = '\0';
+            
+            /* Trim whitespace */
+            char* args_trim = args;
+            while (*args_trim == ' ' || *args_trim == '\t') args_trim++;
+            size_t args_len = strlen(args_trim);
+            while (args_len > 0 && (args_trim[args_len-1] == ' ' || args_trim[args_len-1] == '\t')) {
+                args_trim[--args_len] = '\0';
+            }
+            
+            /* Output: HustVec_i32_push(&arr, value); */
+            snprintf(c_call, sizeof(c_call), "HustVec_i32_push(&%s, %s)", obj_trim, args_trim);
+        }
+    } else {
+        translator_convert_method_call_advanced(obj_trim, NULL, method_call, c_call, sizeof(c_call));
+    }
     
     /* Output function call */
     translator_write_indent(translator);
@@ -2729,6 +2770,9 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
         return;
     }
     
+    /* BINARY SEARCH DEBUG POINT 2: Before array length */
+    fprintf(stderr, "DEBUG: before array length check: '%s'\n", line);
+    
     /* Check for array length method call */
     if (translator_is_array_length_call(line)) {
         translator_translate_array_length(translator, line);
@@ -2739,6 +2783,12 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     if (translator_is_array_push_call(line)) {
         translator_translate_array_push(translator, line);
         return;
+    }
+    
+    /* Check for array element access (arr[i]) */
+    if (strstr(line, "[") && strstr(line, "]") && !strstr(line, "[]")) {
+        fprintf(stderr, "DEBUG: array element access detected: '%s'\n", line);
+        /* TODO: Translate arr[i] to arr.data[i] */
     }
     
     /* Check for string declaration */

@@ -327,6 +327,11 @@ NodeType parser_detect_node_type_v2(const char* line) {
         return NODE_VARIABLE_DECL;
     }
     
+    /* Check for method call (contains . but not declaration) */
+    if (strchr(stripped, '.') && strchr(stripped, '(') && !strchr(stripped, '=')) {
+        return NODE_STATEMENT;
+    }
+    
     /* Default: generic statement */
     return NODE_STATEMENT;
 }

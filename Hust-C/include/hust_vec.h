@@ -2,6 +2,7 @@
  * hust_vec.h - Dynamic array (vector) implementation for Hust-C
  * 
  * Provides HustVec structure and operations for dynamic arrays
+ * Hust syntax has no pointers, so all functions return/take struct values
  */
 
 #ifndef HUST_VEC_H
@@ -49,21 +50,22 @@ typedef struct {
 
 /* ============ HustVec_i32 Operations ============ */
 
-/* Create a new HustVec_i32 */
-static inline HustVec_i32* HustVec_i32_new(void) {
-    HustVec_i32* vec = (HustVec_i32*)malloc(sizeof(HustVec_i32));
-    if (!vec) return NULL;
-    vec->data = NULL;
-    vec->size = 0;
-    vec->capacity = 0;
+/* Create a new HustVec_i32 (returns by value, no pointers in Hust syntax) */
+static inline HustVec_i32 HustVec_i32_new(void) {
+    HustVec_i32 vec;
+    vec.data = NULL;
+    vec.size = 0;
+    vec.capacity = 0;
     return vec;
 }
 
-/* Free HustVec_i32 */
+/* Free HustVec_i32 internal data (call when done with the vector) */
 static inline void HustVec_i32_free(HustVec_i32* vec) {
     if (!vec) return;
     free(vec->data);
-    free(vec);
+    vec->data = NULL;
+    vec->size = 0;
+    vec->capacity = 0;
 }
 
 /* Push element to HustVec_i32 */
@@ -83,7 +85,7 @@ static inline bool HustVec_i32_push(HustVec_i32* vec, int32_t value) {
     return true;
 }
 
-/* Pop element from HustVec_i32 (returns popped value, sets success flag) */
+/* Pop element from HustVec_i32 (returns popped value via out param) */
 static inline bool HustVec_i32_pop(HustVec_i32* vec, int32_t* out_value) {
     if (!vec || vec->size == 0) return false;
     if (out_value) *out_value = vec->data[vec->size - 1];
@@ -112,21 +114,22 @@ static inline bool HustVec_i32_set(HustVec_i32* vec, size_t index, int32_t value
 
 /* ============ HustVec_f64 Operations ============ */
 
-/* Create a new HustVec_f64 */
-static inline HustVec_f64* HustVec_f64_new(void) {
-    HustVec_f64* vec = (HustVec_f64*)malloc(sizeof(HustVec_f64));
-    if (!vec) return NULL;
-    vec->data = NULL;
-    vec->size = 0;
-    vec->capacity = 0;
+/* Create a new HustVec_f64 (returns by value) */
+static inline HustVec_f64 HustVec_f64_new(void) {
+    HustVec_f64 vec;
+    vec.data = NULL;
+    vec.size = 0;
+    vec.capacity = 0;
     return vec;
 }
 
-/* Free HustVec_f64 */
+/* Free HustVec_f64 internal data */
 static inline void HustVec_f64_free(HustVec_f64* vec) {
     if (!vec) return;
     free(vec->data);
-    free(vec);
+    vec->data = NULL;
+    vec->size = 0;
+    vec->capacity = 0;
 }
 
 /* Push element to HustVec_f64 */
@@ -172,9 +175,9 @@ static inline bool HustVec_f64_set(HustVec_f64* vec, size_t index, double value)
     return true;
 }
 
-/* ============ Generic Macros for Type-Specific Vectors ============ */
+/* ============ Generic Macro for Type-Specific Vectors ============ */
 
-/* Declare a new vector type for a specific element type */
+/* Declare vector operations for a specific type */
 #define HUST_VEC_DECLARE(TYPE, NAME) \
 typedef struct { \
     TYPE* data; \
@@ -182,19 +185,20 @@ typedef struct { \
     size_t capacity; \
 } HustVec_##NAME; \
 \
-static inline HustVec_##NAME* HustVec_##NAME##_new(void) { \
-    HustVec_##NAME* vec = (HustVec_##NAME*)malloc(sizeof(HustVec_##NAME)); \
-    if (!vec) return NULL; \
-    vec->data = NULL; \
-    vec->size = 0; \
-    vec->capacity = 0; \
+static inline HustVec_##NAME HustVec_##NAME##_new(void) { \
+    HustVec_##NAME vec; \
+    vec.data = NULL; \
+    vec.size = 0; \
+    vec.capacity = 0; \
     return vec; \
 } \
 \
 static inline void HustVec_##NAME##_free(HustVec_##NAME* vec) { \
     if (!vec) return; \
     free(vec->data); \
-    free(vec); \
+    vec->data = NULL; \
+    vec->size = 0; \
+    vec->capacity = 0; \
 } \
 \
 static inline bool HustVec_##NAME##_push(HustVec_##NAME* vec, TYPE value) { \
