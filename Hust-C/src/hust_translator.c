@@ -282,15 +282,40 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
     
     /* Parse: type name = value; or type name; */
+    /* Also handle array: type[size] name = {init}; */
     char type[32] = {0};
     char rest[256] = {0};
     int i = 0, j = 0;
     
-    /* Extract type */
+    /* Extract type (may include [size]) */
     while (node->value[i] && node->value[i] != ' ' && node->value[i] != '\t' && j < 31) {
         type[j++] = node->value[i++];
     }
     type[j] = '\0';
+    
+    /* Check if it's an array type like i32[5] */
+    char base_type[32] = {0};
+    char array_size[16] = {0};
+    bool is_array = false;
+    
+    char* bracket = strchr(type, '[');
+    if (bracket) {
+        /* Extract base type */
+        size_t base_len = bracket - type;
+        strncpy(base_type, type, base_len);
+        base_type[base_len] = '\0';
+        
+        /* Extract array size */
+        char* close = strchr(bracket, ']');
+        if (close) {
+            size_t size_len = close - bracket - 1;
+            strncpy(array_size, bracket + 1, size_len);
+            array_size[size_len] = '\0';
+            is_array = true;
+        }
+    } else {
+        strncpy(base_type, type, sizeof(base_type) - 1);
+    }
     
     /* Skip whitespace */
     while (node->value[i] == ' ' || node->value[i] == '\t') i++;
@@ -300,11 +325,29 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     rest[sizeof(rest) - 1] = '\0';
     
     /* Get C type */
-    const char* c_type = get_c_type(type);
+    const char* c_type = get_c_type(base_type);
     
     /* Output C declaration */
     translator_write_indent(translator);
-    fprintf(translator->output, "%s %s", c_type, rest);
+    if (is_array) {
+        /* Array declaration: type name[size] = {init}; */
+        /* Extract variable name from rest */
+        char var_name[64] = {0};
+        int k = 0;
+        while (rest[k] && rest[k] != ' ' && rest[k] != '\t' && rest[k] != '=' && rest[k] != ';' && k < 63) {
+            var_name[k] = rest[k];
+            k++;
+        }
+        var_name[k] = '\0';
+        
+        fprintf(translator->output, "%s %s[%s]", c_type, var_name, array_size);
+        
+        /* Add rest after variable name (initialization, etc.) */
+        const char* after_var = rest + k;
+        fprintf(translator->output, "%s", after_var);
+    } else {
+        fprintf(translator->output, "%s %s", c_type, rest);
+    }
     
     /* Ensure semicolon */
     if (!strchr(rest, ';')) {
@@ -319,6 +362,49 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
  * ============================================ */
 
 /* Helper: Check if line contains a function call */
+/* Helper: Check if line contains a 'new' expression */
+static bool translator_is_new_expression(const char* line) {
+    if (!line) return false;
+    
+    /* Look for pattern: new ClassName() or new ClassName(args) */
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Check for 'new ' keyword */
+    if (strncmp(p, "new ", 4) == 0) {
+        return true;
+    }
+    
+    /* Also check for '= new ' in assignment */
+    if (strstr(line, "= new ")) {
+        return true;
+    }
+    
+    return false;
+}
+
+/* Helper: Extract class name from 'new' expression */
+static bool translator_extract_new_class_name(const char* line, char* class_name, size_t size) {
+    if (!line || !class_name || size == 0) return false;
+    
+    /* Find 'new ' keyword */
+    const char* new_pos = strstr(line, "new ");
+    if (!new_pos) return false;
+    
+    /* Skip 'new ' */
+    const char* p = new_pos + 4;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Extract class name (identifier) */
+    int j = 0;
+    while (*p && (isalnum(*p) || *p == '_') && j < (int)size - 1) {
+        class_name[j++] = *p++;
+    }
+    class_name[j] = '\0';
+    
+    return j > 0;
+}
+
 static bool translator_is_function_call(const char* line) {
     if (!line) return false;
     
@@ -2320,6 +2406,46 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     if (translator_is_array_declaration(line)) {
         translator_translate_array_decl(translator, line);
         return;
+    }
+    
+    /* Check for 'new' expression */
+    if (translator_is_new_expression(line)) {
+        char class_name[64] = {0};
+        if (translator_extract_new_class_name(line, class_name, sizeof(class_name))) {
+            /* Check if this is an assignment: Type var = new Type() */
+            const char* eq = strchr(line, '=');
+            if (eq) {
+                /* Extract variable name */
+                char var_name[64] = {0};
+                const char* var_start = line;
+                while (*var_start == ' ' || *var_start == '\t') var_start++;
+                
+                /* Skip type if present (e.g., "Point p = new Point()") */
+                const char* space = strchr(var_start, ' ');
+                if (space && space < eq) {
+                    /* Variable name is after type */
+                    var_start = space + 1;
+                    while (*var_start == ' ' || *var_start == '\t') var_start++;
+                }
+                
+                /* Extract variable name */
+                int j = 0;
+                while (var_start[j] && (isalnum(var_start[j]) || var_start[j] == '_') && j < 63) {
+                    var_name[j] = var_start[j];
+                    j++;
+                }
+                var_name[j] = '\0';
+                
+                /* Output: Type var = Type_new(); */
+                translator_write_indent(translator);
+                fprintf(translator->output, "%s %s = %s_new();\n", class_name, var_name, class_name);
+            } else {
+                /* Standalone: new Point() -> Point_new(); */
+                translator_write_indent(translator);
+                fprintf(translator->output, "%s_new();\n", class_name);
+            }
+            return;
+        }
     }
     
     /* Check for method call */
