@@ -1,0 +1,6 @@
+use C.stdio.*;
+void main() {
+    i32 a[3] = {1, 2, 3};
+    i32* p = a;
+    printf("%d %d\n", *p, *(p + 1));
+}

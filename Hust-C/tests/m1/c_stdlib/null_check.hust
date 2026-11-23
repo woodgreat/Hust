@@ -1,0 +1,8 @@
+use C.stdio.*;
+use C.stdlib.*;
+void main() {
+    i32* p = null;
+    if (p == null) {
+        printf("null\n");
+    }
+}

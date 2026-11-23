@@ -1,0 +1,6 @@
+use C.stdio.*;
+use C.string.*;
+void main() {
+    i32 n = (i32)strlen("hello");
+    printf("%d\n", n);
+}

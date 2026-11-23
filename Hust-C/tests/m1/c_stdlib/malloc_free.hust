@@ -1,0 +1,8 @@
+use C.stdio.*;
+use C.stdlib.*;
+void main() {
+    i32* p = malloc(sizeof(i32));
+    *p = 42;
+    printf("%d\n", *p);
+    free(p);
+}

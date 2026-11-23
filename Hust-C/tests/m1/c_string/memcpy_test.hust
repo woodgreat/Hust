@@ -1,0 +1,9 @@
+use C.stdio.*;
+use C.string.*;
+void main() {
+    char a[8];
+    char b[8];
+    strcpy(a, "abc");
+    memcpy(b, a, 4);
+    printf("%s\n", b);
+}

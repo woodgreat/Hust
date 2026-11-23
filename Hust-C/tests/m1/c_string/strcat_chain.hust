@@ -1,0 +1,9 @@
+use C.stdio.*;
+use C.string.*;
+void main() {
+    char s[32];
+    strcpy(s, "a");
+    strcat(s, "b");
+    strcat(s, "c");
+    printf("%s\n", s);
+}

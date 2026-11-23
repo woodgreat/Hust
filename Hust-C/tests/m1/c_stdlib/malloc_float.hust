@@ -1,0 +1,8 @@
+use C.stdio.*;
+use C.stdlib.*;
+void main() {
+    f64* p = malloc(sizeof(f64));
+    *p = 2.5;
+    printf("%.1f\n", *p);
+    free(p);
+}

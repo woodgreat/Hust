@@ -1,0 +1,7 @@
+use C.stdio.*;
+void main() {
+    i32 x = 1;
+    i32* p = &x;
+    *p = 5;
+    printf("%d\n", x);
+}

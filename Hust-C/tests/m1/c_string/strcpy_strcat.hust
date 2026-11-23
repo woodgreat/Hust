@@ -1,0 +1,8 @@
+use C.stdio.*;
+use C.string.*;
+void main() {
+    char dest[32];
+    strcpy(dest, "hi");
+    strcat(dest, "!");
+    printf("%s\n", dest);
+}

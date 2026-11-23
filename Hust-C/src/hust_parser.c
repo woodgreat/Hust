@@ -102,9 +102,10 @@ static bool starts_with_keyword(const char* line, const char* keyword) {
     size_t len = strlen(keyword);
     if (strncmp(line, keyword, len) != 0) return false;
     
-    /* Check next char is space, tab, '(', '[', or '\0' */
+    /* Check next char is space, tab, '(', '[', '*', or '\0' */
     char next = line[len];
-    return (next == ' ' || next == '\t' || next == '(' || next == '[' || next == '\0');
+    return (next == ' ' || next == '\t' || next == '(' || next == '[' ||
+            next == '*' || next == '\0');
 }
 
 /* Helper: Check if line is a variable declaration type */

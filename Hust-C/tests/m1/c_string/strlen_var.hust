@@ -1,0 +1,8 @@
+use C.stdio.*;
+use C.string.*;
+void main() {
+    char s[16];
+    strcpy(s, "hust");
+    i32 n = (i32)strlen(s);
+    printf("%d\n", n);
+}

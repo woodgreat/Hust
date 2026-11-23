@@ -1,0 +1,5 @@
+use C.stdio.*;
+use C.string.*;
+void main() {
+    printf("%d\n", strcmp("b", "a") > 0);
+}

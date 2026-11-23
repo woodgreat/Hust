@@ -1,0 +1,10 @@
+use C.stdio.*;
+use C.stdlib.*;
+void main() {
+    i32* a = malloc(3 * sizeof(i32));
+    a[0] = 1;
+    a[1] = 2;
+    a[2] = 3;
+    printf("%d\n", a[0] + a[1] + a[2]);
+    free(a);
+}

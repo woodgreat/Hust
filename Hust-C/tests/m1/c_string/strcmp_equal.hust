@@ -1,0 +1,6 @@
+use C.stdio.*;
+use C.string.*;
+void main() {
+    i32 r = strcmp("a", "a");
+    printf("%d\n", r);
+}

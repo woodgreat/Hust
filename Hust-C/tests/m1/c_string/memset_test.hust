@@ -1,0 +1,8 @@
+use C.stdio.*;
+use C.string.*;
+void main() {
+    char a[8];
+    memset(a, 'x', 3);
+    a[3] = '\0';
+    printf("%s\n", a);
+}

@@ -1,0 +1,9 @@
+use C.stdio.*;
+use C.string.*;
+void main() {
+    char src[8];
+    char dst[8];
+    strcpy(src, "xyz");
+    memcpy(dst, src, 4);
+    printf("%d\n", (i32)strlen(dst));
+}

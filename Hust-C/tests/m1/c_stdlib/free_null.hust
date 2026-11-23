@@ -1,0 +1,7 @@
+use C.stdio.*;
+use C.stdlib.*;
+void main() {
+    i32* p = null;
+    free(p);
+    printf("ok\n");
+}

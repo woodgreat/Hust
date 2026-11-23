@@ -92,6 +92,7 @@ int translator_translate(Translator* translator) {
     fprintf(translator->output, "#include \"hust_error.h\"\n");
     fprintf(translator->output, "#include \"hust_vec.h\"\n");
     fprintf(translator->output, "#include \"hust_string.h\"\n");
+    fprintf(translator->output, "#define null NULL\n");
     fprintf(translator->output, "\n");
     
     /* Translate root node */
@@ -239,6 +240,10 @@ static void translator_register_iface_var(Translator* translator,
 static bool translator_rewrite_interface_calls(Translator* translator,
                                                const char* text,
                                                char* out, size_t out_size);
+static const char* translator_c_type_ex(const char* hust_type,
+                                        char* buf, size_t buf_size);
+static void translator_rewrite_type_tokens(const char* line,
+                                           char* out, size_t out_size);
 
 /* Helper: Convert a single parameter from Hust to C */
 static void translator_convert_param(Translator* translator, const char* param,
@@ -298,7 +303,9 @@ static void translator_convert_param(Translator* translator, const char* param,
             snprintf(c_param, c_param_size, "%s %s%s", get_c_type(base), p_name, bracket);
         }
     } else {
-        snprintf(c_param, c_param_size, "%s %s", get_c_type(p_type), p_name);
+        char type_buf[128] = {0};
+        snprintf(c_param, c_param_size, "%s %s",
+                 translator_c_type_ex(p_type, type_buf, sizeof(type_buf)), p_name);
     }
 }
 
@@ -407,7 +414,9 @@ void translator_translate_function(Translator* translator, ASTNode* node) {
     
     /* Convert return type */
     char ret_buf[128] = {0};
-    const char* c_return_type = get_c_type(sig.return_type);
+    char ret_type_buf[128] = {0};
+    const char* c_return_type = translator_c_type_ex(sig.return_type, ret_type_buf,
+                                                     sizeof(ret_type_buf));
     if (strchr(sig.return_type, '(')) {
         char iface[64] = {0};
         size_t in = 0;
@@ -1402,6 +1411,27 @@ static bool translator_rewrite_enum_members(Translator* translator,
     return changed;
 }
 
+/* Map a Hust type with trailing pointer stars to C. */
+static const char* translator_c_type_ex(const char* hust_type, char* buf, size_t buf_size) {
+    if (!hust_type || !buf || buf_size == 0) return "void";
+    size_t len = strlen(hust_type);
+    size_t stars = 0;
+    while (len > 0 && hust_type[len - 1] == '*') {
+        stars++;
+        len--;
+    }
+    while (len > 0 && (hust_type[len - 1] == ' ' || hust_type[len - 1] == '\t')) len--;
+    char base[64] = {0};
+    if (len >= sizeof(base)) len = sizeof(base) - 1;
+    memcpy(base, hust_type, len);
+    base[len] = '\0';
+    snprintf(buf, buf_size, "%s", get_c_type(base));
+    for (size_t i = 0; i < stars && strlen(buf) + 1 < buf_size; i++) {
+        strncat(buf, "*", buf_size - strlen(buf) - 1);
+    }
+    return buf;
+}
+
 /* Translate variable declaration */
 void translator_translate_variable(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
@@ -1523,6 +1553,11 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     /* Convert Hust casts like (i32) to C types. */
     translator_convert_type_casts(rest, sizeof(rest));
     
+    char typed_rest[512] = {0};
+    translator_rewrite_type_tokens(rest, typed_rest, sizeof(typed_rest));
+    strncpy(rest, typed_rest, sizeof(rest) - 1);
+    rest[sizeof(rest) - 1] = '\0';
+    
     /* Extract declaration name and register arrays. */
     char decl_name[64] = {0};
     int dn = 0;
@@ -1608,7 +1643,8 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     }
     
     /* Get C type */
-    const char* c_type = get_c_type(base_type);
+    char c_type_buf[128] = {0};
+    const char* c_type = translator_c_type_ex(base_type, c_type_buf, sizeof(c_type_buf));
     
     /* String declarations use the language-level HustString runtime. */
     if (strcmp(base_type, "String") == 0 && !is_array && !is_dynamic_array) {
@@ -5527,6 +5563,10 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     char stmt_buf[2048] = {0};
     strncpy(stmt_buf, line, sizeof(stmt_buf) - 1);
     translator_convert_type_casts(stmt_buf, sizeof(stmt_buf));
+    
+    char typed_buf[2048] = {0};
+    translator_rewrite_type_tokens(stmt_buf, typed_buf, sizeof(typed_buf));
+    strncpy(stmt_buf, typed_buf, sizeof(stmt_buf) - 1);
     
     char rewritten_line[2048] = {0};
     translator_rewrite_array_accesses(translator, stmt_buf, rewritten_line,
