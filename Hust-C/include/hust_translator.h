@@ -11,6 +11,8 @@
 
 #define HUST_MAX_ARRAYS 128
 #define HUST_MAX_STRINGS 128
+#define HUST_MAX_OBJECTS 128
+#define HUST_MAX_CLASSES 128
 
 typedef struct {
     char name[64];
@@ -23,6 +25,17 @@ typedef struct {
     char name[64];
 } StringInfo;
 
+typedef struct {
+    char name[64];
+    char class_name[64];
+} ObjectInfo;
+
+typedef struct {
+    char name[64];
+    char parent[64];
+    bool is_enum;
+} ClassInfo;
+
 /* Translator structure */
 typedef struct {
     ASTNode* ast;
@@ -33,6 +46,11 @@ typedef struct {
     int array_count;
     StringInfo strings[HUST_MAX_STRINGS];
     int string_count;
+    ObjectInfo objects[HUST_MAX_OBJECTS];
+    int object_count;
+    ClassInfo classes[HUST_MAX_CLASSES];
+    int class_count;
+    bool in_match_block;
 } Translator;
 
 /* Function declarations */

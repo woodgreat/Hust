@@ -322,6 +322,24 @@ static bool parser_is_method_definition(const char* line) {
     return false;
 }
 
+/* Check for a character outside string literals. */
+static bool parser_has_char_outside_strings(const char* line, char target) {
+    if (!line) return false;
+    bool in_string = false;
+    bool escaped = false;
+    for (const char* p = line; *p; p++) {
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (*p == '\\') escaped = true;
+            else if (*p == '"') in_string = false;
+            continue;
+        }
+        if (*p == '"') { in_string = true; continue; }
+        if (*p == target) return true;
+    }
+    return false;
+}
+
 /* V2 node type detection - refactored with single responsibility */
 NodeType parser_detect_node_type_v2(const char* line) {
     if (!line || line[0] == '\0') return NODE_UNKNOWN;
@@ -361,7 +379,7 @@ NodeType parser_detect_node_type_v2(const char* line) {
     }
     
     /* Check for match case (contains : and looks like a case pattern) */
-    if (strchr(stripped, ':') && !strchr(stripped, '=')) {
+    if (strchr(stripped, ':') && !parser_has_char_outside_strings(stripped, '=')) {
         /* Check if it's a match case (not a regular statement with :) */
         const char* colon = strchr(stripped, ':');
         if (colon && colon != stripped) {

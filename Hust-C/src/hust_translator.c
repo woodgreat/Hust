@@ -22,6 +22,9 @@ Translator* translator_new(ASTNode* ast, FILE* output) {
     translator->error_count = 0;
     translator->array_count = 0;
     translator->string_count = 0;
+    translator->object_count = 0;
+    translator->class_count = 0;
+    translator->in_match_block = false;
     
     return translator;
 }
@@ -41,6 +44,15 @@ void translator_write_indent(Translator* translator) {
     }
 }
 
+static bool translator_ast_contains(const ASTNode* node, const char* needle) {
+    if (!node || !needle) return false;
+    if (node->value && strstr(node->value, needle)) return true;
+    for (int i = 0; i < node->child_count; i++) {
+        if (translator_ast_contains(node->children[i], needle)) return true;
+    }
+    return false;
+}
+
 /* Translate AST to C code */
 int translator_translate(Translator* translator) {
     if (!translator || !translator->ast) return -1;
@@ -56,6 +68,13 @@ int translator_translate(Translator* translator) {
     }
     if (has_c && has_rust) {
         fprintf(stderr, "Error: mixed language cores are not allowed (C.* and RUST.*).\n");
+        translator->error_count++;
+    }
+    
+    /* Import before use: printf requires C.stdio.* in the C dialect. */
+    if (translator_ast_contains(translator->ast, "printf(") &&
+        !translator_ast_contains(translator->ast, "use C.stdio.*")) {
+        fprintf(stderr, "Error: `printf` requires `use C.stdio.*;` in the C core.\n");
         translator->error_count++;
     }
     
@@ -536,6 +555,101 @@ static bool translator_resolve_array_expr(Translator* translator, const char* ob
     return true;
 }
 
+static void translator_register_object(Translator* translator, const char* name,
+                                       const char* class_name) {
+    if (!translator || !name || !class_name || !*name) return;
+    for (int i = 0; i < translator->object_count; i++) {
+        if (strcmp(translator->objects[i].name, name) == 0) {
+            strncpy(translator->objects[i].class_name, class_name,
+                    sizeof(translator->objects[i].class_name) - 1);
+            return;
+        }
+    }
+    if (translator->object_count >= HUST_MAX_OBJECTS) return;
+    strncpy(translator->objects[translator->object_count].name, name,
+            sizeof(translator->objects[0].name) - 1);
+    strncpy(translator->objects[translator->object_count].class_name, class_name,
+            sizeof(translator->objects[0].class_name) - 1);
+    translator->object_count++;
+}
+
+static const char* translator_find_object_class(Translator* translator,
+                                                const char* name, size_t len) {
+    if (!translator || !name) return NULL;
+    for (int i = 0; i < translator->object_count; i++) {
+        if (strlen(translator->objects[i].name) == len &&
+            strncmp(translator->objects[i].name, name, len) == 0) {
+            return translator->objects[i].class_name;
+        }
+    }
+    return NULL;
+}
+
+static void translator_register_class(Translator* translator, const char* name,
+                                      const char* parent) {
+    if (!translator || !name || !*name) return;
+    for (int i = 0; i < translator->class_count; i++) {
+        if (strcmp(translator->classes[i].name, name) == 0) {
+            strncpy(translator->classes[i].parent, parent ? parent : "",
+                    sizeof(translator->classes[i].parent) - 1);
+            return;
+        }
+    }
+    if (translator->class_count >= HUST_MAX_CLASSES) return;
+    strncpy(translator->classes[translator->class_count].name, name,
+            sizeof(translator->classes[0].name) - 1);
+    strncpy(translator->classes[translator->class_count].parent, parent ? parent : "",
+            sizeof(translator->classes[0].parent) - 1);
+    translator->classes[translator->class_count].is_enum = false;
+    translator->class_count++;
+}
+
+static void translator_register_enum(Translator* translator, const char* name) {
+    if (!translator || !name || !*name) return;
+    translator_register_class(translator, name, NULL);
+    for (int i = 0; i < translator->class_count; i++) {
+        if (strcmp(translator->classes[i].name, name) == 0) {
+            translator->classes[i].is_enum = true;
+            return;
+        }
+    }
+}
+
+static bool translator_is_enum_name(Translator* translator, const char* name, size_t len) {
+    if (!translator || !name) return false;
+    for (int i = 0; i < translator->class_count; i++) {
+        if (translator->classes[i].is_enum &&
+            strlen(translator->classes[i].name) == len &&
+            strncmp(translator->classes[i].name, name, len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static const char* translator_class_parent(Translator* translator,
+                                           const char* name, size_t len) {
+    if (!translator || !name) return NULL;
+    for (int i = 0; i < translator->class_count; i++) {
+        if (strlen(translator->classes[i].name) == len &&
+            strncmp(translator->classes[i].name, name, len) == 0) {
+            return translator->classes[i].parent[0] ? translator->classes[i].parent : NULL;
+        }
+    }
+    return NULL;
+}
+
+static bool translator_is_known_class(Translator* translator, const char* name, size_t len) {
+    if (!translator || !name) return false;
+    for (int i = 0; i < translator->class_count; i++) {
+        if (strlen(translator->classes[i].name) == len &&
+            strncmp(translator->classes[i].name, name, len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Rewrite array accesses outside strings. Dynamic arrays use .data[idx]. */
 static bool translator_rewrite_array_accesses(Translator* translator,
                                               const char* line,
@@ -910,6 +1024,196 @@ static bool translator_build_concat_expr(const char* expr, char* out, size_t out
     return true;
 }
 
+/* Rewrite obj.method(args) for known class objects. */
+static bool translator_rewrite_object_method_calls(Translator* translator,
+                                                   const char* text,
+                                                   char* out, size_t out_size) {
+    if (!translator || !text || !out || out_size == 0) return false;
+    
+    size_t o = 0;
+    bool changed = false;
+    const char* p = text;
+    
+    while (*p && o + 1 < out_size) {
+        if (*p == '"') {
+            out[o++] = *p++;
+            while (*p && o + 1 < out_size) {
+                if (*p == '\\' && p[1]) {
+                    out[o++] = *p++;
+                    if (o + 1 < out_size) out[o++] = *p++;
+                } else if (*p == '"') {
+                    out[o++] = *p++;
+                    break;
+                } else {
+                    out[o++] = *p++;
+                }
+            }
+            continue;
+        }
+        
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            char name[64] = {0};
+            size_t n = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && n < sizeof(name) - 1) {
+                name[n++] = *p++;
+            }
+            name[n] = '\0';
+            
+            const char* q = p;
+            while (*q == ' ' || *q == '\t') q++;
+            if (*q == '.') {
+                const char* m = q + 1;
+                char method[64] = {0};
+                size_t mn = 0;
+                while ((isalnum((unsigned char)*m) || *m == '_') && mn < sizeof(method) - 1) {
+                    method[mn++] = *m++;
+                }
+                method[mn] = '\0';
+                const char* r = m;
+                while (*r == ' ' || *r == '\t') r++;
+                
+                const char* cls = translator_find_object_class(translator, name, n);
+                bool reserved = (strcmp(method, "len") == 0 ||
+                                 strcmp(method, "push") == 0 ||
+                                 strcmp(method, "pop") == 0 ||
+                                 strcmp(method, "replaceit") == 0 ||
+                                 strcmp(method, "moveit") == 0 ||
+                                 strcmp(method, "clone") == 0 ||
+                                 strcmp(method, "to_string") == 0);
+                
+                /* Parent member call: obj.Parent.method(args) */
+                if (cls && *r == '.') {
+                    const char* m2 = r + 1;
+                    char method2[64] = {0};
+                    size_t m2n = 0;
+                    while ((isalnum((unsigned char)*m2) || *m2 == '_') &&
+                           m2n < sizeof(method2) - 1) {
+                        method2[m2n++] = *m2++;
+                    }
+                    method2[m2n] = '\0';
+                    const char* r2 = m2;
+                    while (*r2 == ' ' || *r2 == '\t') r2++;
+                    const char* parent = translator_class_parent(translator, cls, strlen(cls));
+                    if (parent && strcmp(parent, method) == 0 && *r2 == '(') {
+                        const char* close = r2 + 1;
+                        int depth = 1;
+                        while (*close && depth > 0) {
+                            if (*close == '(') depth++;
+                            else if (*close == ')') depth--;
+                            close++;
+                        }
+                        size_t args_len = (size_t)((close - 1) - (r2 + 1));
+                        if (args_len > 0) {
+                            o += (size_t)snprintf(out + o, out_size - o,
+                                                  "%s_%s(&%s.%s, %.*s)",
+                                                  parent, method2, name, method,
+                                                  (int)args_len, r2 + 1);
+                        } else {
+                            o += (size_t)snprintf(out + o, out_size - o,
+                                                  "%s_%s(&%s.%s)",
+                                                  parent, method2, name, method);
+                        }
+                        changed = true;
+                        p = close;
+                        continue;
+                    }
+                }
+                
+                if (cls && !reserved && *r == '(') {
+                    const char* close = r + 1;
+                    int depth = 1;
+                    while (*close && depth > 0) {
+                        if (*close == '(') depth++;
+                        else if (*close == ')') depth--;
+                        close++;
+                    }
+                    size_t args_len = (size_t)((close - 1) - (r + 1));
+                    if (args_len > 0) {
+                        o += (size_t)snprintf(out + o, out_size - o,
+                                              "%s_%s(&%s, %.*s)",
+                                              cls, method, name,
+                                              (int)args_len, r + 1);
+                    } else {
+                        o += (size_t)snprintf(out + o, out_size - o,
+                                              "%s_%s(&%s)", cls, method, name);
+                    }
+                    changed = true;
+                    p = close;
+                    continue;
+                }
+            }
+            
+            o += (size_t)snprintf(out + o, out_size - o, "%s", name);
+            continue;
+        }
+        
+        out[o++] = *p++;
+    }
+    
+    out[o] = '\0';
+    return changed;
+}
+
+/* Rewrite Enum.Member to Enum_Member. */
+static bool translator_rewrite_enum_members(Translator* translator,
+                                            const char* text,
+                                            char* out, size_t out_size) {
+    if (!translator || !text || !out || out_size == 0) return false;
+    
+    size_t o = 0;
+    bool changed = false;
+    const char* p = text;
+    while (*p && o + 1 < out_size) {
+        if (*p == '"') {
+            out[o++] = *p++;
+            while (*p && o + 1 < out_size) {
+                if (*p == '\\' && p[1]) {
+                    out[o++] = *p++;
+                    if (o + 1 < out_size) out[o++] = *p++;
+                } else if (*p == '"') {
+                    out[o++] = *p++;
+                    break;
+                } else {
+                    out[o++] = *p++;
+                }
+            }
+            continue;
+        }
+        
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            char name[64] = {0};
+            size_t n = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && n < sizeof(name) - 1) {
+                name[n++] = *p++;
+            }
+            name[n] = '\0';
+            
+            if (*p == '.' && translator_is_enum_name(translator, name, n)) {
+                const char* m = p + 1;
+                char member[64] = {0};
+                size_t mn = 0;
+                while ((isalnum((unsigned char)*m) || *m == '_') && mn < sizeof(member) - 1) {
+                    member[mn++] = *m++;
+                }
+                if (mn > 0) {
+                    o += (size_t)snprintf(out + o, out_size - o, "%s_%s", name, member);
+                    changed = true;
+                    p = m;
+                    continue;
+                }
+            }
+            
+            o += (size_t)snprintf(out + o, out_size - o, "%s", name);
+            continue;
+        }
+        
+        out[o++] = *p++;
+    }
+    
+    out[o] = '\0';
+    return changed;
+}
+
 /* Translate variable declaration */
 void translator_translate_variable(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
@@ -1063,6 +1367,22 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     if (translator_rewrite_string_comparisons(translator, rest, rewritten_cmp,
                                               sizeof(rewritten_cmp))) {
         strncpy(rest, rewritten_cmp, sizeof(rest) - 1);
+        rest[sizeof(rest) - 1] = '\0';
+    }
+    
+    /* Rewrite method calls on known class objects. */
+    char rewritten_obj[512] = {0};
+    if (translator_rewrite_object_method_calls(translator, rest, rewritten_obj,
+                                               sizeof(rewritten_obj))) {
+        strncpy(rest, rewritten_obj, sizeof(rest) - 1);
+        rest[sizeof(rest) - 1] = '\0';
+    }
+    
+    /* Rewrite Enum.Member to Enum_Member. */
+    char rewritten_enum[512] = {0};
+    if (translator_rewrite_enum_members(translator, rest, rewritten_enum,
+                                        sizeof(rewritten_enum))) {
+        strncpy(rest, rewritten_enum, sizeof(rest) - 1);
         rest[sizeof(rest) - 1] = '\0';
     }
     
@@ -1733,6 +2053,11 @@ static bool translator_is_method_definition(const char* line) {
         p += 7;
     }
     
+    /* Skip readonly modifier */
+    if (strncmp(p, "readonly ", 9) == 0) {
+        p += 9;
+    }
+    
     /* Exclude macro calls like println!(...) */
     if (strstr(p, "!(")) {
         return false;
@@ -1850,9 +2175,28 @@ static void translator_translate_match_case_body(Translator* translator, const c
     colon++;
     while (*colon == ' ' || *colon == '\t') colon++;
     
-    /* Output the statement (e.g., println!("Red");) */
+    /* Normalize the case body into a C statement. */
+    char stmt[512] = {0};
+    strncpy(stmt, colon, sizeof(stmt) - 1);
+    size_t len = strlen(stmt);
+    while (len > 0 && (stmt[len - 1] == ' ' || stmt[len - 1] == '\t' ||
+                       stmt[len - 1] == ',' || stmt[len - 1] == '\r')) {
+        stmt[--len] = '\0';
+    }
+    if (len > 0 && stmt[len - 1] != ';' && stmt[len - 1] != '{' && stmt[len - 1] != '}') {
+        strncat(stmt, ";", sizeof(stmt) - strlen(stmt) - 1);
+    }
+    
+    if (stmt[0] == '{') {
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", stmt);
+        translator->indent_level++;
+        translator->in_match_block = true;
+        return;
+    }
+    
     translator_write_indent(translator);
-    fprintf(translator->output, "%s\n", colon);
+    fprintf(translator->output, "%s\n", stmt);
     
     /* Add break; after case body */
     translator->indent_level--;
@@ -2250,6 +2594,303 @@ static bool translator_extract_class_full_info(const char* line,
 }
 
 /* Translate class definition with inheritance support */
+/* Find the matching closing brace for an opening brace (string-aware). */
+static const char* translator_match_brace(const char* open) {
+    if (!open || *open != '{') return NULL;
+    int depth = 1;
+    bool in_string = false;
+    bool escaped = false;
+    const char* p = open + 1;
+    while (*p) {
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (*p == '\\') escaped = true;
+            else if (*p == '"') in_string = false;
+            p++;
+            continue;
+        }
+        if (*p == '"') { in_string = true; p++; continue; }
+        if (*p == '{') depth++;
+        else if (*p == '}') {
+            depth--;
+            if (depth == 0) return p;
+        }
+        p++;
+    }
+    return NULL;
+}
+
+/* Rewrite type tokens outside strings. */
+static void translator_rewrite_type_tokens(const char* line, char* out, size_t out_size) {
+    if (!line || !out || out_size == 0) return;
+    size_t o = 0;
+    const char* p = line;
+    while (*p && o + 1 < out_size) {
+        if (*p == '"') {
+            out[o++] = *p++;
+            while (*p && o + 1 < out_size) {
+                if (*p == '\\' && p[1]) {
+                    out[o++] = *p++;
+                    if (o + 1 < out_size) out[o++] = *p++;
+                } else if (*p == '"') {
+                    out[o++] = *p++;
+                    break;
+                } else {
+                    out[o++] = *p++;
+                }
+            }
+            continue;
+        }
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            char token[64] = {0};
+            size_t n = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && n < sizeof(token) - 1) {
+                token[n++] = *p++;
+            }
+            token[n] = '\0';
+            const char* ct = get_c_type(token);
+            if (ct && strcmp(ct, token) != 0) {
+                o += (size_t)snprintf(out + o, out_size - o, "%s", ct);
+            } else {
+                o += (size_t)snprintf(out + o, out_size - o, "%s", token);
+            }
+            continue;
+        }
+        out[o++] = *p++;
+    }
+    out[o] = '\0';
+}
+
+/* Rewrite this.field / this.method(...) inside a class body line. */
+static void translator_rewrite_this_line(const char* line, bool is_ctor,
+                                         const char* class_name,
+                                         char* out, size_t out_size) {
+    if (!line || !out || out_size == 0) return;
+    size_t o = 0;
+    const char* p = line;
+    while (*p && o + 1 < out_size) {
+        if (*p == '"') {
+            out[o++] = *p++;
+            while (*p && o + 1 < out_size) {
+                if (*p == '\\' && p[1]) {
+                    out[o++] = *p++;
+                    if (o + 1 < out_size) out[o++] = *p++;
+                } else if (*p == '"') {
+                    out[o++] = *p++;
+                    break;
+                } else {
+                    out[o++] = *p++;
+                }
+            }
+            continue;
+        }
+        
+        if (strncmp(p, "this.", 5) == 0 &&
+            (p == line || !(isalnum((unsigned char)p[-1]) || p[-1] == '_'))) {
+            p += 5;
+            char member[64] = {0};
+            size_t n = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && n < sizeof(member) - 1) {
+                member[n++] = *p++;
+            }
+            member[n] = '\0';
+            
+            const char* q = p;
+            while (*q == ' ' || *q == '\t') q++;
+            if (*q == '(') {
+                const char* close = q + 1;
+                int depth = 1;
+                while (*close && depth > 0) {
+                    if (*close == '(') depth++;
+                    else if (*close == ')') depth--;
+                    close++;
+                }
+                size_t args_len = (size_t)((close - 1) - (q + 1));
+                if (args_len > 0) {
+                    o += (size_t)snprintf(out + o, out_size - o, "%s_%s(&self, %.*s)",
+                                          class_name, member, (int)args_len, q + 1);
+                } else {
+                    o += (size_t)snprintf(out + o, out_size - o, "%s_%s(&self)",
+                                          class_name, member);
+                }
+                p = close;
+            } else {
+                o += (size_t)snprintf(out + o, out_size - o, "%s%s%s",
+                                      is_ctor ? "self." : "self->", member, "");
+            }
+            continue;
+        }
+        
+        out[o++] = *p++;
+    }
+    out[o] = '\0';
+    
+    char typed[2048] = {0};
+    translator_rewrite_type_tokens(out, typed, sizeof(typed));
+    strncpy(out, typed, out_size - 1);
+    out[out_size - 1] = '\0';
+}
+
+/* Emit class method/constructor body lines with indentation. */
+static void translator_emit_class_body(Translator* translator, const char* body,
+                                       bool is_ctor, const char* class_name,
+                                       const char* parent_class) {
+    if (!translator || !body) return;
+    char* copy = strdup(body);
+    if (!copy) return;
+    
+    char* saveptr = NULL;
+    char* line = strtok_r(copy, "\n", &saveptr);
+    while (line) {
+        char* s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        char* e = s + strlen(s);
+        while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r')) *--e = '\0';
+        
+        if (*s == '\0') {
+            line = strtok_r(NULL, "\n", &saveptr);
+            continue;
+        }
+        
+        if (is_ctor && parent_class && *parent_class && strncmp(s, "super", 5) == 0) {
+            const char* q = s + 5;
+            while (*q == ' ' || *q == '\t') q++;
+            char args[256] = {0};
+            if (*q == '(') {
+                const char* close = strrchr(q, ')');
+                if (close) {
+                    size_t alen = (size_t)(close - (q + 1));
+                    if (alen >= sizeof(args)) alen = sizeof(args) - 1;
+                    memcpy(args, q + 1, alen);
+                    args[alen] = '\0';
+                }
+            }
+            translator_write_indent(translator);
+            fprintf(translator->output, "self.%s = %s_new(%s);\n",
+                    parent_class, parent_class, args);
+            line = strtok_r(NULL, "\n", &saveptr);
+            continue;
+        }
+        
+        if (*s == '}') {
+            translator->indent_level--;
+            if (translator->indent_level < 0) translator->indent_level = 0;
+            translator_write_indent(translator);
+            if (strstr(s, "else")) {
+                fprintf(translator->output, "} else {\n");
+                translator->indent_level++;
+            } else {
+                fprintf(translator->output, "}\n");
+            }
+            line = strtok_r(NULL, "\n", &saveptr);
+            continue;
+        }
+        
+        char rewritten[2048] = {0};
+        translator_rewrite_this_line(s, is_ctor, class_name, rewritten, sizeof(rewritten));
+        
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", rewritten);
+        if (strlen(rewritten) > 0 && rewritten[strlen(rewritten) - 1] == '{') {
+            translator->indent_level++;
+        }
+        
+        line = strtok_r(NULL, "\n", &saveptr);
+    }
+    
+    free(copy);
+}
+
+/* Emit a method or constructor with its body. */
+static void translator_emit_class_method(Translator* translator, const char* sig,
+                                         const char* body, const char* class_name,
+                                         bool is_ctor, const char* parent_class) {
+    if (!translator || !sig || !class_name) return;
+    
+    char line[256] = {0};
+    strncpy(line, sig, sizeof(line) - 1);
+    char* s = line;
+    while (*s == ' ' || *s == '\t') s++;
+    if (strncmp(s, "public ", 7) == 0) s += 7;
+    if (strncmp(s, "readonly ", 9) == 0) s += 9;
+    while (*s == ' ' || *s == '\t') s++;
+    
+    char* brace = strrchr(s, '{');
+    if (brace) *brace = '\0';
+    char* end = s + strlen(s);
+    while (end > s && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+    
+    const char* paren = strchr(s, '(');
+    if (!paren) return;
+    const char* close = strrchr(paren, ')');
+    if (!close) return;
+    
+    char params[256] = {0};
+    size_t plen = (size_t)(close - (paren + 1));
+    if (plen >= sizeof(params)) plen = sizeof(params) - 1;
+    memcpy(params, paren + 1, plen);
+    params[plen] = '\0';
+    
+    char c_params[256] = {0};
+    translator_convert_params(params, c_params, sizeof(c_params));
+    translator_register_string_params(translator, params);
+    translator_register_array_params(translator, params);
+    bool has_params = strlen(params) > 0;
+    
+    if (is_ctor) {
+        translator_write_indent(translator);
+        if (has_params) {
+            fprintf(translator->output, "%s %s_new(%s) {\n", class_name, class_name, c_params);
+        } else {
+            fprintf(translator->output, "%s %s_new(void) {\n", class_name, class_name);
+        }
+        translator->indent_level++;
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s self = {0};\n", class_name);
+        
+        translator_emit_class_body(translator, body, true, class_name, parent_class);
+        
+        translator_write_indent(translator);
+        fprintf(translator->output, "return self;\n");
+        translator->indent_level--;
+        translator_write_indent(translator);
+        fprintf(translator->output, "}\n\n");
+        return;
+    }
+    
+    char ret_type[64] = {0};
+    char method_name[64] = {0};
+    const char* p = s;
+    size_t n = 0;
+    while (*p && *p != ' ' && *p != '\t' && n < sizeof(ret_type) - 1) {
+        ret_type[n++] = *p++;
+    }
+    ret_type[n] = '\0';
+    while (*p == ' ' || *p == '\t') p++;
+    n = 0;
+    while (p < paren && *p && *p != ' ' && *p != '\t' && n < sizeof(method_name) - 1) {
+        method_name[n++] = *p++;
+    }
+    method_name[n] = '\0';
+    
+    const char* c_ret = get_c_type(ret_type);
+    translator_write_indent(translator);
+    if (has_params) {
+        fprintf(translator->output, "%s %s_%s(%s* self, %s) {\n",
+                c_ret, class_name, method_name, class_name, c_params);
+    } else {
+        fprintf(translator->output, "%s %s_%s(%s* self) {\n",
+                c_ret, class_name, method_name, class_name);
+    }
+    translator->indent_level++;
+    
+    translator_emit_class_body(translator, body, false, class_name, parent_class);
+    
+    translator->indent_level--;
+    translator_write_indent(translator);
+    fprintf(translator->output, "}\n\n");
+}
+
 void translator_translate_class(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
     
@@ -2282,6 +2923,8 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
         fprintf(stderr, "Error: Failed to extract class name\n");
         return;
     }
+    
+    translator_register_class(translator, class_name, parent_class);
     
     /* Output struct definition */
     translator_write_indent(translator);
@@ -2405,63 +3048,102 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
     translator->indent_level--;
     translator_write_indent(translator);
     fprintf(translator->output, "} %s;\n", class_name);
+    fprintf(translator->output, "HUST_VEC_DECLARE(%s, %s)\n", class_name, class_name);
     fprintf(translator->output, "\n");
     
-    /* Second pass: output methods outside struct */
+    /* Second pass: output methods/constructors outside struct */
     body = strdup(node->value);
     if (body) {
+        char* lines[1024];
+        int line_count = 0;
         char* saveptr = NULL;
         char* body_line = strtok_r(body, "\n", &saveptr);
-        bool first_line = true;
-        
-        while (body_line) {
-            /* Skip first line (class declaration) */
-            if (first_line) {
-                first_line = false;
-                body_line = strtok_r(NULL, "\n", &saveptr);
-                continue;
-            }
-            
-            /* Skip empty lines and closing brace */
-            char* trimmed = body_line;
-            while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
-            
-            if (*trimmed == '\0' || *trimmed == '}') {
-                body_line = strtok_r(NULL, "\n", &saveptr);
-                continue;
-            }
-            
-            /* Check if it's a method definition */
-            if (translator_is_method_definition(trimmed)) {
-                /* Translate method to C function */
-                translator_translate_method(translator, trimmed, class_name);
-            }
-            
+        while (body_line && line_count < 1024) {
+            lines[line_count++] = body_line;
             body_line = strtok_r(NULL, "\n", &saveptr);
+        }
+        
+        bool has_ctor = false;
+        int ctor_count = 0;
+        for (int i = 1; i < line_count; i++) {
+            char* trimmed = lines[i];
+            while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+            if (*trimmed == '\0' || *trimmed == '}') continue;
+            if (!translator_is_method_definition(trimmed)) continue;
+            
+            char sig[256] = {0};
+            strncpy(sig, trimmed, sizeof(sig) - 1);
+            char* br = strrchr(sig, '{');
+            if (br) *br = '\0';
+            char* se = sig + strlen(sig);
+            while (se > sig && (se[-1] == ' ' || se[-1] == '\t')) *--se = '\0';
+            
+            const char* q = sig;
+            while (*q == ' ' || *q == '\t') q++;
+            if (strncmp(q, "public ", 7) == 0) q += 7;
+            if (strncmp(q, "readonly ", 9) == 0) q += 9;
+            while (*q == ' ' || *q == '\t') q++;
+            char first[64] = {0};
+            size_t fn = 0;
+            while (*q && *q != ' ' && *q != '\t' && *q != '(' && fn < sizeof(first) - 1) {
+                first[fn++] = *q++;
+            }
+            first[fn] = '\0';
+            while (*q == ' ' || *q == '\t') q++;
+            bool is_ctor = (strcmp(first, class_name) == 0 && *q == '(');
+            if (is_ctor) {
+                has_ctor = true;
+                ctor_count++;
+            }
+            
+            char method_body[4096] = {0};
+            int depth = strchr(trimmed, '{') ? 1 : 0;
+            int j = i + 1;
+            if (depth == 0) {
+                while (j < line_count && !strchr(lines[j], '{')) j++;
+                if (j < line_count) {
+                    depth = 1;
+                    j++;
+                }
+            }
+            
+            for (; j < line_count && depth > 0; j++) {
+                char* l = lines[j];
+                while (*l == ' ' || *l == '\t') l++;
+                for (const char* c = l; *c; c++) {
+                    if (*c == '{') depth++;
+                    else if (*c == '}') depth--;
+                }
+                if (depth == 0) break;
+                strncat(method_body, l, sizeof(method_body) - strlen(method_body) - 2);
+                strncat(method_body, "\n", sizeof(method_body) - strlen(method_body) - 1);
+            }
+            
+            translator_emit_class_method(translator, sig, method_body, class_name, is_ctor, parent_class);
+            i = j;
+        }
+        
+        if (ctor_count > 1) {
+            fprintf(stderr, "Error: class `%s` declares multiple constructors; Hust allows exactly one constructor.\n", class_name);
+            translator->error_count++;
+        }
+        
+        if (!has_ctor) {
+            translator_write_indent(translator);
+            fprintf(translator->output, "%s %s_new(void) {\n", class_name, class_name);
+            translator->indent_level++;
+            translator_write_indent(translator);
+            fprintf(translator->output, "%s self = {0};\n", class_name);
+            translator_write_indent(translator);
+            fprintf(translator->output, "return self;\n");
+            translator->indent_level--;
+            translator_write_indent(translator);
+            fprintf(translator->output, "}\n\n");
         }
         
         free(body);
     }
     
-    /* Output constructor with parent initialization */
-    if (strlen(parent_class) > 0) {
-        translator_write_indent(translator);
-        fprintf(translator->output, "/* Constructor with parent initialization */\n");
-        translator_write_indent(translator);
-        fprintf(translator->output, "%s* %s_new() {\n", class_name, class_name);
-        translator->indent_level++;
-        translator_write_indent(translator);
-        fprintf(translator->output, "%s* self = malloc(sizeof(%s));\n", class_name, class_name);
-        translator_write_indent(translator);
-        fprintf(translator->output, "/* Initialize parent */\n");
-        translator_write_indent(translator);
-        fprintf(translator->output, "%s_init(&self->%s);\n", parent_class, parent_class);
-        translator_write_indent(translator);
-        fprintf(translator->output, "return self;\n");
-        translator->indent_level--;
-        translator_write_indent(translator);
-        fprintf(translator->output, "}\n\n");
-    }
 }
 
 /* Translate interface definition */
@@ -2472,6 +3154,19 @@ void translator_translate_interface(Translator* translator, ASTNode* node) {
     
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
+    
+    /* Shape interfaces must contain names only, never type words. */
+    if (strstr(line, " void ") || strstr(line, " i32 ") ||
+        strstr(line, " i64 ") || strstr(line, " i16 ") ||
+        strstr(line, " f32 ") || strstr(line, " f64 ") ||
+        strstr(line, " bool ") || strstr(line, " char ") ||
+        strstr(line, " String ") || strstr(line, " usize ") ||
+        strstr(line, "(void ") || strstr(line, "public void ") ||
+        strstr(line, "public i32 ") || strstr(line, "public String ")) {
+        fprintf(stderr, "Error: interface body must contain names only, not type words.\n");
+        translator->error_count++;
+        return;
+    }
     
     /* Check for interface definition */
     if (!translator_is_interface_definition(line)) {
@@ -2655,6 +3350,8 @@ void translator_translate_enum(Translator* translator, ASTNode* node) {
     }
     enum_name[j] = '\0';
     
+    translator_register_enum(translator, enum_name);
+    
     /* Output enum comment */
     translator_write_indent(translator);
     fprintf(translator->output, "/* Enum: %s */\n", enum_name);
@@ -2831,7 +3528,13 @@ static void translator_translate_array_push(Translator* translator, const char* 
     const char* args = push_pos + 6;
     char value[256] = {0};
     int j = 0;
-    while (*args && *args != ')' && j < 255) {
+    int depth = 1;
+    while (*args && depth > 0 && j < 255) {
+        if (*args == '(') depth++;
+        else if (*args == ')') {
+            depth--;
+            if (depth == 0) break;
+        }
         value[j++] = *args++;
     }
     value[j] = '\0';
@@ -2857,6 +3560,26 @@ static void translator_translate_array_push(Translator* translator, const char* 
             snprintf(elem_value, sizeof(elem_value), "%s_new()", inner_type);
         } else if (strcmp(info->elem_type, "String") == 0 && val_trim[0] == '"') {
             snprintf(elem_value, sizeof(elem_value), "HustString_new(%s)", val_trim);
+        } else if (strncmp(val_trim, "new ", 4) == 0) {
+            char new_cls[64] = {0};
+            const char* q = val_trim + 4;
+            size_t nn = 0;
+            while ((isalnum((unsigned char)*q) || *q == '_') && nn < sizeof(new_cls) - 1) {
+                new_cls[nn++] = *q++;
+            }
+            new_cls[nn] = '\0';
+            while (*q == ' ' || *q == '\t') q++;
+            char args[256] = {0};
+            if (*q == '(') {
+                const char* close = strrchr(q, ')');
+                if (close) {
+                    size_t alen = (size_t)(close - (q + 1));
+                    if (alen >= sizeof(args)) alen = sizeof(args) - 1;
+                    memcpy(args, q + 1, alen);
+                    args[alen] = '\0';
+                }
+            }
+            snprintf(elem_value, sizeof(elem_value), "%s_new(%s)", new_cls, args);
         } else {
             strncpy(elem_value, val_trim, sizeof(elem_value) - 1);
         }
@@ -3875,6 +4598,121 @@ static void translator_translate_standalone_method_call(Translator* translator, 
 }
 
 /* Translate statement */
+/* Translate class-typed declarations and class arrays. */
+static bool translator_try_translate_class_decl(Translator* translator, const char* line) {
+    if (!translator || !line) return false;
+    
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    char cls[64] = {0};
+    size_t cn = 0;
+    while ((isalnum((unsigned char)*p) || *p == '_') && cn < sizeof(cls) - 1) {
+        cls[cn++] = *p++;
+    }
+    cls[cn] = '\0';
+    if (!translator_is_known_class(translator, cls, cn)) return false;
+    
+    while (*p == ' ' || *p == '\t') p++;
+    
+    if (*p == '[') {
+        const char* close = strchr(p, ']');
+        if (!close) return false;
+        p = close + 1;
+        while (*p == ' ' || *p == '\t') p++;
+        
+        char var[64] = {0};
+        size_t vn = 0;
+        while ((isalnum((unsigned char)*p) || *p == '_') && vn < sizeof(var) - 1) {
+            var[vn++] = *p++;
+        }
+        var[vn] = '\0';
+        if (!var[0]) return false;
+        
+        char vec_type[128] = {0};
+        translator_make_vec_type(cls, 1, vec_type, sizeof(vec_type));
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s %s = %s_new();\n",
+                vec_type, var, vec_type);
+        translator_register_array(translator, var, cls, 1, true);
+        return true;
+    }
+    
+    char var[64] = {0};
+    size_t vn = 0;
+    while ((isalnum((unsigned char)*p) || *p == '_') && vn < sizeof(var) - 1) {
+        var[vn++] = *p++;
+    }
+    var[vn] = '\0';
+    if (!var[0]) return false;
+    
+    while (*p == ' ' || *p == '\t') p++;
+    
+    /* Function definition with a class return type: let the function path handle it. */
+    if (*p == '(') return false;
+    
+    if (*p != '=') {
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s %s;\n", cls, var);
+        translator_register_object(translator, var, cls);
+        return true;
+    }
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+    
+    char expr[256] = {0};
+    strncpy(expr, p, sizeof(expr) - 1);
+    size_t elen = strlen(expr);
+    while (elen > 0 && (expr[elen - 1] == ';' || expr[elen - 1] == ' ' ||
+                        expr[elen - 1] == '\t')) {
+        expr[--elen] = '\0';
+    }
+    
+    char* mv = strstr(expr, ".moveit()");
+    if (mv) {
+        memmove(mv, mv + 9, strlen(mv + 9) + 1);
+    }
+    
+    char final_expr[320] = {0};
+    if (strncmp(expr, "new ", 4) == 0) {
+        char new_cls[64] = {0};
+        const char* q = expr + 4;
+        size_t n = 0;
+        while ((isalnum((unsigned char)*q) || *q == '_') && n < sizeof(new_cls) - 1) {
+            new_cls[n++] = *q++;
+        }
+        new_cls[n] = '\0';
+        while (*q == ' ' || *q == '\t') q++;
+        const char* args = "";
+        char arg_buf[256] = {0};
+        if (*q == '(') {
+            const char* close = strrchr(q, ')');
+            if (close) {
+                size_t alen = (size_t)(close - (q + 1));
+                if (alen >= sizeof(arg_buf)) alen = sizeof(arg_buf) - 1;
+                memcpy(arg_buf, q + 1, alen);
+                arg_buf[alen] = '\0';
+                args = arg_buf;
+            }
+        }
+        snprintf(final_expr, sizeof(final_expr), "%s_new(%s)", new_cls, args);
+    } else {
+        strncpy(final_expr, expr, sizeof(final_expr) - 1);
+    }
+    
+    char enum_final[320] = {0};
+    if (translator_rewrite_enum_members(translator, final_expr, enum_final,
+                                        sizeof(enum_final))) {
+        strncpy(final_expr, enum_final, sizeof(final_expr) - 1);
+        final_expr[sizeof(final_expr) - 1] = '\0';
+    }
+    
+    translator_write_indent(translator);
+    fprintf(translator->output, "%s %s = %s;\n", cls, var, final_expr);
+    translator_register_object(translator, var, cls);
+    return true;
+}
+
 void translator_translate_statement(Translator* translator, ASTNode* node) {
     if (!translator || !node || !node->value) return;
     
@@ -3882,6 +4720,15 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
+    
+    /* `self` is deprecated in Hust; use `this`. */
+    if (strncmp(line, "self", 4) == 0 &&
+        (line[4] == '\0' || line[4] == ';' || line[4] == '.' ||
+         line[4] == ' ' || line[4] == '\t')) {
+        fprintf(stderr, "Error: `self` is deprecated in Hust; use `this` instead.\n");
+        translator->error_count++;
+        return;
+    }
     
     /* pass is a no-op statement. */
     if (strncmp(line, "pass", 4) == 0 &&
@@ -3919,7 +4766,55 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
                                               sizeof(rewritten_cmp))) {
         strncpy(stmt_buf, rewritten_cmp, sizeof(stmt_buf) - 1);
     }
+    
+    char rewritten_obj[2048] = {0};
+    if (translator_rewrite_object_method_calls(translator, stmt_buf, rewritten_obj,
+                                               sizeof(rewritten_obj))) {
+        strncpy(stmt_buf, rewritten_obj, sizeof(stmt_buf) - 1);
+    }
+    
+    char rewritten_enum[2048] = {0};
+    if (translator_rewrite_enum_members(translator, stmt_buf, rewritten_enum,
+                                        sizeof(rewritten_enum))) {
+        strncpy(stmt_buf, rewritten_enum, sizeof(stmt_buf) - 1);
+    }
     line = stmt_buf;
+    
+    if (translator->in_match_block && line[0] == '}') {
+        translator->indent_level--;
+        if (translator->indent_level < 0) translator->indent_level = 0;
+        translator_write_indent(translator);
+        fprintf(translator->output, "}\n");
+        translator_write_indent(translator);
+        fprintf(translator->output, "break;\n");
+        translator->in_match_block = false;
+        return;
+    }
+    
+    /* Returning an object: return new Class(args); */
+    if (strncmp(line, "return new ", 11) == 0) {
+        const char* q = line + 11;
+        char cls[64] = {0};
+        size_t n = 0;
+        while ((isalnum((unsigned char)*q) || *q == '_') && n < sizeof(cls) - 1) {
+            cls[n++] = *q++;
+        }
+        cls[n] = '\0';
+        while (*q == ' ' || *q == '\t') q++;
+        char args[256] = {0};
+        if (*q == '(') {
+            const char* close = strrchr(q, ')');
+            if (close) {
+                size_t alen = (size_t)(close - (q + 1));
+                if (alen >= sizeof(args)) alen = sizeof(args) - 1;
+                memcpy(args, q + 1, alen);
+                args[alen] = '\0';
+            }
+        }
+        translator_write_indent(translator);
+        fprintf(translator->output, "return %s_new(%s);\n", cls, args);
+        return;
+    }
     
     /* String literals returned from functions use the HustString runtime. */
     if (strncmp(line, "return", 6) == 0) {
@@ -3948,6 +4843,11 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     /* Check for import/use statement */
     if (translator_is_import_statement(line)) {
         translator_translate_import(translator, line);
+        return;
+    }
+    
+    /* Class-typed declarations and class arrays. */
+    if (translator_try_translate_class_decl(translator, line)) {
         return;
     }
     
@@ -4074,6 +4974,7 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
                 } else {
                     fprintf(translator->output, "%s %s = %s_new();\n", class_name, var_name, class_name);
                 }
+                translator_register_object(translator, var_name, class_name);
             } else {
                 /* Standalone: new Point(args) -> Point_new(args); */
                 translator_write_indent(translator);

@@ -171,7 +171,7 @@ make
 
 - 旧 130 个用例：121 个逐字节复制自 Hust-Rust，120 个 Rust 方言复制品已删除。
 - 10 个旧种子移至 `legacy/`，不纳入基线，待改写。
-- 新测试组已生成 **143 个用例**：
+- 新测试组已生成 **145 个用例**：
   - M1：62 个（pure 42 + c_stdio 10 + c_math 8 + 2 个多行 smoke）
   - M2：33 个（arrays 23 + strings 10）
   - M3：29 个（classes 16 + inheritance 5 + interfaces 8）
@@ -180,12 +180,13 @@ make
 - 2026-11-22 晚基线：
   - M1：62/62 通过
   - M2：32/33 通过
-  - M3：0/29 通过
-  - M4：11/21 通过
+  - M3：21/29 通过
+  - M4：21/21 通过
 - M1 已修复：DEBUG 输出、i8/i16/u8-u64 映射、函数调用被误判、C.* 通配导入、RUST.*/HUST.*/println! 方言错误、`int main`、pass、const、显式转换、for 块更新、单语句循环体。
 - M2 已修复：HustVec 运行时、静态 1D/N 维数组、动态 1D/2D/3D 数组、push/pop/len/index、replaceit、切片、const 维度、数组参数、HustString 运行时、String 声明/拼接/比较/长度/参数/返回、String 对象数组。
 - M2 剩余：`array_return`（C 不能按值返回数组，需要结构体包装或 out-param 降级）。
-- M3 剩余：类方法体、构造、继承、接口 vtable。
-- M4 剩余：enum/match、self/interface/重复构造/缺导入的负向检查。
+- M3 已修复：类方法体解析、value 语义构造/隐式构造、字段/方法/可见性/readonly、clone/moveit、类返回、对象数组、继承、super()、父类字段/方法调用。
+- M3 剩余：嵌套类（1）、接口 vtable 与接口变量/参数/返回/多态容器（7）。
+- M4 已修复：enum 类型注册与成员改写、match/switch/case/块分支、self 弃用、接口类型字、重复构造、先导入才能用 I/O 的负向检查。M4 全绿。
 - 待补：`m1/c_stdlib`（8）、`m1/c_string`（10）、`c_specific`（10），补齐后目标 171。
-- 优先级：先 M2，再 M3/M4；`c_specific/` 等 Q1 语法边界确认后补。
+- 优先级：先 M3 接口/嵌套类，再补 M2 `array_return` 和 C 专属测试。
