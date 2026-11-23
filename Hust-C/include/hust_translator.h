@@ -13,6 +13,9 @@
 #define HUST_MAX_STRINGS 128
 #define HUST_MAX_OBJECTS 128
 #define HUST_MAX_CLASSES 128
+#define HUST_MAX_INTERFACES 32
+#define HUST_MAX_IFACE_VARS 128
+#define HUST_MAX_ARRAY_RETURNS 32
 
 typedef struct {
     char name[64];
@@ -33,8 +36,31 @@ typedef struct {
 typedef struct {
     char name[64];
     char parent[64];
+    char interface_name[64];
     bool is_enum;
 } ClassInfo;
+
+typedef struct {
+    char name[64];
+    int arity;
+    bool has_return;
+} InterfaceMethod;
+
+typedef struct {
+    char name[64];
+    int method_count;
+    InterfaceMethod methods[32];
+} InterfaceInfo;
+
+typedef struct {
+    char name[64];
+    char interface_name[64];
+} IfaceVar;
+
+typedef struct {
+    char name[64];
+    char dims[64];
+} ArrayReturnFunc;
 
 /* Translator structure */
 typedef struct {
@@ -50,6 +76,14 @@ typedef struct {
     int object_count;
     ClassInfo classes[HUST_MAX_CLASSES];
     int class_count;
+    InterfaceInfo interfaces[HUST_MAX_INTERFACES];
+    int interface_count;
+    IfaceVar iface_vars[HUST_MAX_IFACE_VARS];
+    int iface_var_count;
+    ArrayReturnFunc array_returns[HUST_MAX_ARRAY_RETURNS];
+    int array_return_count;
+    bool in_array_return;
+    char array_return_out[64];
     bool in_match_block;
 } Translator;
 

@@ -179,14 +179,14 @@ make
 - 已超过 Hust-Rust 的 134 个活跃用例。
 - 2026-11-22 晚基线：
   - M1：62/62 通过
-  - M2：32/33 通过
-  - M3：21/29 通过
+  - M2：33/33 通过
+  - M3：29/29 通过
   - M4：21/21 通过
+  - 总计：145/145
 - M1 已修复：DEBUG 输出、i8/i16/u8-u64 映射、函数调用被误判、C.* 通配导入、RUST.*/HUST.*/println! 方言错误、`int main`、pass、const、显式转换、for 块更新、单语句循环体。
-- M2 已修复：HustVec 运行时、静态 1D/N 维数组、动态 1D/2D/3D 数组、push/pop/len/index、replaceit、切片、const 维度、数组参数、HustString 运行时、String 声明/拼接/比较/长度/参数/返回、String 对象数组。
-- M2 剩余：`array_return`（C 不能按值返回数组，需要结构体包装或 out-param 降级）。
-- M3 已修复：类方法体解析、value 语义构造/隐式构造、字段/方法/可见性/readonly、clone/moveit、类返回、对象数组、继承、super()、父类字段/方法调用。
-- M3 剩余：嵌套类（1）、接口 vtable 与接口变量/参数/返回/多态容器（7）。
-- M4 已修复：enum 类型注册与成员改写、match/switch/case/块分支、self 弃用、接口类型字、重复构造、先导入才能用 I/O 的负向检查。M4 全绿。
+- M2 已修复：HustVec 运行时、静态 1D/N 维数组、动态 1D/2D/3D 数组、push/pop/len/index、replaceit、切片、const 维度、数组参数、HustString 运行时、String 声明/拼接/比较/长度/参数/返回、String 对象数组、数组返回（out-param 降级）。
+- M3 已修复：类方法体解析、value 语义构造/隐式构造、字段/方法/可见性/readonly、clone/moveit、类返回、对象数组、继承、super()、父类字段/方法调用、接口 vtable/handle、接口变量/参数/返回/多态容器、嵌套类扁平化。
+- M4 已修复：enum 类型注册与成员改写、match/switch/case/块分支、self 弃用、接口类型字、重复构造、先导入才能用 I/O 的负向检查。
+- 当前 M1-M4 全部通过。
 - 待补：`m1/c_stdlib`（8）、`m1/c_string`（10）、`c_specific`（10），补齐后目标 171。
-- 优先级：先 M3 接口/嵌套类，再补 M2 `array_return` 和 C 专属测试。
+- 下一步：补 C 专属测试（依赖 Q1 语法边界确认）、C.stdlib/C.string 用例、HUST.* 与模块/命名空间。

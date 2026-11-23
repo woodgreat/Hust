@@ -340,6 +340,15 @@ static bool parser_has_char_outside_strings(const char* line, char target) {
     return false;
 }
 
+/* Detect functions whose return type contains parentheses, e.g. Interface(T) make(). */
+static bool parser_is_generic_function_def(const char* line) {
+    if (!line || !strchr(line, '{') || !strchr(line, '(')) return false;
+    const char* p1 = strchr(line, '(');
+    const char* p2 = p1 ? strchr(p1 + 1, ')') : NULL;
+    if (!p2) return false;
+    return strchr(p2 + 1, '(') != NULL;
+}
+
 /* V2 node type detection - refactored with single responsibility */
 NodeType parser_detect_node_type_v2(const char* line) {
     if (!line || line[0] == '\0') return NODE_UNKNOWN;
@@ -404,6 +413,9 @@ NodeType parser_detect_node_type_v2(const char* line) {
     }
     
     /* Check for function definition */
+    if (parser_is_generic_function_def(stripped)) {
+        return NODE_FUNCTION_DEF;
+    }
     if (parser_is_function_def(stripped)) {
         return NODE_FUNCTION_DEF;
     }
