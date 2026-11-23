@@ -171,24 +171,24 @@ make
 
 - 旧 130 个用例：121 个逐字节复制自 Hust-Rust，120 个 Rust 方言复制品已删除。
 - 10 个旧种子移至 `legacy/`，不纳入基线，待改写。
-- 新测试组已生成 **171 个用例**：
+- 新测试组已生成 **177 个用例**：
   - M1：80 个（pure 42 + c_stdio 10 + c_math 8 + c_stdlib 8 + c_string 10 + 2 个多行 smoke）
   - M2：33 个（arrays 23 + strings 10）
   - M3：29 个（classes 16 + inheritance 5 + interfaces 8）
-  - M4：21 个（enum_match 6 + modules 5 + negative 10）
+  - M4：27 个（enum_match 6 + modules 5 + negative 10 + modules_user 6）
   - C-specific：8 个（指针、C 风格数组、null、sizeof）
 - 已超过 Hust-Rust 的 134 个活跃用例。
 - 2026-11-22 晚基线：
   - M1：80/80 通过
   - M2：33/33 通过
   - M3：29/29 通过
-  - M4：21/21 通过
+  - M4：27/27 通过
   - C-specific：8/8 通过
-  - 总计：171/171
+  - 总计：177/177
 - M1 已修复：DEBUG 输出、i8/i16/u8-u64 映射、函数调用被误判、C.* 通配导入、RUST.*/HUST.*/println! 方言错误、`int main`、pass、const、显式转换、for 块更新、单语句循环体、C.stdlib/C.string。
 - M2 已修复：HustVec 运行时、静态 1D/N 维数组、动态 1D/2D/3D 数组、push/pop/len/index、replaceit、切片、const 维度、数组参数、HustString 运行时、String 声明/拼接/比较/长度/参数/返回、String 对象数组、数组返回（out-param 降级）。
 - M3 已修复：类方法体解析、value 语义构造/隐式构造、字段/方法/可见性/readonly、clone/moveit、类返回、对象数组、继承、super()、父类字段/方法调用、接口 vtable/handle、接口变量/参数/返回/多态容器、嵌套类扁平化。
-- M4 已修复：enum 类型注册与成员改写、match/switch/case/块分支、self 弃用、接口类型字、重复构造、先导入才能用 I/O 的负向检查。
-- C-specific 暂定边界（待 owner 最终确认）：C 方言允许指针、C 风格数组、`null`、`sizeof`、C 库调用。
+- M4 已修复：enum 类型注册与成员改写、match/switch/case/块分支、self 弃用、接口类型字、重复构造、先导入才能用 I/O 的负向检查、用户模块/命名空间/use（项目模式、settings.config 路径、依赖链、类模块）。
+- C-specific 边界（2026-11-22 owner 确认，暂定先用）：允许指针、C 风格数组、`null`、`sizeof`、C 库调用；`struct` 后续再补。
 - 当前全部测试组通过。
-- 下一步：扩展 HUST.* 与模块/命名空间，增加真实项目级用例。
+- 下一步：内存/越界安全闭环、错误处理、C 方言 struct/函数指针、HUST.* 与真实项目级用例。

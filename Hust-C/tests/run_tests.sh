@@ -60,11 +60,24 @@ run_one() {
     local run_err="$OUT_DIR/${base}.run.err"
     local expected="${src%.hust}.expected"
     local expected_err="${src%.hust}.expected.err"
+    local src_dir
+    src_dir="$(dirname "$src")"
+    local src_base
+    src_base="$(basename "$src")"
+
+    # Project directories: only main.hust is an entry; module files are loaded by it.
+    if [ -f "$src_dir/settings.config" ] && [ "$src_base" != "main.hust" ]; then
+        return
+    fi
 
     total=$((total + 1))
+    local project_flag=""
+    if [ -f "$src_dir/settings.config" ]; then
+        project_flag="--project"
+    fi
 
     # 1. Translate
-    if ! "$HUST_C" "$src" -o "$c_file" > /dev/null 2> "$tr_err"; then
+    if ! "$HUST_C" "$src" $project_flag -o "$c_file" > /dev/null 2> "$tr_err"; then
         if [ -f "$expected_err" ]; then
             local needle
             needle="$(head -n 1 "$expected_err")"

@@ -16,6 +16,7 @@
 #define HUST_MAX_INTERFACES 32
 #define HUST_MAX_IFACE_VARS 128
 #define HUST_MAX_ARRAY_RETURNS 32
+#define HUST_MAX_MODULES 64
 
 typedef struct {
     char name[64];
@@ -62,6 +63,10 @@ typedef struct {
     char dims[64];
 } ArrayReturnFunc;
 
+typedef struct {
+    char name[64];
+} ModuleInfo;
+
 /* Translator structure */
 typedef struct {
     ASTNode* ast;
@@ -84,6 +89,8 @@ typedef struct {
     int array_return_count;
     bool in_array_return;
     char array_return_out[64];
+    ModuleInfo modules[HUST_MAX_MODULES];
+    int module_count;
     bool in_match_block;
 } Translator;
 

@@ -1,0 +1,7 @@
+use C.stdio.*;
+use shapes.*;
+
+void main() {
+    Point p = new Point(1, 2);
+    printf("%d\n", p.sum());
+}

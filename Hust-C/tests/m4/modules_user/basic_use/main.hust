@@ -1,0 +1,6 @@
+use C.stdio.*;
+use math.*;
+
+void main() {
+    printf("%d\n", add(2, 3));
+}

@@ -29,6 +29,7 @@ Translator* translator_new(ASTNode* ast, FILE* output) {
     translator->array_return_count = 0;
     translator->in_array_return = false;
     translator->array_return_out[0] = '\0';
+    translator->module_count = 0;
     translator->in_match_block = false;
     
     return translator;
@@ -847,6 +848,82 @@ static bool translator_find_array_return(Translator* translator, const char* nam
     return false;
 }
 
+static void translator_register_module(Translator* translator, const char* name) {
+    if (!translator || !name || !*name) return;
+    for (int i = 0; i < translator->module_count; i++) {
+        if (strcmp(translator->modules[i].name, name) == 0) return;
+    }
+    if (translator->module_count >= HUST_MAX_MODULES) return;
+    strncpy(translator->modules[translator->module_count].name, name,
+            sizeof(translator->modules[0].name) - 1);
+    translator->module_count++;
+}
+
+static bool translator_is_module(Translator* translator, const char* name, size_t len) {
+    if (!translator || !name) return false;
+    for (int i = 0; i < translator->module_count; i++) {
+        if (strlen(translator->modules[i].name) == len &&
+            strncmp(translator->modules[i].name, name, len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Rewrite module.func / module.Class to bare names in a combined C file. */
+static bool translator_rewrite_module_prefixes(Translator* translator,
+                                               const char* text,
+                                               char* out, size_t out_size) {
+    if (!translator || !text || !out || out_size == 0) return false;
+    size_t o = 0;
+    bool changed = false;
+    const char* p = text;
+    while (*p && o + 1 < out_size) {
+        if (*p == '"') {
+            out[o++] = *p++;
+            while (*p && o + 1 < out_size) {
+                if (*p == '\\' && p[1]) {
+                    out[o++] = *p++;
+                    if (o + 1 < out_size) out[o++] = *p++;
+                } else if (*p == '"') {
+                    out[o++] = *p++;
+                    break;
+                } else {
+                    out[o++] = *p++;
+                }
+            }
+            continue;
+        }
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            char name[64] = {0};
+            size_t n = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && n < sizeof(name) - 1) {
+                name[n++] = *p++;
+            }
+            name[n] = '\0';
+            if (*p == '.' && translator_is_module(translator, name, n)) {
+                const char* q = p + 1;
+                char item[64] = {0};
+                size_t in = 0;
+                while ((isalnum((unsigned char)*q) || *q == '_') && in < sizeof(item) - 1) {
+                    item[in++] = *q++;
+                }
+                if (in > 0) {
+                    o += (size_t)snprintf(out + o, out_size - o, "%s", item);
+                    changed = true;
+                    p = q;
+                    continue;
+                }
+            }
+            o += (size_t)snprintf(out + o, out_size - o, "%s", name);
+            continue;
+        }
+        out[o++] = *p++;
+    }
+    out[o] = '\0';
+    return changed;
+}
+
 /* Rewrite array accesses outside strings. Dynamic arrays use .data[idx]. */
 static bool translator_rewrite_array_accesses(Translator* translator,
                                               const char* line,
@@ -1613,6 +1690,13 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     if (translator_rewrite_interface_calls(translator, rest, rewritten_ifcall,
                                            sizeof(rewritten_ifcall))) {
         strncpy(rest, rewritten_ifcall, sizeof(rest) - 1);
+        rest[sizeof(rest) - 1] = '\0';
+    }
+    
+    char rewritten_module[512] = {0};
+    if (translator_rewrite_module_prefixes(translator, rest, rewritten_module,
+                                           sizeof(rewritten_module))) {
+        strncpy(rest, rewritten_module, sizeof(rest) - 1);
         rest[sizeof(rest) - 1] = '\0';
     }
     
@@ -3155,6 +3239,12 @@ void translator_translate_class(Translator* translator, ASTNode* node) {
     
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
+    
+    /* Skip public visibility modifier */
+    if (strncmp(line, "public ", 7) == 0) {
+        line += 7;
+        while (*line == ' ' || *line == '\t') line++;
+    }
     
     /* Check if this is actually an interface */
     if (translator_is_interface_definition(line)) {
@@ -4886,9 +4976,14 @@ static void translator_translate_import(Translator* translator, const char* line
         return;
     }
     
-    /* User module: output #include directive */
-    translator_write_indent(translator);
-    fprintf(translator->output, "#include \"%s.h\"\n", module_name);
+    /* User module: code is concatenated in project mode, so no #include. */
+    char base_module[64] = {0};
+    size_t bm = 0;
+    for (const char* q = module_name; *q && *q != '.' && bm < sizeof(base_module) - 1; q++) {
+        base_module[bm++] = *q;
+    }
+    base_module[bm] = '\0';
+    translator_register_module(translator, base_module);
 }
 
 /* Helper: Translate standalone method call */
@@ -5544,6 +5639,11 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
         return;
     }
     
+    /* Namespace declarations are metadata; C uses flattened global names. */
+    if (strncmp(line, "namespace ", 10) == 0) {
+        return;
+    }
+    
     /* pass is a no-op statement. */
     if (strncmp(line, "pass", 4) == 0 &&
         (line[4] == '\0' || line[4] == ';' || line[4] == ' ' || line[4] == '\t')) {
@@ -5611,6 +5711,13 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
         line = stmt_buf;
     }
     
+    char rewritten_module[2048] = {0};
+    if (translator_rewrite_module_prefixes(translator, stmt_buf, rewritten_module,
+                                           sizeof(rewritten_module))) {
+        strncpy(stmt_buf, rewritten_module, sizeof(stmt_buf) - 1);
+        line = stmt_buf;
+    }
+    
     if (translator->in_match_block && line[0] == '}') {
         translator->indent_level--;
         if (translator->indent_level < 0) translator->indent_level = 0;
@@ -5624,8 +5731,7 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     
     if (translator_try_translate_interface_decl(translator, line)) return;
     if (translator_try_translate_interface_assign(translator, line)) return;
-    if (translator_try_translate_class_decl(translator, line)) return;
-    
+    if (translator_try_translate_class_decl(translator, line)) return;    
     char rewritten_ifnew[2048] = {0};
     if (translator_rewrite_interface_new(translator, stmt_buf, rewritten_ifnew,
                                          sizeof(rewritten_ifnew))) {

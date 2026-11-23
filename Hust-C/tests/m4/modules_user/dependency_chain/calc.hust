@@ -1,0 +1,5 @@
+use math.*;
+
+public i32 twice_sum(i32 a, i32 b) {
+    return add(a, b) * 2;
+}
