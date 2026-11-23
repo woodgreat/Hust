@@ -4984,6 +4984,20 @@ static void translator_translate_import(Translator* translator, const char* line
     }
     base_module[bm] = '\0';
     translator_register_module(translator, base_module);
+    
+    /* Alias import: use module as alias; */
+    const char* as_pos = strstr(line, " as ");
+    if (as_pos) {
+        char alias[64] = {0};
+        size_t an = 0;
+        const char* ap = as_pos + 4;
+        while (*ap == ' ' || *ap == '\t') ap++;
+        while (*ap && *ap != ';' && *ap != ' ' && *ap != '\t' && an < sizeof(alias) - 1) {
+            alias[an++] = *ap++;
+        }
+        alias[an] = '\0';
+        if (alias[0]) translator_register_module(translator, alias);
+    }
 }
 
 /* Helper: Translate standalone method call */

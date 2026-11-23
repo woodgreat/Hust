@@ -160,4 +160,20 @@ void main() {
     "6\n",
 )
 
+write_case(
+    "alias_use",
+    {
+        "math.hust": MATH_ADD,
+        "main.hust": """
+use C.stdio.*;
+use math as m;
+
+void main() {
+    printf("%d\\n", m.add(5, 6));
+}
+""",
+    },
+    "11\n",
+)
+
 print("Generated user module project tests.")
