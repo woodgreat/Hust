@@ -8,6 +8,9 @@
 #include "../include/hust_mappings.h"
 #include <ctype.h>
 
+static void translator_register_string_params(Translator* translator, const char* params);
+static void translator_register_array_params(Translator* translator, const char* params);
+
 /* Create a new translator */
 Translator* translator_new(ASTNode* ast, FILE* output) {
     Translator* translator = (Translator*)malloc(sizeof(Translator));
@@ -16,6 +19,9 @@ Translator* translator_new(ASTNode* ast, FILE* output) {
     translator->ast = ast;
     translator->output = output ? output : stdout;
     translator->indent_level = 0;
+    translator->error_count = 0;
+    translator->array_count = 0;
+    translator->string_count = 0;
     
     return translator;
 }
@@ -39,19 +45,33 @@ void translator_write_indent(Translator* translator) {
 int translator_translate(Translator* translator) {
     if (!translator || !translator->ast) return -1;
     
-    /* Write C header */
+    /* Layer-1 dialect check: mixed cores are not allowed. */
+    bool has_c = false;
+    bool has_rust = false;
+    for (int i = 0; i < translator->ast->child_count; i++) {
+        const char* v = translator->ast->children[i]->value;
+        if (!v) continue;
+        if (strstr(v, "use C.")) has_c = true;
+        if (strstr(v, "use RUST.")) has_rust = true;
+    }
+    if (has_c && has_rust) {
+        fprintf(stderr, "Error: mixed language cores are not allowed (C.* and RUST.*).\n");
+        translator->error_count++;
+    }
+    
+    /* Write C header. C library headers are imported via C.* modules. */
     fprintf(translator->output, "#include <stdbool.h>\n");
     fprintf(translator->output, "#include <stdint.h>\n");
-    fprintf(translator->output, "#include <stdio.h>\n");
-    fprintf(translator->output, "#include <stdlib.h>\n");
-    fprintf(translator->output, "#include <string.h>\n");
+    fprintf(translator->output, "#include <stddef.h>\n");
     fprintf(translator->output, "#include \"hust_error.h\"\n");
+    fprintf(translator->output, "#include \"hust_vec.h\"\n");
+    fprintf(translator->output, "#include \"hust_string.h\"\n");
     fprintf(translator->output, "\n");
     
     /* Translate root node */
     translator_translate_node(translator, translator->ast);
     
-    return 0;
+    return translator->error_count > 0 ? 1 : 0;
 }
 
 /* Translate a single AST node */
@@ -204,10 +224,22 @@ static void translator_convert_param(const char* param, char* c_param, size_t c_
     p_name[l] = '\0';
     
     /* Convert type */
-    const char* c_type = get_c_type(p_type);
-    
-    /* Build C parameter */
-    snprintf(c_param, c_param_size, "%s %s", c_type, p_name);
+    if (strchr(p_type, '[')) {
+        char base[32] = {0};
+        const char* bracket = strchr(p_type, '[');
+        size_t blen = (size_t)(bracket - p_type);
+        if (blen >= sizeof(base)) blen = sizeof(base) - 1;
+        memcpy(base, p_type, blen);
+        base[blen] = '\0';
+        
+        if (strstr(bracket, "[]")) {
+            snprintf(c_param, c_param_size, "HustVec_%s %s", base, p_name);
+        } else {
+            snprintf(c_param, c_param_size, "%s %s%s", get_c_type(base), p_name, bracket);
+        }
+    } else {
+        snprintf(c_param, c_param_size, "%s %s", get_c_type(p_type), p_name);
+    }
 }
 
 /* Helper: Convert all parameters from Hust to C */
@@ -262,7 +294,7 @@ void translator_translate_function(Translator* translator, ASTNode* node) {
     
     /* Check for main function */
     if (translator_is_main_function(line)) {
-        fprintf(translator->output, "void main(void) {\n");
+        fprintf(translator->output, "int main(void) {\n");
         translator->indent_level++;
         return;
     }
@@ -283,9 +315,599 @@ void translator_translate_function(Translator* translator, ASTNode* node) {
     /* Convert parameters */
     char c_params[256] = {0};
     translator_convert_params(sig.params, c_params, sizeof(c_params));
+    translator_register_string_params(translator, sig.params);
+    translator_register_array_params(translator, sig.params);
     
     /* Output function signature */
     translator_output_function_signature(translator, c_return_type, sig.func_name, c_params);
+}
+
+/* Convert Hust C-style type casts such as (i32) to C types. */
+static void translator_convert_type_casts(char* text, size_t size) {
+    if (!text || size == 0) return;
+    
+    char out[512] = {0};
+    size_t o = 0;
+    size_t n = strlen(text);
+    
+    for (size_t i = 0; i < n && o + 1 < sizeof(out); ) {
+        if (text[i] == '(') {
+            const char* close = strchr(text + i + 1, ')');
+            if (close) {
+                size_t tlen = (size_t)(close - (text + i + 1));
+                if (tlen > 0 && tlen < 16) {
+                    char t[16] = {0};
+                    memcpy(t, text + i + 1, tlen);
+                    char* ts = t;
+                    while (*ts == ' ' || *ts == '\t') ts++;
+                    char* te = ts + strlen(ts);
+                    while (te > ts && (te[-1] == ' ' || te[-1] == '\t')) *--te = '\0';
+                    const char* ct = get_c_type(ts);
+                    if (ct && strcmp(ct, ts) != 0) {
+                        o += (size_t)snprintf(out + o, sizeof(out) - o, "(%s)", ct);
+                        i = (size_t)(close - text) + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out[o++] = text[i++];
+    }
+    
+    out[o] = '\0';
+    strncpy(text, out, size - 1);
+    text[size - 1] = '\0';
+}
+
+static void translator_register_array(Translator* translator, const char* name,
+                                      const char* elem_type, int dims, bool is_dynamic) {
+    if (!translator || !name || !*name) return;
+    
+    for (int i = 0; i < translator->array_count; i++) {
+        if (strcmp(translator->arrays[i].name, name) == 0) {
+            strncpy(translator->arrays[i].elem_type, elem_type ? elem_type : "",
+                    sizeof(translator->arrays[i].elem_type) - 1);
+            translator->arrays[i].dims = dims;
+            translator->arrays[i].is_dynamic = is_dynamic;
+            return;
+        }
+    }
+    
+    if (translator->array_count >= HUST_MAX_ARRAYS) return;
+    
+    ArrayInfo* info = &translator->arrays[translator->array_count++];
+    strncpy(info->name, name, sizeof(info->name) - 1);
+    strncpy(info->elem_type, elem_type ? elem_type : "", sizeof(info->elem_type) - 1);
+    info->dims = dims;
+    info->is_dynamic = is_dynamic;
+}
+
+static const ArrayInfo* translator_find_array(Translator* translator, const char* name, size_t len) {
+    if (!translator || !name) return NULL;
+    for (int i = 0; i < translator->array_count; i++) {
+        if (strlen(translator->arrays[i].name) == len &&
+            strncmp(translator->arrays[i].name, name, len) == 0) {
+            return &translator->arrays[i];
+        }
+    }
+    return NULL;
+}
+
+static void translator_register_string(Translator* translator, const char* name) {
+    if (!translator || !name || !*name) return;
+    for (int i = 0; i < translator->string_count; i++) {
+        if (strcmp(translator->strings[i].name, name) == 0) return;
+    }
+    if (translator->string_count >= HUST_MAX_STRINGS) return;
+    strncpy(translator->strings[translator->string_count].name, name,
+            sizeof(translator->strings[0].name) - 1);
+    translator->string_count++;
+}
+
+static bool translator_is_string_var(Translator* translator, const char* name, size_t len) {
+    if (!translator || !name) return false;
+    for (int i = 0; i < translator->string_count; i++) {
+        if (strlen(translator->strings[i].name) == len &&
+            strncmp(translator->strings[i].name, name, len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void translator_register_string_params(Translator* translator, const char* params) {
+    if (!translator || !params) return;
+    
+    const char* p = params;
+    while (*p) {
+        const char* comma = strchr(p, ',');
+        size_t len = comma ? (size_t)(comma - p) : strlen(p);
+        char token[128] = {0};
+        if (len >= sizeof(token)) len = sizeof(token) - 1;
+        memcpy(token, p, len);
+        token[len] = '\0';
+        
+        char* s = token;
+        while (*s == ' ' || *s == '\t') s++;
+        if (strncmp(s, "String ", 7) == 0) {
+            char* name = s + 7;
+            while (*name == ' ' || *name == '\t') name++;
+            char* end = name;
+            while (*end && *end != ' ' && *end != '\t') end++;
+            *end = '\0';
+            translator_register_string(translator, name);
+        }
+        
+        if (!comma) break;
+        p = comma + 1;
+    }
+}
+
+static void translator_register_array_params(Translator* translator, const char* params) {
+    if (!translator || !params) return;
+    
+    const char* p = params;
+    while (*p) {
+        const char* comma = strchr(p, ',');
+        size_t len = comma ? (size_t)(comma - p) : strlen(p);
+        char token[128] = {0};
+        if (len >= sizeof(token)) len = sizeof(token) - 1;
+        memcpy(token, p, len);
+        token[len] = '\0';
+        
+        char* s = token;
+        while (*s == ' ' || *s == '\t') s++;
+        char* bracket = strchr(s, '[');
+        if (bracket) {
+            char base[32] = {0};
+            size_t blen = (size_t)(bracket - s);
+            if (blen >= sizeof(base)) blen = sizeof(base) - 1;
+            memcpy(base, s, blen);
+            base[blen] = '\0';
+            
+            char* last = strrchr(s, ']');
+            char* name = last ? last + 1 : bracket;
+            while (*name == ' ' || *name == '\t') name++;
+            char* name_end = name;
+            while (*name_end && *name_end != ' ' && *name_end != '\t') name_end++;
+            *name_end = '\0';
+            
+            int dims = 0;
+            for (char* q = bracket; *q; q++) {
+                if (*q == '[') dims++;
+            }
+            bool is_dynamic = strstr(bracket, "[]") != NULL;
+            if (name[0]) {
+                translator_register_array(translator, name, base, dims, is_dynamic);
+            }
+        }
+        
+        if (!comma) break;
+        p = comma + 1;
+    }
+}
+
+static void translator_make_vec_type(const char* base, int dims,
+                                     char* out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    out[0] = '\0';
+    for (int i = 0; i < dims; i++) {
+        strncat(out, "HustVec_", out_size - strlen(out) - 1);
+    }
+    strncat(out, base ? base : "i32", out_size - strlen(out) - 1);
+}
+
+/* Resolve a variable or a var.data[i] chain to its remaining dimension count. */
+static bool translator_resolve_array_expr(Translator* translator, const char* obj,
+                                          const ArrayInfo** out_info,
+                                          int* out_remaining) {
+    if (!translator || !obj || !*obj) return false;
+    
+    const ArrayInfo* info = translator_find_array(translator, obj, strlen(obj));
+    if (info) {
+        *out_info = info;
+        *out_remaining = info->dims;
+        return true;
+    }
+    
+    char name[64] = {0};
+    size_t n = 0;
+    while (obj[n] && obj[n] != '.' && n < sizeof(name) - 1) {
+        name[n] = obj[n];
+        n++;
+    }
+    name[n] = '\0';
+    
+    info = translator_find_array(translator, name, n);
+    if (!info) return false;
+    
+    int levels = 0;
+    const char* p = obj + n;
+    while (strncmp(p, ".data[", 6) == 0) {
+        const char* close = strchr(p + 6, ']');
+        if (!close) break;
+        levels++;
+        p = close + 1;
+    }
+    
+    if (levels <= 0 || levels >= info->dims) return false;
+    *out_info = info;
+    *out_remaining = info->dims - levels;
+    return true;
+}
+
+/* Rewrite array accesses outside strings. Dynamic arrays use .data[idx]. */
+static bool translator_rewrite_array_accesses(Translator* translator,
+                                              const char* line,
+                                              char* out, size_t out_size) {
+    if (!translator || !line || !out || out_size == 0) return false;
+    
+    size_t o = 0;
+    bool changed = false;
+    const char* p = line;
+    
+    while (*p && o + 1 < out_size) {
+        if (*p == '"') {
+            out[o++] = *p++;
+            while (*p && o + 1 < out_size) {
+                if (*p == '\\' && p[1]) {
+                    out[o++] = *p++;
+                    if (o + 1 < out_size) out[o++] = *p++;
+                } else if (*p == '"') {
+                    out[o++] = *p++;
+                    break;
+                } else {
+                    out[o++] = *p++;
+                }
+            }
+            continue;
+        }
+        
+        if (*p == '/' && p[1] == '/') {
+            while (*p && o + 1 < out_size) out[o++] = *p++;
+            break;
+        }
+        
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            char name[64] = {0};
+            size_t n = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && n < sizeof(name) - 1) {
+                name[n++] = *p++;
+            }
+            name[n] = '\0';
+            
+            const char* bracket = p;
+            while (*bracket == ' ' || *bracket == '\t') bracket++;
+            
+            const ArrayInfo* info = translator_find_array(translator, name, n);
+            if (info && *bracket == '[') {
+                p = bracket;
+                o += (size_t)snprintf(out + o, out_size - o, "%s", name);
+                if (info->is_dynamic) changed = true;
+                
+                int level = 0;
+                while (*p == '[' && o + 1 < out_size) {
+                    const char* close = strchr(p + 1, ']');
+                    if (!close) break;
+                    if (info->is_dynamic) {
+                        o += (size_t)snprintf(out + o, out_size - o, ".data");
+                    }
+                    o += (size_t)snprintf(out + o, out_size - o, "[%.*s]",
+                                          (int)(close - (p + 1)), p + 1);
+                    p = close + 1;
+                    level++;
+                    if (level >= info->dims) break;
+                }
+                continue;
+            }
+            
+            o += (size_t)snprintf(out + o, out_size - o, "%s", name);
+            continue;
+        }
+        
+        out[o++] = *p++;
+    }
+    
+    out[o] = '\0';
+    return changed;
+}
+
+/* Rewrite .len() calls on declared arrays. */
+static bool translator_rewrite_len_calls(Translator* translator,
+                                         const char* text,
+                                         char* out, size_t out_size) {
+    if (!translator || !text || !out || out_size == 0) return false;
+    
+    size_t o = 0;
+    bool changed = false;
+    const char* p = text;
+    
+    while (*p && o + 1 < out_size) {
+        if (*p == '"') {
+            out[o++] = *p++;
+            while (*p && o + 1 < out_size) {
+                if (*p == '\\' && p[1]) {
+                    out[o++] = *p++;
+                    if (o + 1 < out_size) out[o++] = *p++;
+                } else if (*p == '"') {
+                    out[o++] = *p++;
+                    break;
+                } else {
+                    out[o++] = *p++;
+                }
+            }
+            continue;
+        }
+        
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            char name[64] = {0};
+            size_t n = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && n < sizeof(name) - 1) {
+                name[n++] = *p++;
+            }
+            name[n] = '\0';
+            
+            const char* q = p;
+            while (*q == ' ' || *q == '\t') q++;
+            
+            /* String element inside a dynamic array: a.data[i].len() */
+            if (strncmp(q, ".data[", 6) == 0) {
+                const char* close = strchr(q + 6, ']');
+                if (close) {
+                    const char* r = close + 1;
+                    while (*r == ' ' || *r == '\t') r++;
+                    if (strncmp(r, ".len", 4) == 0) {
+                        const char* z = r + 4;
+                        while (*z == ' ' || *z == '\t') z++;
+                        if (*z == '(' && *(z + 1) == ')') {
+                            const ArrayInfo* info = translator_find_array(translator, name, n);
+                            if (info && info->is_dynamic) {
+                                int remaining = info->dims - 1;
+                                if (remaining >= 1) {
+                                    char vec_type[128] = {0};
+                                    translator_make_vec_type(info->elem_type, remaining,
+                                                             vec_type, sizeof(vec_type));
+                                    o += (size_t)snprintf(out + o, out_size - o,
+                                                          "%s_len(&%s.data[%.*s])",
+                                                          vec_type, name,
+                                                          (int)(close - (q + 6)), q + 6);
+                                    changed = true;
+                                    p = z + 2;
+                                    continue;
+                                }
+                                if (strcmp(info->elem_type, "String") == 0) {
+                                    o += (size_t)snprintf(out + o, out_size - o,
+                                                          "HustString_len(%s.data[%.*s])",
+                                                          name, (int)(close - (q + 6)), q + 6);
+                                    changed = true;
+                                    p = z + 2;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (strncmp(q, ".len", 4) == 0) {
+                const char* r = q + 4;
+                while (*r == ' ' || *r == '\t') r++;
+                if (*r == '(' && *(r + 1) == ')') {
+                    const ArrayInfo* info = translator_find_array(translator, name, n);
+                    if (info) {
+                        if (info->is_dynamic) {
+                            char vec_type[128] = {0};
+                            translator_make_vec_type(info->elem_type, info->dims,
+                                                     vec_type, sizeof(vec_type));
+                            o += (size_t)snprintf(out + o, out_size - o,
+                                                  "%s_len(&%s)",
+                                                  vec_type, name);
+                        } else {
+                            o += (size_t)snprintf(out + o, out_size - o,
+                                                  "(sizeof(%s)/sizeof(%s[0]))",
+                                                  name, name);
+                        }
+                        changed = true;
+                        p = r + 2;
+                        continue;
+                    }
+                    if (translator_is_string_var(translator, name, n)) {
+                        o += (size_t)snprintf(out + o, out_size - o,
+                                              "HustString_len(%s)", name);
+                        changed = true;
+                        p = r + 2;
+                        continue;
+                    }
+                }
+            }
+            
+            o += (size_t)snprintf(out + o, out_size - o, "%s", name);
+            continue;
+        }
+        
+        out[o++] = *p++;
+    }
+    
+    out[o] = '\0';
+    return changed;
+}
+
+/* Rewrite ==/!= between String variables and literals. */
+static bool translator_rewrite_string_comparisons(Translator* translator,
+                                                  const char* text,
+                                                  char* out, size_t out_size) {
+    if (!translator || !text || !out || out_size == 0) return false;
+    
+    size_t o = 0;
+    bool changed = false;
+    const char* p = text;
+    
+    while (*p && o + 1 < out_size) {
+        if (*p == '"') {
+            out[o++] = *p++;
+            while (*p && o + 1 < out_size) {
+                if (*p == '\\' && p[1]) {
+                    out[o++] = *p++;
+                    if (o + 1 < out_size) out[o++] = *p++;
+                } else if (*p == '"') {
+                    out[o++] = *p++;
+                    break;
+                } else {
+                    out[o++] = *p++;
+                }
+            }
+            continue;
+        }
+        
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            char name[64] = {0};
+            size_t n = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && n < sizeof(name) - 1) {
+                name[n++] = *p++;
+            }
+            name[n] = '\0';
+            
+            if (translator_is_string_var(translator, name, n)) {
+                const char* q = p;
+                while (*q == ' ' || *q == '\t') q++;
+                bool is_eq = (q[0] == '=' && q[1] == '=');
+                bool is_ne = (q[0] == '!' && q[1] == '=');
+                if (is_eq || is_ne) {
+                    const char* rhs = q + 2;
+                    while (*rhs == ' ' || *rhs == '\t') rhs++;
+                    
+                    if (*rhs == '"') {
+                        const char* end = rhs + 1;
+                        while (*end && *end != '"') {
+                            if (*end == '\\' && end[1]) end += 2;
+                            else end++;
+                        }
+                        if (*end == '"') {
+                            o += (size_t)snprintf(out + o, out_size - o,
+                                                  "%sHustString_equals_cstr(%s, %.*s)",
+                                                  is_ne ? "!" : "", name,
+                                                  (int)(end - rhs + 1), rhs);
+                            changed = true;
+                            p = end + 1;
+                            continue;
+                        }
+                    } else if (isalpha((unsigned char)*rhs) || *rhs == '_') {
+                        char other[64] = {0};
+                        size_t m = 0;
+                        const char* r = rhs;
+                        while ((isalnum((unsigned char)*r) || *r == '_') && m < sizeof(other) - 1) {
+                            other[m++] = *r++;
+                        }
+                        other[m] = '\0';
+                        if (translator_is_string_var(translator, other, m)) {
+                            o += (size_t)snprintf(out + o, out_size - o,
+                                                  "%sHustString_equals(%s, %s)",
+                                                  is_ne ? "!" : "", name, other);
+                            changed = true;
+                            p = r;
+                            continue;
+                        }
+                    }
+                }
+            }
+            
+            o += (size_t)snprintf(out + o, out_size - o, "%s", name);
+            continue;
+        }
+        
+        out[o++] = *p++;
+    }
+    
+    out[o] = '\0';
+    return changed;
+}
+
+static bool translator_contains_top_level_plus(const char* text) {
+    if (!text) return false;
+    bool in_string = false;
+    bool escaped = false;
+    int depth = 0;
+    for (const char* p = text; *p; p++) {
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (*p == '\\') escaped = true;
+            else if (*p == '"') in_string = false;
+            continue;
+        }
+        if (*p == '"') { in_string = true; continue; }
+        if (*p == '(') depth++;
+        else if (*p == ')') { if (depth > 0) depth--; }
+        else if (*p == '+' && depth == 0) return true;
+    }
+    return false;
+}
+
+static void translator_string_operand(const char* op, char* out, size_t out_size) {
+    if (!op || !out || out_size == 0) return;
+    if (op[0] == '"') {
+        snprintf(out, out_size, "HustString_new(%s)", op);
+    } else {
+        strncpy(out, op, out_size - 1);
+        out[out_size - 1] = '\0';
+    }
+}
+
+static bool translator_build_concat_expr(const char* expr, char* out, size_t out_size) {
+    if (!expr || !out || out_size == 0) return false;
+    
+    char ops[8][128] = {{0}};
+    int count = 0;
+    int start = 0;
+    bool in_string = false;
+    bool escaped = false;
+    int depth = 0;
+    int len = (int)strlen(expr);
+    
+    for (int i = 0; i <= len; i++) {
+        char c = expr[i];
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') in_string = false;
+            continue;
+        }
+        if (c == '"') { in_string = true; continue; }
+        if (c == '(') { depth++; continue; }
+        if (c == ')') { if (depth > 0) depth--; continue; }
+        
+        if ((c == '+' && depth == 0) || c == '\0') {
+            if (count >= 8) return false;
+            int seg_len = i - start;
+            if (seg_len >= (int)sizeof(ops[0])) seg_len = (int)sizeof(ops[0]) - 1;
+            memcpy(ops[count], expr + start, (size_t)seg_len);
+            ops[count][seg_len] = '\0';
+            
+            char* s = ops[count];
+            while (*s == ' ' || *s == '\t') s++;
+            char* e = s + strlen(s);
+            while (e > s && (e[-1] == ' ' || e[-1] == '\t')) *--e = '\0';
+            memmove(ops[count], s, strlen(s) + 1);
+            count++;
+            start = i + 1;
+        }
+    }
+    
+    if (count < 2) return false;
+    
+    char acc[512] = {0};
+    translator_string_operand(ops[0], acc, sizeof(acc));
+    for (int i = 1; i < count; i++) {
+        char operand[160] = {0};
+        char next[512] = {0};
+        translator_string_operand(ops[i], operand, sizeof(operand));
+        snprintf(next, sizeof(next), "HustString_concat(%s, %s)", acc, operand);
+        strncpy(acc, next, sizeof(acc) - 1);
+        acc[sizeof(acc) - 1] = '\0';
+    }
+    
+    strncpy(out, acc, out_size - 1);
+    out[out_size - 1] = '\0';
+    return true;
 }
 
 /* Translate variable declaration */
@@ -303,6 +925,18 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
         type[j++] = node->value[i++];
     }
     type[j] = '\0';
+    
+    /* const is a modifier; the real type follows it. */
+    bool is_const_decl = false;
+    if (strcmp(type, "const") == 0) {
+        is_const_decl = true;
+        while (node->value[i] == ' ' || node->value[i] == '\t') i++;
+        j = 0;
+        while (node->value[i] && node->value[i] != ' ' && node->value[i] != '\t' && j < 31) {
+            type[j++] = node->value[i++];
+        }
+        type[j] = '\0';
+    }
     
     /* Check if it's an array type like i32[5] or i32[] (dynamic) */
     char base_type[32] = {0};
@@ -347,10 +981,6 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
         strncpy(base_type, type, sizeof(base_type) - 1);
     }
     
-    /* Debug: print parsed array info */
-    fprintf(stderr, "DEBUG: base_type='%s', array_dims='%s', is_array=%d, is_dynamic=%d, dims=%d\n",
-            base_type, array_dims, is_array, is_dynamic_array, array_dim_count);
-    
     /* Check for new expression: type var = new type[size1][size2]... */
     if (strstr(rest, "new ")) {
         /* Extract new expression dimensions */
@@ -380,15 +1010,12 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
                     p = close + 1;
                 }
                 
-                fprintf(stderr, "DEBUG: new_dims='%s', new_dim_count=%d\n", new_dims, new_dim_count);
-                
                 /* Update array_dims and array_dim_count with new expression dimensions */
                 if (new_dim_count > 0) {
                     strcpy(array_dims, new_dims);
                     array_dim_count = new_dim_count;
                     is_array = true;
                     is_dynamic_array = false;
-                    fprintf(stderr, "DEBUG: updated array_dims='%s', dims=%d\n", array_dims, array_dim_count);
                 }
             }
         }
@@ -401,50 +1028,128 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
     strncpy(rest, &node->value[i], sizeof(rest) - 1);
     rest[sizeof(rest) - 1] = '\0';
     
+    /* Convert Hust casts like (i32) to C types. */
+    translator_convert_type_casts(rest, sizeof(rest));
+    
+    /* Extract declaration name and register arrays. */
+    char decl_name[64] = {0};
+    int dn = 0;
+    while (rest[dn] && rest[dn] != ' ' && rest[dn] != '\t' &&
+           rest[dn] != '=' && rest[dn] != ';' && dn < 63) {
+        decl_name[dn] = rest[dn];
+        dn++;
+    }
+    decl_name[dn] = '\0';
+    if (decl_name[0] && (is_array || is_dynamic_array)) {
+        translator_register_array(translator, decl_name, base_type,
+                                  array_dim_count, is_dynamic_array);
+    }
+    
+    /* Rewrite array accesses in the initializer by array kind. */
+    char rewritten_rest[512] = {0};
+    translator_rewrite_array_accesses(translator, rest, rewritten_rest, sizeof(rewritten_rest));
+    strncpy(rest, rewritten_rest, sizeof(rest) - 1);
+    rest[sizeof(rest) - 1] = '\0';
+    
+    /* Rewrite .len() calls on declared arrays. */
+    char rewritten_len[512] = {0};
+    if (translator_rewrite_len_calls(translator, rest, rewritten_len, sizeof(rewritten_len))) {
+        strncpy(rest, rewritten_len, sizeof(rest) - 1);
+        rest[sizeof(rest) - 1] = '\0';
+    }
+    
+    /* Rewrite String ==/!= comparisons. */
+    char rewritten_cmp[512] = {0};
+    if (translator_rewrite_string_comparisons(translator, rest, rewritten_cmp,
+                                              sizeof(rewritten_cmp))) {
+        strncpy(rest, rewritten_cmp, sizeof(rest) - 1);
+        rest[sizeof(rest) - 1] = '\0';
+    }
+    
+    /* Compile-time integer constants become C macros (usable as array dims). */
+    if (is_const_decl && !is_array && !is_dynamic_array) {
+        const char* eq = strchr(rest, '=');
+        if (eq) {
+            char value[64] = {0};
+            strncpy(value, eq + 1, sizeof(value) - 1);
+            char* s = value;
+            while (*s == ' ' || *s == '\t') s++;
+            char* e = s + strlen(s);
+            while (e > s && (e[-1] == ';' || e[-1] == ' ' || e[-1] == '\t')) *--e = '\0';
+            
+            bool is_int_literal = (*s != '\0');
+            for (char* q = s; *q; q++) {
+                if (!((*q >= '0' && *q <= '9') || (*q == '-' && q == s))) {
+                    is_int_literal = false;
+                    break;
+                }
+            }
+            if (is_int_literal) {
+                translator_write_indent(translator);
+                fprintf(translator->output, "#define %s %s\n", decl_name, s);
+                return;
+            }
+        }
+    }
+    
     /* Get C type */
     const char* c_type = get_c_type(base_type);
     
-    /* Check for array element access in value: type var = arr[i]; */
-    if (strchr(rest, '[') && strchr(rest, ']') && !strstr(rest, "[]")) {
-        /* Extract variable name */
-        char var_name[64] = {0};
-        int k = 0;
-        while (rest[k] && rest[k] != ' ' && rest[k] != '\t' && rest[k] != '=' && rest[k] != ';' && k < 63) {
-            var_name[k] = rest[k];
-            k++;
-        }
-        var_name[k] = '\0';
+    /* String declarations use the language-level HustString runtime. */
+    if (strcmp(base_type, "String") == 0 && !is_array && !is_dynamic_array) {
+        translator_register_string(translator, decl_name);
         
-        /* Find = and extract array access */
         const char* eq = strchr(rest, '=');
-        if (eq) {
-            const char* val_start = eq + 1;
-            while (*val_start == ' ' || *val_start == '\t') val_start++;
-            
-            /* Extract array name and index from arr[i] */
-            char arr_name[64] = {0};
-            char index[64] = {0};
-            int j = 0;
-            while (val_start[j] && val_start[j] != '[' && j < 63) {
-                arr_name[j] = val_start[j];
-                j++;
-            }
-            arr_name[j] = '\0';
-            
-            /* Skip [ */
-            if (val_start[j] == '[') j++;
-            
-            /* Extract index */
-            int idx = 0;
-            while (val_start[j] && val_start[j] != ']' && idx < 63) {
-                index[idx++] = val_start[j++];
-            }
-            index[idx] = '\0';
-            
-            /* Output: type var = arr.data[index]; */
-            fprintf(translator->output, "%s %s = %s.data[%s];\n", c_type, var_name, arr_name, index);
+        if (!eq) {
+            translator_write_indent(translator);
+            fprintf(translator->output, "HustString* %s = NULL;\n", decl_name);
             return;
         }
+        
+        const char* val = eq + 1;
+        while (*val == ' ' || *val == '\t') val++;
+        
+        char expr_trim[256] = {0};
+        strncpy(expr_trim, val, sizeof(expr_trim) - 1);
+        size_t trim_len = strlen(expr_trim);
+        while (trim_len > 0 && (expr_trim[trim_len - 1] == ';' ||
+                                expr_trim[trim_len - 1] == ' ' ||
+                                expr_trim[trim_len - 1] == '\t')) {
+            expr_trim[--trim_len] = '\0';
+        }
+        
+        if (translator_contains_top_level_plus(expr_trim)) {
+            char built[512] = {0};
+            if (translator_build_concat_expr(expr_trim, built, sizeof(built))) {
+                translator_write_indent(translator);
+                fprintf(translator->output, "HustString* %s = %s;\n", decl_name, built);
+                return;
+            }
+        }
+        
+        if (*val == '"') {
+            const char* end = val + 1;
+            while (*end && *end != '"') {
+                if (*end == '\\' && end[1]) end += 2;
+                else end++;
+            }
+            size_t lit_len = (*end == '"') ? (size_t)(end - val + 1) : strlen(val);
+            translator_write_indent(translator);
+            fprintf(translator->output, "HustString* %s = HustString_new(%.*s);\n",
+                    decl_name, (int)lit_len, val);
+            return;
+        }
+        
+        char expr[256] = {0};
+        strncpy(expr, val, sizeof(expr) - 1);
+        size_t elen = strlen(expr);
+        while (elen > 0 && (expr[elen - 1] == ';' || expr[elen - 1] == ' ' ||
+                            expr[elen - 1] == '\t')) {
+            expr[--elen] = '\0';
+        }
+        translator_write_indent(translator);
+        fprintf(translator->output, "HustString* %s = %s;\n", decl_name, expr);
+        return;
     }
     
     /* Output C declaration */
@@ -459,8 +1164,93 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
         }
         var_name[k] = '\0';
         
-        /* Output: HustVec_i32 name = HustVec_i32_new(); (no *) */
-        fprintf(translator->output, "HustVec_%s %s = HustVec_%s_new();\n", base_type, var_name, base_type);
+        char vec_type[128] = {0};
+        translator_make_vec_type(base_type, array_dim_count, vec_type, sizeof(vec_type));
+        
+        /* Static slice -> dynamic array copy: i32[] b = a[0..3]; */
+        const char* dotdot = strstr(rest, "..");
+        if (dotdot) {
+            const char* eq = strchr(rest, '=');
+            const char* lb = eq ? strchr(eq, '[') : NULL;
+            const char* rb = lb ? strchr(lb, ']') : NULL;
+            if (eq && lb && rb && dotdot > lb && dotdot < rb) {
+                char src_name[64] = {0};
+                size_t sn_len = (size_t)(lb - (eq + 1));
+                if (sn_len >= sizeof(src_name)) sn_len = sizeof(src_name) - 1;
+                memcpy(src_name, eq + 1, sn_len);
+                src_name[sn_len] = '\0';
+                char* ss = src_name;
+                while (*ss == ' ' || *ss == '\t') ss++;
+                char* se = ss + strlen(ss);
+                while (se > ss && (se[-1] == ' ' || se[-1] == '\t')) *--se = '\0';
+                memmove(src_name, ss, strlen(ss) + 1);
+                
+                int start = atoi(lb + 1);
+                int end = atoi(dotdot + 2);
+                int count = end - start;
+                if (count < 0) count = 0;
+                
+                const ArrayInfo* src = translator_find_array(translator, src_name, strlen(src_name));
+                bool src_dynamic = src && src->is_dynamic;
+                
+                fprintf(translator->output, "%s %s = %s_new();\n",
+                        vec_type, var_name, vec_type);
+                translator_write_indent(translator);
+                fprintf(translator->output, "for (int32_t _slice_i = 0; _slice_i < %d; _slice_i++) {\n", count);
+                translator->indent_level++;
+                translator_write_indent(translator);
+                if (src_dynamic) {
+                    fprintf(translator->output, "%s_push(&%s, %s.data[(%d) + _slice_i]);\n",
+                            vec_type, var_name, src_name, start);
+                } else {
+                    fprintf(translator->output, "%s_push(&%s, %s[(%d) + _slice_i]);\n",
+                            vec_type, var_name, src_name, start);
+                }
+                translator->indent_level--;
+                translator_write_indent(translator);
+                fprintf(translator->output, "}\n");
+                return;
+            }
+        }
+        
+        const char* open = strchr(rest, '{');
+        const char* close = open ? strrchr(open, '}') : NULL;
+        
+        fprintf(translator->output, "%s %s = %s_new();\n",
+                vec_type, var_name, vec_type);
+        
+        if (open && close && !strchr(open + 1, '{')) {
+            const char* q = open + 1;
+            while (q < close) {
+                const char* comma = strchr(q, ',');
+                if (!comma || comma > close) comma = close;
+                
+                char elem[128] = {0};
+                size_t elen = (size_t)(comma - q);
+                if (elen >= sizeof(elem)) elen = sizeof(elem) - 1;
+                memcpy(elem, q, elen);
+                elem[elen] = '\0';
+                
+                char* s = elem;
+                while (*s == ' ' || *s == '\t') s++;
+                char* e = s + strlen(s);
+                while (e > s && (e[-1] == ' ' || e[-1] == '\t')) *--e = '\0';
+                
+                if (*s) {
+                    char wrapped[160] = {0};
+                    if (strcmp(base_type, "String") == 0 && s[0] == '"') {
+                        snprintf(wrapped, sizeof(wrapped), "HustString_new(%s)", s);
+                    } else {
+                        strncpy(wrapped, s, sizeof(wrapped) - 1);
+                    }
+                    translator_write_indent(translator);
+                    fprintf(translator->output, "%s_push(&%s, %s);\n",
+                            vec_type, var_name, wrapped);
+                }
+                
+                q = comma + 1;
+            }
+        }
     } else if (is_array) {
         /* Static array declaration: type name[dims] = {init}; */
         char var_name[64] = {0};
@@ -483,7 +1273,7 @@ void translator_translate_variable(Translator* translator, ASTNode* node) {
         }
         fprintf(translator->output, "\n");
     } else {
-        fprintf(translator->output, "%s %s", c_type, rest);
+        fprintf(translator->output, "%s%s %s", is_const_decl ? "const " : "", c_type, rest);
         if (!strchr(rest, ';')) {
             fprintf(translator->output, ";");
         }
@@ -591,51 +1381,53 @@ static bool translator_is_function_call(const char* line) {
     return false;
 }
 
-/* Helper: Check if line contains a method call (obj.method(...)) */
-static bool translator_is_method_call(const char* line) {
-    if (!line) return false;
+/* Find a method-call dot outside strings and float literals. */
+static const char* translator_find_method_dot(const char* line) {
+    if (!line) return NULL;
     
-    /* Look for pattern: identifier.identifier(...) */
+    bool in_string = false;
+    bool escaped = false;
     const char* p = line;
+    
     while (*p) {
-        /* Skip whitespace */
-        while (*p == ' ' || *p == '\t') p++;
-        
-        /* Check for identifier start */
-        if (isalpha(*p) || *p == '_') {
-            /* Find end of identifier */
-            while (isalnum(*p) || *p == '_') p++;
-            
-            /* Skip whitespace */
-            while (*p == ' ' || *p == '\t') p++;
-            
-            /* Check if next char is . */
-            if (*p == '.') {
-                p++;
-                
-                /* Skip whitespace */
-                while (*p == ' ' || *p == '\t') p++;
-                
-                /* Check for method name */
-                if (isalpha(*p) || *p == '_') {
-                    /* Find end of method name */
-                    while (isalnum(*p) || *p == '_') p++;
-                    
-                    /* Skip whitespace */
-                    while (*p == ' ' || *p == '\t') p++;
-                    
-                    /* Check if next char is ( */
-                    if (*p == '(') {
-                        return true;
-                    }
-                }
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (*p == '\\') {
+                escaped = true;
+            } else if (*p == '"') {
+                in_string = false;
             }
-        } else {
             p++;
+            continue;
         }
+        
+        if (*p == '"') {
+            in_string = true;
+            p++;
+            continue;
+        }
+        
+        if (*p == '.' && p > line) {
+            const char* prev = p - 1;
+            const char* q = p + 1;
+            
+            if ((isalnum((unsigned char)*prev) || *prev == '_') &&
+                (isalpha((unsigned char)*q) || *q == '_')) {
+                while (isalnum((unsigned char)*q) || *q == '_') q++;
+                while (*q == ' ' || *q == '\t') q++;
+                if (*q == '(') return p;
+            }
+        }
+        p++;
     }
     
-    return false;
+    return NULL;
+}
+
+/* Helper: Check if line contains a method call (obj.method(...)) */
+static bool translator_is_method_call(const char* line) {
+    return translator_find_method_dot(line) != NULL;
 }
 
 /* Helper: Extract object name and method call from line */
@@ -643,7 +1435,7 @@ static bool translator_extract_method_call(const char* line, char* obj_name, siz
     if (!line || !obj_name || !method_call || obj_size == 0 || method_size == 0) return false;
     
     /* Find pattern: obj.method(args) */
-    const char* dot = strchr(line, '.');
+    const char* dot = translator_find_method_dot(line);
     if (!dot) return false;
     
     /* Extract object name (before dot) */
@@ -2010,7 +2802,7 @@ static bool translator_is_array_push_call(const char* line) {
     
     /* Look for pattern: arr.push(value) */
     if (strstr(line, ".push(")) {
-        fprintf(stderr, "DEBUG: push call detected: '%s'\n", line);
+        /* Push call detected */
         return true;
     }
     
@@ -2021,41 +2813,61 @@ static bool translator_is_array_push_call(const char* line) {
 static void translator_translate_array_push(Translator* translator, const char* line) {
     if (!translator || !line) return;
     
-    /* Extract array name and value from arr.push(value) */
-    char arr_name[64] = {0};
-    char value[256] = {0};
-    const char* p = line;
-    
-    /* Skip leading whitespace */
-    while (*p == ' ' || *p == '\t') p++;
-    
-    /* Extract array name (before .push) */
-    int j = 0;
-    while (*p && *p != '.' && *p != ' ' && *p != '\t' && j < 63) {
-        arr_name[j++] = *p++;
-    }
-    arr_name[j] = '\0';
-    
-    /* Skip .push( */
     const char* push_pos = strstr(line, ".push(");
     if (!push_pos) return;
     
-    push_pos += 6;  /* Skip ".push(" */
+    char obj[256] = {0};
+    size_t obj_len = (size_t)(push_pos - line);
+    if (obj_len >= sizeof(obj)) obj_len = sizeof(obj) - 1;
+    memcpy(obj, line, obj_len);
+    obj[obj_len] = '\0';
     
-    /* Extract value */
-    j = 0;
-    while (*push_pos && *push_pos != ')' && j < 255) {
-        value[j++] = *push_pos++;
+    char* os = obj;
+    while (*os == ' ' || *os == '\t') os++;
+    char* oe = os + strlen(os);
+    while (oe > os && (oe[-1] == ' ' || oe[-1] == '\t')) *--oe = '\0';
+    memmove(obj, os, strlen(os) + 1);
+    
+    const char* args = push_pos + 6;
+    char value[256] = {0};
+    int j = 0;
+    while (*args && *args != ')' && j < 255) {
+        value[j++] = *args++;
     }
     value[j] = '\0';
     
-    /* Trim whitespace from value */
     char* val_trim = value;
     while (*val_trim == ' ' || *val_trim == '\t') val_trim++;
+    char* ve = val_trim + strlen(val_trim);
+    while (ve > val_trim && (ve[-1] == ' ' || ve[-1] == '\t')) *--ve = '\0';
     
-    /* Output: HustVec_i32_push(&arr, value); (pass by reference) */
+    const ArrayInfo* info = NULL;
+    int remaining = 0;
+    bool resolved = translator_resolve_array_expr(translator, obj, &info, &remaining);
+    
+    char vec_type[128] = {0};
+    char elem_value[300] = {0};
+    
+    if (resolved) {
+        translator_make_vec_type(info->elem_type, remaining, vec_type, sizeof(vec_type));
+        if (strcmp(val_trim, "[]") == 0 && remaining >= 2) {
+            char inner_type[128] = {0};
+            translator_make_vec_type(info->elem_type, remaining - 1,
+                                     inner_type, sizeof(inner_type));
+            snprintf(elem_value, sizeof(elem_value), "%s_new()", inner_type);
+        } else if (strcmp(info->elem_type, "String") == 0 && val_trim[0] == '"') {
+            snprintf(elem_value, sizeof(elem_value), "HustString_new(%s)", val_trim);
+        } else {
+            strncpy(elem_value, val_trim, sizeof(elem_value) - 1);
+        }
+    } else {
+        strncpy(vec_type, "HustVec_i32", sizeof(vec_type) - 1);
+        strncpy(elem_value, val_trim, sizeof(elem_value) - 1);
+    }
+    
     translator_write_indent(translator);
-    fprintf(translator->output, "HustVec_i32_push(&%s, %s);\n", arr_name, val_trim);
+    fprintf(translator->output, "%s_push(&%s, %s);\n",
+            vec_type, obj, elem_value);
 }
 
 /* Helper: Check if line contains string concatenation */
@@ -2723,14 +3535,117 @@ static void translator_translate_method_call_assignment(Translator* translator, 
 }
 
 /* Helper: Check if line contains standalone method call (no assignment) */
+static bool translator_is_dynamic_pop_call(Translator* translator, const char* line) {
+    if (!translator || !line) return false;
+    
+    const char* pop = strstr(line, ".pop");
+    if (!pop) return false;
+    
+    const char* q = pop + 4;
+    while (*q == ' ' || *q == '\t') q++;
+    if (*q != '(') return false;
+    q++;
+    while (*q == ' ' || *q == '\t') q++;
+    if (*q != ')') return false;
+    
+    char obj[256] = {0};
+    int n = 0;
+    const char* s = line;
+    while (*s == ' ' || *s == '\t') s++;
+    while (s < pop && *s != ' ' && *s != '\t' && n < (int)sizeof(obj) - 1) {
+        obj[n++] = *s++;
+    }
+    obj[n] = '\0';
+    
+    const ArrayInfo* info = NULL;
+    int remaining = 0;
+    return translator_resolve_array_expr(translator, obj, &info, &remaining) && remaining > 0;
+}
+
+static void translator_translate_dynamic_pop(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    const char* pop = strstr(line, ".pop");
+    if (!pop) return;
+    
+    char obj[256] = {0};
+    int n = 0;
+    const char* s = line;
+    while (*s == ' ' || *s == '\t') s++;
+    while (s < pop && *s != ' ' && *s != '\t' && n < (int)sizeof(obj) - 1) {
+        obj[n++] = *s++;
+    }
+    obj[n] = '\0';
+    
+    const ArrayInfo* info = NULL;
+    int remaining = 0;
+    if (!translator_resolve_array_expr(translator, obj, &info, &remaining) || remaining <= 0) {
+        return;
+    }
+    
+    char vec_type[128] = {0};
+    translator_make_vec_type(info->elem_type, remaining, vec_type, sizeof(vec_type));
+    
+    translator_write_indent(translator);
+    fprintf(translator->output, "%s_pop(&%s);\n", vec_type, obj);
+}
+
+static bool translator_is_replaceit_call(const char* line) {
+    return line && strstr(line, ".replaceit(") != NULL;
+}
+
+static void translator_translate_replaceit(Translator* translator, const char* line) {
+    if (!translator || !line) return;
+    
+    const char* call = strstr(line, ".replaceit(");
+    if (!call) return;
+    
+    char obj[64] = {0};
+    int n = 0;
+    const char* s = line;
+    while (*s == ' ' || *s == '\t') s++;
+    while (s < call && *s != ' ' && *s != '\t' && n < 63) {
+        obj[n++] = *s++;
+    }
+    obj[n] = '\0';
+    
+    const char* args = call + 11; /* skip ".replaceit(" */
+    char idx[64] = {0};
+    char val[128] = {0};
+    int k = 0;
+    while (*args && *args != ',' && k < 63) idx[k++] = *args++;
+    idx[k] = '\0';
+    if (*args == ',') args++;
+    k = 0;
+    while (*args && *args != ')' && k < 127) val[k++] = *args++;
+    val[k] = '\0';
+    
+    char* is = idx;
+    while (*is == ' ' || *is == '\t') is++;
+    char* ie = is + strlen(is);
+    while (ie > is && (ie[-1] == ' ' || ie[-1] == '\t')) *--ie = '\0';
+    char* vs = val;
+    while (*vs == ' ' || *vs == '\t') vs++;
+    char* ve = vs + strlen(vs);
+    while (ve > vs && (ve[-1] == ' ' || ve[-1] == '\t')) *--ve = '\0';
+    
+    const ArrayInfo* info = translator_find_array(translator, obj, strlen(obj));
+    translator_write_indent(translator);
+    if (info && info->is_dynamic) {
+        fprintf(translator->output, "%s.data[%s] = %s;\n", obj, is, vs);
+    } else {
+        fprintf(translator->output, "%s[%s] = %s;\n", obj, is, vs);
+    }
+}
+
 static bool translator_is_standalone_method_call(const char* line) {
     if (!line) return false;
     
     /* Look for pattern: obj.method(args); (no assignment) */
     if (strchr(line, '=')) return false;  /* Has assignment */
     
-    /* Check for obj.method( pattern */
-    const char* dot = strchr(line, '.');
+    /* Check for obj.method( pattern outside strings/float literals */
+    const char* dot = translator_find_method_dot(line);
     if (!dot) return false;
     
     const char* paren = strchr(dot, '(');
@@ -2790,7 +3705,50 @@ static void translator_translate_import(Translator* translator, const char* line
     }
     module_name[j] = '\0';
     
-    /* Output #include directive */
+    /* C dialect system modules: import before use. */
+    if (strncmp(module_name, "C.", 2) == 0) {
+        if (strcmp(module_name, "C.stdio.*") == 0) {
+            fprintf(translator->output, "#include <stdio.h>\n");
+            return;
+        }
+        if (strcmp(module_name, "C.stdlib.*") == 0) {
+            fprintf(translator->output, "#include <stdlib.h>\n");
+            return;
+        }
+        if (strcmp(module_name, "C.string.*") == 0) {
+            fprintf(translator->output, "#include <string.h>\n");
+            return;
+        }
+        if (strcmp(module_name, "C.math.*") == 0) {
+            fprintf(translator->output, "#include <math.h>\n");
+            return;
+        }
+        if (strcmp(module_name, "C.stdio") == 0 ||
+            strcmp(module_name, "C.stdlib") == 0 ||
+            strcmp(module_name, "C.string") == 0 ||
+            strcmp(module_name, "C.math") == 0) {
+            fprintf(stderr, "Error: C system modules require a wildcard import, e.g. `use C.stdio.*;`\n");
+            translator->error_count++;
+            return;
+        }
+        fprintf(stderr, "Error: unknown C system module `%s`.\n", module_name);
+        translator->error_count++;
+        return;
+    }
+    
+    /* Mixed cores are not allowed. */
+    if (strncmp(module_name, "RUST.", 5) == 0) {
+        fprintf(stderr, "Error: `RUST.*` is a Rust-dialect module and is not available in the C core.\n");
+        translator->error_count++;
+        return;
+    }
+    if (strncmp(module_name, "HUST.", 5) == 0) {
+        fprintf(stderr, "Error: `HUST.*` is not available yet.\n");
+        translator->error_count++;
+        return;
+    }
+    
+    /* User module: output #include directive */
     translator_write_indent(translator);
     fprintf(translator->output, "#include \"%s.h\"\n", module_name);
 }
@@ -2925,6 +3883,62 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     /* Skip leading whitespace */
     while (*line == ' ' || *line == '\t') line++;
     
+    /* pass is a no-op statement. */
+    if (strncmp(line, "pass", 4) == 0 &&
+        (line[4] == '\0' || line[4] == ';' || line[4] == ' ' || line[4] == '\t')) {
+        translator_write_indent(translator);
+        fprintf(translator->output, ";\n");
+        return;
+    }
+    
+    /* Rust-dialect macros are not available in the C core. */
+    if (strstr(line, "println!") || strstr(line, "print!") || strstr(line, "format!")) {
+        fprintf(stderr, "Error: Rust-dialect macro is not available in the C core: %s\n", line);
+        translator->error_count++;
+        return;
+    }
+    
+    /* Normalize casts, array accesses and .len() by declared type. */
+    char stmt_buf[2048] = {0};
+    strncpy(stmt_buf, line, sizeof(stmt_buf) - 1);
+    translator_convert_type_casts(stmt_buf, sizeof(stmt_buf));
+    
+    char rewritten_line[2048] = {0};
+    translator_rewrite_array_accesses(translator, stmt_buf, rewritten_line,
+                                      sizeof(rewritten_line));
+    strncpy(stmt_buf, rewritten_line, sizeof(stmt_buf) - 1);
+    
+    char rewritten_len[2048] = {0};
+    if (translator_rewrite_len_calls(translator, stmt_buf, rewritten_len,
+                                     sizeof(rewritten_len))) {
+        strncpy(stmt_buf, rewritten_len, sizeof(stmt_buf) - 1);
+    }
+    
+    char rewritten_cmp[2048] = {0};
+    if (translator_rewrite_string_comparisons(translator, stmt_buf, rewritten_cmp,
+                                              sizeof(rewritten_cmp))) {
+        strncpy(stmt_buf, rewritten_cmp, sizeof(stmt_buf) - 1);
+    }
+    line = stmt_buf;
+    
+    /* String literals returned from functions use the HustString runtime. */
+    if (strncmp(line, "return", 6) == 0) {
+        const char* v = line + 6;
+        while (*v == ' ' || *v == '\t') v++;
+        if (*v == '"') {
+            const char* end = v + 1;
+            while (*end && *end != '"') {
+                if (*end == '\\' && end[1]) end += 2;
+                else end++;
+            }
+            size_t lit_len = (*end == '"') ? (size_t)(end - v + 1) : strlen(v);
+            translator_write_indent(translator);
+            fprintf(translator->output, "return HustString_new(%.*s);\n",
+                    (int)lit_len, v);
+            return;
+        }
+    }
+    
     /* Check for enum definition */
     if (translator_is_enum_definition(line)) {
         translator_translate_enum(translator, node);
@@ -2940,6 +3954,23 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     /* Check for method call with assignment */
     if (translator_is_method_call_assignment(line)) {
         translator_translate_method_call_assignment(translator, line);
+        return;
+    }
+    
+    /* Check for dynamic array pop */
+    if (translator_is_dynamic_pop_call(translator, line)) {
+        translator_translate_dynamic_pop(translator, line);
+        return;
+    }
+    
+    /* Array push must run before the generic method-call path. */
+    if (translator_is_array_push_call(line)) {
+        translator_translate_array_push(translator, line);
+        return;
+    }
+    
+    if (translator_is_replaceit_call(line)) {
+        translator_translate_replaceit(translator, line);
         return;
     }
     
@@ -2970,87 +4001,6 @@ void translator_translate_statement(Translator* translator, ASTNode* node) {
     /* Check for array length method call */
     if (translator_is_array_length_call(line)) {
         translator_translate_array_length(translator, line);
-        return;
-    }
-    
-    /* Check for array push method call */
-    if (translator_is_array_push_call(line)) {
-        translator_translate_array_push(translator, line);
-        return;
-    }
-    
-    /* Check for array element access (arr[i]) */
-    if (strstr(line, "[") && strstr(line, "]") && !strstr(line, "[]")) {
-        /* Extract array name and index from arr[i] */
-        char arr_name[64] = {0};
-        char index[64] = {0};
-        const char* p = line;
-        
-        /* Skip leading whitespace */
-        while (*p == ' ' || *p == '\t') p++;
-        
-        /* Extract array name (before [) */
-        int j = 0;
-        while (*p && *p != '[' && *p != ' ' && *p != '\t' && j < 63) {
-            arr_name[j++] = *p++;
-        }
-        arr_name[j] = '\0';
-        
-        /* Skip [ */
-        if (*p == '[') p++;
-        
-        /* Extract index (until ]) */
-        j = 0;
-        while (*p && *p != ']' && j < 63) {
-            index[j++] = *p++;
-        }
-        index[j] = '\0';
-        
-        /* Check if this is an assignment: x = arr[i]; */
-        const char* eq = strchr(line, '=');
-        if (eq) {
-            /* Extract left side */
-            char left[64] = {0};
-            const char* left_start = line;
-            while (*left_start == ' ' || *left_start == '\t') left_start++;
-            
-            int k = 0;
-            while (left_start < eq && *left_start != ' ' && *left_start != '\t' && k < 63) {
-                left[k++] = *left_start++;
-            }
-            left[k] = '\0';
-            
-            /* Extract type if present */
-            char left_type[32] = {0};
-            if (strncmp(left, "i32 ", 4) == 0) {
-                strncpy(left_type, "int32_t", sizeof(left_type) - 1);
-                memmove(left, left + 4, strlen(left + 4) + 1);
-            } else if (strncmp(left, "i64 ", 4) == 0) {
-                strncpy(left_type, "int64_t", sizeof(left_type) - 1);
-                memmove(left, left + 4, strlen(left + 4) + 1);
-            } else if (strncmp(left, "f32 ", 4) == 0) {
-                strncpy(left_type, "float", sizeof(left_type) - 1);
-                memmove(left, left + 4, strlen(left + 4) + 1);
-            } else if (strncmp(left, "f64 ", 4) == 0) {
-                strncpy(left_type, "double", sizeof(left_type) - 1);
-                memmove(left, left + 4, strlen(left + 4) + 1);
-            } else if (strncmp(left, "bool ", 5) == 0) {
-                strncpy(left_type, "bool", sizeof(left_type) - 1);
-                memmove(left, left + 5, strlen(left + 5) + 1);
-            }
-            
-            /* Output: type result = arr.data[index]; */
-            translator_write_indent(translator);
-            if (strlen(left_type) > 0) {
-                fprintf(translator->output, "%s %s = %s.data[%s];\n", left_type, left, arr_name, index);
-            } else {
-                fprintf(translator->output, "%s = %s.data[%s];\n", left, arr_name, index);
-            }
-        } else {
-            /* Just output the expression */
-            translator_write_indent(translator);
-            fprintf(translator->output, "%s.data[%s]\n", arr_name, index);
-        }
         return;
     }
     
@@ -3287,10 +4237,27 @@ static void translator_translate_for(Translator* translator, const char* line) {
     
     int part = 0;
     int j = 0;
+    int paren_depth = 0;
+    int brace_depth = 0;
     const char* p = for_pos;
+    const char* after_header = NULL;
     
-    while (*p && *p != ')' && part < 3) {
-        if (*p == ';') {
+    while (*p) {
+        if (*p == '(') {
+            paren_depth++;
+        } else if (*p == ')') {
+            if (paren_depth == 0) {
+                after_header = p + 1;
+                break;
+            }
+            paren_depth--;
+        } else if (*p == '{') {
+            brace_depth++;
+        } else if (*p == '}') {
+            if (brace_depth > 0) brace_depth--;
+        }
+        
+        if (*p == ';' && brace_depth == 0 && paren_depth == 0) {
             part++;
             j = 0;
             p++;
@@ -3321,6 +4288,43 @@ static void translator_translate_for(Translator* translator, const char* line) {
     while (*cond_trim == ' ' || *cond_trim == '\t') cond_trim++;
     while (*incr_trim == ' ' || *incr_trim == '\t') incr_trim++;
     
+    /* A block update { ... } is not valid C for-update syntax. */
+    char incr_clean[128] = {0};
+    if (incr_trim[0] == '{') {
+        const char* open = incr_trim + 1;
+        const char* close = strrchr(open, '}');
+        if (close) {
+            size_t len = (size_t)(close - open);
+            if (len >= sizeof(incr_clean)) len = sizeof(incr_clean) - 1;
+            memcpy(incr_clean, open, len);
+            incr_clean[len] = '\0';
+            
+            char* s = incr_clean;
+            while (*s == ' ' || *s == '\t') s++;
+            char* e = s + strlen(s);
+            while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == ';')) *--e = '\0';
+            memmove(incr_clean, s, strlen(s) + 1);
+            
+            /* Multiple statements become a comma expression. */
+            for (char* q = incr_clean; *q; q++) {
+                if (*q == ';') *q = ',';
+            }
+            e = incr_clean + strlen(incr_clean);
+            while (e > incr_clean && (e[-1] == ',' || e[-1] == ' ')) *--e = '\0';
+        } else {
+            strncpy(incr_clean, incr_trim, sizeof(incr_clean) - 1);
+        }
+    } else {
+        strncpy(incr_clean, incr_trim, sizeof(incr_clean) - 1);
+    }
+    
+    /* Single-statement loop body: for (...) statement; */
+    const char* body = after_header;
+    if (body) {
+        while (*body == ' ' || *body == '\t') body++;
+    }
+    bool single_body = (body && *body != '\0' && *body != '{');
+    
     /* Convert init part (may contain type declaration) */
     char c_init[256] = {0};
     if (strlen(init_trim) > 0) {
@@ -3347,6 +4351,12 @@ static void translator_translate_for(Translator* translator, const char* line) {
     /* Clean up condition: remove outer parens if they wrap the whole condition */
     char c_condition[256] = {0};
     strncpy(c_condition, cond_trim, sizeof(c_condition) - 1);
+    
+    char c_cond_rewritten[256] = {0};
+    if (translator_rewrite_len_calls(translator, c_condition, c_cond_rewritten,
+                                     sizeof(c_cond_rewritten))) {
+        strncpy(c_condition, c_cond_rewritten, sizeof(c_condition) - 1);
+    }
     
     /* Simple approach: just copy condition as-is, C compiler can handle extra parens */
     /* The issue is unbalanced parens from parsing, so let's fix that */
@@ -3375,8 +4385,16 @@ static void translator_translate_for(Translator* translator, const char* line) {
     
     /* Output for loop */
     translator_write_indent(translator);
-    fprintf(translator->output, "for (%s; %s; %s) {\n", c_init, c_condition, incr_trim);
+    fprintf(translator->output, "for (%s; %s; %s) {\n", c_init, c_condition, incr_clean);
     translator->indent_level++;
+    
+    if (single_body) {
+        translator_write_indent(translator);
+        fprintf(translator->output, "%s\n", body);
+        translator->indent_level--;
+        translator_write_indent(translator);
+        fprintf(translator->output, "}\n");
+    }
 }
 
 /* Translate control flow */

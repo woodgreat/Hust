@@ -9,8 +9,16 @@
 /* Type mapping table */
 static const TypeMapping type_mappings[] = {
     /* Primitive types */
+    {"i8", "int8_t"},
+    {"i16", "int16_t"},
     {"i32", "int32_t"},
     {"i64", "int64_t"},
+    {"u8", "uint8_t"},
+    {"u16", "uint16_t"},
+    {"u32", "uint32_t"},
+    {"u64", "uint64_t"},
+    {"usize", "size_t"},
+    {"isize", "ptrdiff_t"},
     {"f32", "float"},
     {"f64", "double"},
     {"bool", "bool"},
@@ -79,8 +87,16 @@ bool is_valid_hust_type(const char* type) {
 bool is_primitive_type(const char* type) {
     if (!type) return false;
     
-    return (strcmp(type, "i32") == 0 ||
+    return (strcmp(type, "i8") == 0 ||
+            strcmp(type, "i16") == 0 ||
+            strcmp(type, "i32") == 0 ||
             strcmp(type, "i64") == 0 ||
+            strcmp(type, "u8") == 0 ||
+            strcmp(type, "u16") == 0 ||
+            strcmp(type, "u32") == 0 ||
+            strcmp(type, "u64") == 0 ||
+            strcmp(type, "usize") == 0 ||
+            strcmp(type, "isize") == 0 ||
             strcmp(type, "f32") == 0 ||
             strcmp(type, "f64") == 0 ||
             strcmp(type, "bool") == 0 ||

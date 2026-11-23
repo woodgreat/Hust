@@ -1,183 +1,18 @@
 /*
- * hust_vec.h - Dynamic array (vector) implementation for Hust-C
- * 
- * Provides HustVec structure and operations for dynamic arrays
- * Hust syntax has no pointers, so all functions return/take struct values
+ * hust_vec.h - Dynamic array runtime for Hust-C
+ *
+ * Language-level runtime: String and dynamic arrays are core features,
+ * not members of C.* modules.
  */
 
 #ifndef HUST_VEC_H
 #define HUST_VEC_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
-/* Dynamic array structure for int32_t */
-typedef struct {
-    int32_t* data;
-    size_t size;
-    size_t capacity;
-} HustVec_i32;
-
-/* Dynamic array structure for int64_t */
-typedef struct {
-    int64_t* data;
-    size_t size;
-    size_t capacity;
-} HustVec_i64;
-
-/* Dynamic array structure for float */
-typedef struct {
-    float* data;
-    size_t size;
-    size_t capacity;
-} HustVec_f32;
-
-/* Dynamic array structure for double */
-typedef struct {
-    double* data;
-    size_t size;
-    size_t capacity;
-} HustVec_f64;
-
-/* Dynamic array structure for bool */
-typedef struct {
-    bool* data;
-    size_t size;
-    size_t capacity;
-} HustVec_bool;
-
-/* ============ HustVec_i32 Operations ============ */
-
-/* Create a new HustVec_i32 (returns by value, no pointers in Hust syntax) */
-static inline HustVec_i32 HustVec_i32_new(void) {
-    HustVec_i32 vec;
-    vec.data = NULL;
-    vec.size = 0;
-    vec.capacity = 0;
-    return vec;
-}
-
-/* Free HustVec_i32 internal data (call when done with the vector) */
-static inline void HustVec_i32_free(HustVec_i32* vec) {
-    if (!vec) return;
-    free(vec->data);
-    vec->data = NULL;
-    vec->size = 0;
-    vec->capacity = 0;
-}
-
-/* Push element to HustVec_i32 */
-static inline bool HustVec_i32_push(HustVec_i32* vec, int32_t value) {
-    if (!vec) return false;
-    
-    /* Grow if needed */
-    if (vec->size >= vec->capacity) {
-        size_t new_capacity = (vec->capacity == 0) ? 4 : vec->capacity * 2;
-        int32_t* new_data = (int32_t*)realloc(vec->data, new_capacity * sizeof(int32_t));
-        if (!new_data) return false;
-        vec->data = new_data;
-        vec->capacity = new_capacity;
-    }
-    
-    vec->data[vec->size++] = value;
-    return true;
-}
-
-/* Pop element from HustVec_i32 (returns popped value via out param) */
-static inline bool HustVec_i32_pop(HustVec_i32* vec, int32_t* out_value) {
-    if (!vec || vec->size == 0) return false;
-    if (out_value) *out_value = vec->data[vec->size - 1];
-    vec->size--;
-    return true;
-}
-
-/* Get length of HustVec_i32 */
-static inline size_t HustVec_i32_len(const HustVec_i32* vec) {
-    return vec ? vec->size : 0;
-}
-
-/* Get element at index (with bounds check) */
-static inline bool HustVec_i32_get(const HustVec_i32* vec, size_t index, int32_t* out_value) {
-    if (!vec || index >= vec->size) return false;
-    if (out_value) *out_value = vec->data[index];
-    return true;
-}
-
-/* Set element at index (with bounds check) */
-static inline bool HustVec_i32_set(HustVec_i32* vec, size_t index, int32_t value) {
-    if (!vec || index >= vec->size) return false;
-    vec->data[index] = value;
-    return true;
-}
-
-/* ============ HustVec_f64 Operations ============ */
-
-/* Create a new HustVec_f64 (returns by value) */
-static inline HustVec_f64 HustVec_f64_new(void) {
-    HustVec_f64 vec;
-    vec.data = NULL;
-    vec.size = 0;
-    vec.capacity = 0;
-    return vec;
-}
-
-/* Free HustVec_f64 internal data */
-static inline void HustVec_f64_free(HustVec_f64* vec) {
-    if (!vec) return;
-    free(vec->data);
-    vec->data = NULL;
-    vec->size = 0;
-    vec->capacity = 0;
-}
-
-/* Push element to HustVec_f64 */
-static inline bool HustVec_f64_push(HustVec_f64* vec, double value) {
-    if (!vec) return false;
-    
-    if (vec->size >= vec->capacity) {
-        size_t new_capacity = (vec->capacity == 0) ? 4 : vec->capacity * 2;
-        double* new_data = (double*)realloc(vec->data, new_capacity * sizeof(double));
-        if (!new_data) return false;
-        vec->data = new_data;
-        vec->capacity = new_capacity;
-    }
-    
-    vec->data[vec->size++] = value;
-    return true;
-}
-
-/* Pop element from HustVec_f64 */
-static inline bool HustVec_f64_pop(HustVec_f64* vec, double* out_value) {
-    if (!vec || vec->size == 0) return false;
-    if (out_value) *out_value = vec->data[vec->size - 1];
-    vec->size--;
-    return true;
-}
-
-/* Get length of HustVec_f64 */
-static inline size_t HustVec_f64_len(const HustVec_f64* vec) {
-    return vec ? vec->size : 0;
-}
-
-/* Get element at index */
-static inline bool HustVec_f64_get(const HustVec_f64* vec, size_t index, double* out_value) {
-    if (!vec || index >= vec->size) return false;
-    if (out_value) *out_value = vec->data[index];
-    return true;
-}
-
-/* Set element at index */
-static inline bool HustVec_f64_set(HustVec_f64* vec, size_t index, double value) {
-    if (!vec || index >= vec->size) return false;
-    vec->data[index] = value;
-    return true;
-}
-
-/* ============ Generic Macro for Type-Specific Vectors ============ */
-
-/* Declare vector operations for a specific type */
 #define HUST_VEC_DECLARE(TYPE, NAME) \
 typedef struct { \
     TYPE* data; \
@@ -214,9 +49,8 @@ static inline bool HustVec_##NAME##_push(HustVec_##NAME* vec, TYPE value) { \
     return true; \
 } \
 \
-static inline bool HustVec_##NAME##_pop(HustVec_##NAME* vec, TYPE* out_value) { \
+static inline bool HustVec_##NAME##_pop(HustVec_##NAME* vec) { \
     if (!vec || vec->size == 0) return false; \
-    if (out_value) *out_value = vec->data[vec->size - 1]; \
     vec->size--; \
     return true; \
 } \
@@ -237,10 +71,25 @@ static inline bool HustVec_##NAME##_set(HustVec_##NAME* vec, size_t index, TYPE 
     return true; \
 }
 
-/* Declare common vector types */
+HUST_VEC_DECLARE(int8_t, i8)
+HUST_VEC_DECLARE(int16_t, i16)
+HUST_VEC_DECLARE(int32_t, i32)
 HUST_VEC_DECLARE(int64_t, i64)
+HUST_VEC_DECLARE(uint8_t, u8)
+HUST_VEC_DECLARE(uint16_t, u16)
+HUST_VEC_DECLARE(uint32_t, u32)
+HUST_VEC_DECLARE(uint64_t, u64)
 HUST_VEC_DECLARE(float, f32)
+HUST_VEC_DECLARE(double, f64)
 HUST_VEC_DECLARE(bool, bool)
 HUST_VEC_DECLARE(char, char)
 
+/* String vectors use the language-level HustString runtime. */
+struct HustString;
+HUST_VEC_DECLARE(struct HustString*, String)
+
+/* Nested vectors for dynamic 2D/3D arrays. */
+HUST_VEC_DECLARE(HustVec_i32, HustVec_i32)
+HUST_VEC_DECLARE(HustVec_HustVec_i32, HustVec_HustVec_i32)
+HUST_VEC_DECLARE(HustVec_HustVec_HustVec_i32, HustVec_HustVec_HustVec_i32)
 #endif /* HUST_VEC_H */

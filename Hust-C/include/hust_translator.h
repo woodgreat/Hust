@@ -9,11 +9,30 @@
 
 #include "hust_ast.h"
 
+#define HUST_MAX_ARRAYS 128
+#define HUST_MAX_STRINGS 128
+
+typedef struct {
+    char name[64];
+    char elem_type[32];
+    int dims;
+    bool is_dynamic;
+} ArrayInfo;
+
+typedef struct {
+    char name[64];
+} StringInfo;
+
 /* Translator structure */
 typedef struct {
     ASTNode* ast;
     FILE* output;
     int indent_level;
+    int error_count;
+    ArrayInfo arrays[HUST_MAX_ARRAYS];
+    int array_count;
+    StringInfo strings[HUST_MAX_STRINGS];
+    int string_count;
 } Translator;
 
 /* Function declarations */

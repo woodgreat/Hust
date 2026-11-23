@@ -109,8 +109,17 @@ static bool starts_with_keyword(const char* line, const char* keyword) {
 
 /* Helper: Check if line is a variable declaration type */
 static bool is_var_type(const char* line) {
-    return (starts_with_keyword(line, "i32") ||
+    return (starts_with_keyword(line, "const") ||
+            starts_with_keyword(line, "i8") ||
+            starts_with_keyword(line, "i16") ||
+            starts_with_keyword(line, "i32") ||
             starts_with_keyword(line, "i64") ||
+            starts_with_keyword(line, "u8") ||
+            starts_with_keyword(line, "u16") ||
+            starts_with_keyword(line, "u32") ||
+            starts_with_keyword(line, "u64") ||
+            starts_with_keyword(line, "usize") ||
+            starts_with_keyword(line, "isize") ||
             starts_with_keyword(line, "f32") ||
             starts_with_keyword(line, "f64") ||
             starts_with_keyword(line, "bool") ||
@@ -191,23 +200,51 @@ static bool parser_has_balanced_parens(const char* line) {
     return has_paren && paren_count == 0;
 }
 
+/* A dot is a method separator only when it is not part of a float literal
+ * and is followed by a method name and '('. */
+static bool parser_is_method_dot(const char* eq, const char* dot) {
+    if (!eq || !dot || dot <= eq) return false;
+    if (isdigit((unsigned char)dot[-1])) return false;
+    const char* p = dot + 1;
+    if (!isalpha((unsigned char)*p) && *p != '_') return false;
+    const char* name_start = p;
+    while (isalnum((unsigned char)*p) || *p == '_') p++;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != '(') return false;
+    
+    /* .len() is an expression, not a general method-call assignment. */
+    if (p - name_start == 3 && strncmp(name_start, "len", 3) == 0) {
+        return false;
+    }
+    return true;
+}
+
+static bool parser_has_method_call(const char* line, const char* eq) {
+    (void)line;
+    const char* dot = eq;
+    while (dot && (dot = strchr(dot, '.')) != NULL) {
+        if (parser_is_method_dot(eq, dot)) return true;
+        dot++;
+    }
+    return false;
+}
+
 /* Helper: Check if line is a function definition */
 static bool parser_is_function_def(const char* line) {
     if (!line) return false;
     if (!is_var_type(line)) return false;
     
-    /* Check if this is a method call assignment: type var = obj.method(args) */
     const char* eq = strchr(line, '=');
-    if (eq) {
-        /* Check if there's a . after = (method call) */
-        const char* dot = strchr(eq, '.');
-        if (dot) {
-            /* Check if there's a ( after . */
-            const char* paren = strchr(dot, '(');
-            if (paren) {
-                return false; /* This is a method call assignment, not function def */
-            }
-        }
+    const char* first_paren = strchr(line, '(');
+    
+    /* An initializer expression is not a function signature. */
+    if (eq && (!first_paren || eq < first_paren)) {
+        return false;
+    }
+    
+    /* Check if this is a method call assignment: type var = obj.method(args) */
+    if (eq && parser_has_method_call(line, eq)) {
+        return false;
     }
     
     return parser_has_balanced_parens(line);
@@ -218,17 +255,18 @@ static bool parser_is_variable_decl(const char* line) {
     if (!line) return false;
     if (!is_var_type(line)) return false;
     
-    /* Check if this is a method call assignment: type var = obj.method(args) */
     const char* eq = strchr(line, '=');
+    const char* first_paren = strchr(line, '(');
+    
     if (eq) {
-        /* Check if there's a . after = (method call) */
-        const char* dot = strchr(eq, '.');
-        if (dot) {
-            /* Check if there's a ( after . */
-            const char* paren = strchr(dot, '(');
-            if (paren) {
-                return false; /* This is a method call assignment, not variable decl */
-            }
+        /* Method call assignment is handled by the statement path. */
+        if (parser_has_method_call(line, eq)) {
+            return false;
+        }
+        
+        /* type var = expr; even when expr contains parentheses */
+        if (!first_paren || eq < first_paren) {
+            return true;
         }
     }
     
