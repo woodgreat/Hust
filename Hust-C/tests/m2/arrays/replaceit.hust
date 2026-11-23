@@ -1,0 +1,8 @@
+use C.stdio.*;
+void main() {
+    i32[] a;
+    a.push(1);
+    a.push(2);
+    a.replaceit(1, 9);
+    printf("%d\n", a[1]);
+}

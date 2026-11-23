@@ -1,0 +1,14 @@
+use C.stdio.*;
+class Animal {
+    i32 age;
+    public i32 get_age() {
+        return this.age;
+    }
+}
+class Dog extends Animal {
+}
+void main() {
+    Dog d = new Dog();
+    d.Animal.age = 6;
+    printf("%d\n", d.Animal.get_age());
+}

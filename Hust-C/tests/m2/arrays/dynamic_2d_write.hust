@@ -1,0 +1,8 @@
+use C.stdio.*;
+void main() {
+    i32[][] c;
+    c.push([]);
+    c[0].push(1);
+    c[0][0] = 9;
+    printf("%d\n", c[0][0]);
+}

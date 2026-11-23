@@ -1,0 +1,10 @@
+use C.stdio.*;
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+void main() {
+    Color c = Color.Green;
+    printf("%d\n", c);
+}

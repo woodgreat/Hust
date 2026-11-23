@@ -1,0 +1,3 @@
+use C.unknown.*;
+void main() {
+}

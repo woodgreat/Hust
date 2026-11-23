@@ -1,0 +1,7 @@
+use C.stdio.*;
+void main() {
+    i32[5] a = {1, 2, 3, 4, 5};
+    i32[] b = a[0..3];
+    i32 n = (i32)b.len();
+    printf("%d %d %d\n", n, b[0], b[2]);
+}

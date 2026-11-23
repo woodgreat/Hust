@@ -1,0 +1,9 @@
+use C.stdio.*;
+String greet() {
+    return "Hi";
+}
+void main() {
+    String s = greet();
+    i32 n = (i32)s.len();
+    printf("%d\n", n);
+}

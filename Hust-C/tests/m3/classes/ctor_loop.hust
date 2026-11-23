@@ -1,0 +1,14 @@
+use C.stdio.*;
+class Counter {
+    i32 total;
+    public Counter(i32 n) {
+        this.total = 0;
+        for (i32 i = 0; i < n; i++) {
+            this.total = this.total + 1;
+        }
+    }
+}
+void main() {
+    Counter c = new Counter(4);
+    printf("%d\n", c.total);
+}

@@ -1,0 +1,4 @@
+void main() {
+    const i32 N = 5;
+    i32 a = N;
+}

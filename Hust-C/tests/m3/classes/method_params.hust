@@ -1,0 +1,14 @@
+use C.stdio.*;
+class Adder {
+    i32 base;
+    public Adder(i32 base) {
+        this.base = base;
+    }
+    public i32 add(i32 v) {
+        return this.base + v;
+    }
+}
+void main() {
+    Adder a = new Adder(10);
+    printf("%d\n", a.add(5));
+}

@@ -1,0 +1,4 @@
+use C.stdio.*;
+void main() {
+    bool b = true; printf("%d\n", b);
+}

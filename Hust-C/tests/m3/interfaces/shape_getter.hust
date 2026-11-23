@@ -1,0 +1,15 @@
+use C.stdio.*;
+interface Getter {
+    public value get();
+}
+class Const implements Getter {
+    public Const() {
+    }
+    public i32 get() {
+        return 7;
+    }
+}
+void main() {
+    Getter(i32) g = new Const();
+    printf("%d\n", g.get());
+}

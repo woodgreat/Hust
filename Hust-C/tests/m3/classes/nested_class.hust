@@ -1,0 +1,14 @@
+use C.stdio.*;
+class Outer {
+    class Inner {
+        i32 value;
+        public i32 get() {
+            return this.value;
+        }
+    }
+}
+void main() {
+    Outer.Inner i = new Outer.Inner();
+    i.value = 6;
+    printf("%d\n", i.get());
+}

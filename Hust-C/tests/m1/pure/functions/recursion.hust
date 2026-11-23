@@ -1,0 +1,9 @@
+i32 fact(i32 n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * fact(n - 1);
+}
+void main() {
+    i32 a = fact(5);
+}

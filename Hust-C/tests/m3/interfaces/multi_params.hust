@@ -1,0 +1,15 @@
+use C.stdio.*;
+interface Adder {
+    public result add(a, b);
+}
+class IntAdder implements Adder {
+    public IntAdder() {
+    }
+    public i32 add(i32 a, i32 b) {
+        return a + b;
+    }
+}
+void main() {
+    Adder(i32, i32, i32) a = new IntAdder();
+    printf("%d\n", a.add(3, 4));
+}

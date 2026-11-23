@@ -1,0 +1,14 @@
+use C.stdio.*;
+class Level {
+    i32 budget;
+    public Level(i32 lv) {
+        this.budget = this.calc(lv);
+    }
+    public i32 calc(i32 lv) {
+        return lv * 100;
+    }
+}
+void main() {
+    Level l = new Level(3);
+    printf("%d\n", l.budget);
+}

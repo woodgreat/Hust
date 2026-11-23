@@ -1,0 +1,4 @@
+use C.stdio.*;
+void main() {
+    f32 f = 3.5; printf("%.1f\n", f);
+}

@@ -1,0 +1,6 @@
+use C.stdio.*;
+void main() {
+    String s = "Hi";
+    bool b = s != "Bye";
+    printf("%d\n", b);
+}

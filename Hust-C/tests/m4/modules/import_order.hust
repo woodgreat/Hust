@@ -1,0 +1,5 @@
+use C.math.*;
+use C.stdio.*;
+void main() {
+    printf("%.1f\n", floor(2.9));
+}

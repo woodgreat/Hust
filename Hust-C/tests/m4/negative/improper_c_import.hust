@@ -1,0 +1,3 @@
+use C.stdio;
+void main() {
+}

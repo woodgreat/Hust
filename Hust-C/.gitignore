@@ -10,6 +10,7 @@ hust_c
 *.bak
 
 # Test output files
+tests/output/
 tests/**/*.c
 !tests/**/*.expected.c
 

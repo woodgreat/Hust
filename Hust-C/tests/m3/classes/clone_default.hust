@@ -1,0 +1,13 @@
+use C.stdio.*;
+class Point {
+    i32 x;
+    public Point(i32 x) {
+        this.x = x;
+    }
+}
+void main() {
+    Point a = new Point(1);
+    Point b = a;
+    b.x = 2;
+    printf("%d %d\n", a.x, b.x);
+}

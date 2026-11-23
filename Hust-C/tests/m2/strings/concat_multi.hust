@@ -1,0 +1,6 @@
+use C.stdio.*;
+void main() {
+    String t = "a" + "b" + "c";
+    i32 n = (i32)t.len();
+    printf("%d\n", n);
+}

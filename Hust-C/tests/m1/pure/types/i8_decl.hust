@@ -1,0 +1,4 @@
+void main() {
+    i8 x = 12;
+    i8 y = x;
+}

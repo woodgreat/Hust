@@ -1,0 +1,11 @@
+use C.stdio.*;
+class Board {
+    i32[3] cells;
+}
+void main() {
+    Board b = new Board();
+    b.cells[0] = 1;
+    b.cells[1] = 2;
+    b.cells[2] = 3;
+    printf("%d\n", b.cells[0] + b.cells[1] + b.cells[2]);
+}

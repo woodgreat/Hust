@@ -1,0 +1,14 @@
+use C.stdio.*;
+class Point {
+    i32 x;
+    public Point(i32 x) {
+        this.x = x;
+    }
+    public readonly i32 get() {
+        return this.x;
+    }
+}
+void main() {
+    Point p = new Point(3);
+    printf("%d\n", p.get());
+}

@@ -1,0 +1,5 @@
+use C.stdio.*;
+use C.math.*;
+void main() {
+    printf("%.1f\n", sqrt(9.0));
+}

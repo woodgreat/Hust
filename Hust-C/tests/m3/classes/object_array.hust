@@ -1,0 +1,13 @@
+use C.stdio.*;
+class Point {
+    i32 x;
+    public Point(i32 x) {
+        this.x = x;
+    }
+}
+void main() {
+    Point[] ps;
+    ps.push(new Point(1));
+    ps.push(new Point(2));
+    printf("%d %d %d\n", (i32)ps.len(), ps[0].x, ps[1].x);
+}

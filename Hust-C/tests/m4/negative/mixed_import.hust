@@ -1,0 +1,4 @@
+use C.stdio.*;
+use RUST.io.*;
+void main() {
+}

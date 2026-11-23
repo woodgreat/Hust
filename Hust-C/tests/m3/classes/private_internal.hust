@@ -1,0 +1,15 @@
+use C.stdio.*;
+class Box {
+    i32 value;
+    public void set(i32 v) {
+        this.value = v;
+    }
+    public i32 get() {
+        return this.value;
+    }
+}
+void main() {
+    Box b = new Box();
+    b.set(8);
+    printf("%d\n", b.get());
+}

@@ -1,0 +1,6 @@
+use C.stdio.*;
+use C.math.*;
+void main() {
+    f64 x = pow(2.0, 3.0);
+    printf("%.1f\n", x);
+}

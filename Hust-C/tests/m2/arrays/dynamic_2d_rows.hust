@@ -1,0 +1,10 @@
+use C.stdio.*;
+void main() {
+    i32[][] c;
+    c.push([]);
+    c.push([]);
+    c[0].push(7);
+    c[1].push(8);
+    i32 n = (i32)c.len();
+    printf("%d %d %d\n", n, c[0][0], c[1][0]);
+}

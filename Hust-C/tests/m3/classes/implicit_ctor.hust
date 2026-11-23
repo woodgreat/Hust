@@ -1,0 +1,11 @@
+use C.stdio.*;
+class Point {
+    i32 x;
+    i32 y;
+}
+void main() {
+    Point p = new Point();
+    p.x = 4;
+    p.y = 5;
+    printf("%d\n", p.x + p.y);
+}

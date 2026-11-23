@@ -1,0 +1,14 @@
+use C.stdio.*;
+class Point {
+    i32 x;
+    public Point(i32 x) {
+        this.x = x;
+    }
+}
+Point make() {
+    return new Point(5);
+}
+void main() {
+    Point p = make();
+    printf("%d\n", p.x);
+}

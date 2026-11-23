@@ -1,0 +1,8 @@
+use C.stdio.*;
+i32 len_of(String s) {
+    return (i32)s.len();
+}
+void main() {
+    String s = "Hello";
+    printf("%d\n", len_of(s));
+}

@@ -1,0 +1,5 @@
+void main() {
+    for (i32 i = 0; i < 3; i++) {
+        i = i;
+    }
+}

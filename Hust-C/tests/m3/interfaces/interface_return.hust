@@ -1,0 +1,18 @@
+use C.stdio.*;
+interface Getter {
+    public value get();
+}
+class Seven implements Getter {
+    public Seven() {
+    }
+    public i32 get() {
+        return 7;
+    }
+}
+Getter(i32) make() {
+    return new Seven();
+}
+void main() {
+    Getter(i32) g = make();
+    printf("%d\n", g.get());
+}

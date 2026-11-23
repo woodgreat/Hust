@@ -1,0 +1,6 @@
+i32 answer() {
+    return 42;
+}
+void main() {
+    i32 a = answer();
+}

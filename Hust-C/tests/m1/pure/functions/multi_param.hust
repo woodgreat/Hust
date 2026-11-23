@@ -1,0 +1,6 @@
+i32 sum3(i32 a, i32 b, i32 c) {
+    return a + b + c;
+}
+void main() {
+    i32 a = sum3(1, 2, 3);
+}

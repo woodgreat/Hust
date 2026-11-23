@@ -1,0 +1,26 @@
+use C.stdio.*;
+interface Getter {
+    public value get();
+}
+class Seven implements Getter {
+    public Seven() {
+    }
+    public i32 get() {
+        return 7;
+    }
+}
+class Nine implements Getter {
+    public Nine() {
+    }
+    public i32 get() {
+        return 9;
+    }
+}
+void main() {
+    Getter(i32)[] gs;
+    gs.push(new Seven());
+    gs.push(new Nine());
+    for (i32 i = 0; i < gs.len(); i++) {
+        printf("%d\n", gs[i].get());
+    }
+}

@@ -1,0 +1,4 @@
+use C.stdio.*;
+void main() {
+    char c = 'A'; printf("%c\n", c);
+}

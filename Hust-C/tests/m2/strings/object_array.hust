@@ -1,0 +1,9 @@
+use C.stdio.*;
+void main() {
+    String[] a;
+    a.push("x");
+    a.push("yy");
+    i32 n = (i32)a.len();
+    i32 m = (i32)a[1].len();
+    printf("%d %d\n", n, m);
+}

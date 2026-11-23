@@ -1,0 +1,6 @@
+i32 add(i32 a, i32 b) {
+    return a + b;
+}
+void main() {
+    i32 a = add(1, 2);
+}

@@ -1,0 +1,6 @@
+use C.stdio.*;
+void main() {
+    String s = "a" + "b";
+    bool b = s == "ab";
+    printf("%d\n", b);
+}

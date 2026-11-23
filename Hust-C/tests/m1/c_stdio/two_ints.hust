@@ -1,0 +1,4 @@
+use C.stdio.*;
+void main() {
+    printf("%d %d\n", 1, 2);
+}

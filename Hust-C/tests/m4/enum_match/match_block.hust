@@ -1,0 +1,19 @@
+use C.stdio.*;
+enum Color {
+    Red,
+    Green
+}
+void main() {
+    Color c = Color.Red;
+    match c {
+        Color.Red : {
+            printf("red\n");
+        },
+        Color.Green : {
+            printf("green\n");
+        },
+        default : {
+            printf("other\n");
+        }
+    }
+}

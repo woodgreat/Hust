@@ -1,0 +1,5 @@
+interface Bad {
+    public void draw();
+}
+void main() {
+}

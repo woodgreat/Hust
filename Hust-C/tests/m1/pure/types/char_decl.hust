@@ -1,0 +1,4 @@
+void main() {
+    char x = 'A';
+    char y = x;
+}

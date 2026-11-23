@@ -1,0 +1,7 @@
+use C.stdio.*;
+void main() {
+    const i32 N = 2;
+    i32[N][N] a = {0};
+    a[1][1] = 6;
+    printf("%d\n", a[1][1]);
+}

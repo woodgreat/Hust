@@ -1,4 +1,0 @@
-// Test extract_brace_content
-void main() {
-    println!("test");
-}

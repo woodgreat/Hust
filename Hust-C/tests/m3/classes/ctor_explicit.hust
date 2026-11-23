@@ -1,0 +1,16 @@
+use C.stdio.*;
+class Point {
+    i32 x;
+    i32 y;
+    public Point(i32 x, i32 y) {
+        this.x = x;
+        this.y = y;
+    }
+    public i32 sum() {
+        return this.x + this.y;
+    }
+}
+void main() {
+    Point p = new Point(1, 2);
+    printf("%d\n", p.sum());
+}

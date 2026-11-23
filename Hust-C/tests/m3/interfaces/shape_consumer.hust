@@ -1,0 +1,15 @@
+use C.stdio.*;
+interface Consumer {
+    public result consume(item);
+}
+class PlusOne implements Consumer {
+    public PlusOne() {
+    }
+    public i32 consume(i32 item) {
+        return item + 1;
+    }
+}
+void main() {
+    Consumer(i32, i32) c = new PlusOne();
+    printf("%d\n", c.consume(4));
+}

@@ -1,0 +1,15 @@
+use C.stdio.*;
+class Animal {
+    i32 age;
+    public void eat() {
+    }
+}
+class Dog extends Animal {
+    public i32 bark_volume() {
+        return 9;
+    }
+}
+void main() {
+    Dog d = new Dog();
+    printf("%d\n", d.bark_volume());
+}

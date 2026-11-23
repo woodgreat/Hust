@@ -1,0 +1,11 @@
+class Point {
+    i32 x;
+    public Point() {
+        this.x = 0;
+    }
+    public Point(i32 x) {
+        this.x = x;
+    }
+}
+void main() {
+}

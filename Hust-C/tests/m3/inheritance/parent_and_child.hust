@@ -1,0 +1,21 @@
+use C.stdio.*;
+class Animal {
+    i32 age;
+    public Animal(i32 age) {
+        this.age = age;
+    }
+    public i32 get_age() {
+        return this.age;
+    }
+}
+class Dog extends Animal {
+    i32 volume;
+    public Dog(i32 age, i32 volume) {
+        super(age);
+        this.volume = volume;
+    }
+}
+void main() {
+    Dog d = new Dog(3, 8);
+    printf("%d %d\n", d.Animal.get_age(), d.volume);
+}
