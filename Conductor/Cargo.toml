@@ -1,0 +1,20 @@
+[package]
+name = "hust-conductor"
+version = "0.1.0"
+edition = "2021"
+description = "Hust multi-core conductor"
+authors = ["wood"]
+license = "MIT"
+repository = "https://github.com/woodgreat/Hust"
+
+# The conductor intentionally has no third-party dependencies. It must be
+# buildable offline and stay independent from the language cores.
+[dependencies]
+
+[lib]
+name = "hust_conductor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hustc"
+path = "src/main.rs"
