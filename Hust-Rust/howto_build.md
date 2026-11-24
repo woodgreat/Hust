@@ -1,7 +1,8 @@
-# How to Build Hust
+# How to Build Hust-Rust
 
-This guide covers building the Hust transpiler from source on Linux and Windows,
-and how to install the resulting binary. Current version at time of writing:
+This guide covers building the Rust language core from source on Linux and
+Windows. Normal users should invoke the `hustc` conductor; this guide is for
+building the `hust_rust` core itself. Current version at time of writing:
 `0.1.11+20260908` (Wood format display: `0.1.11.20260908`).
 
 ## Prerequisites
@@ -24,13 +25,13 @@ cd Hust-Rust
 cargo build --release
 ```
 
-The binary is produced at `target/release/hust`.
+The binary is produced at `target/release/hust_rust`.
 
 For a quick debug build (faster compile, slower runtime):
 
 ```bash
 cargo build
-# binary at target/debug/hust
+# binary at target/debug/hust_rust
 ```
 
 ### Restricted / sandboxed environments (read-only $HOME)
@@ -53,8 +54,8 @@ longer; subsequent builds reuse the cache).
 
 ### The portable build directory (important behavior)
 
-Hust creates its working directory **relative to the location of the hust
-binary**, not relative to the source file being compiled:
+Hust creates its working directory **relative to the location of the
+`hust_rust` binary**, not relative to the source file being compiled:
 
 ```
 <binary dir>/build/
@@ -68,7 +69,7 @@ Two practical consequences:
    output tree — it works but pollutes `target/`. Prefer an installed copy.
 2. If a build is killed mid-run, a stale `.cargo-build-lock` may remain in
    `build/dist/debug/`. If subsequent runs hang, delete the lock file (with no
-   hust process running) and retry.
+   `hust_rust` process running) and retry.
 
 ## Build on Windows
 
@@ -91,7 +92,7 @@ cd Hust-Rust
 cargo build --release
 ```
 
-The binary is produced at `target\release\hust.exe`.
+The binary is produced at `target\release\hust_rust.exe`.
 
 If your user profile is on a restricted drive, the same `CARGO_HOME`
 workaround applies:
@@ -103,53 +104,67 @@ cargo build --release
 
 ## Installing
 
-### Linux
-
-Recommended (user-level, no root, on the standard PATH):
+The recommended way is the repo-root `install.sh`, which builds the Conductor,
+Rust core, and C core and installs all three:
 
 ```bash
-cp target/release/hust ~/.local/bin/
+cd ..          # repo root
+./install.sh
+hustc --version
 ```
 
-Alternatives:
+This installs `hustc`, `hust_rust`, `hust_c` to `$PREFIX/bin` (default
+`~/.local/bin`) and the C runtime headers to `$PREFIX/include`.
+
+The old `hust` binary is retired. Update existing scripts by replacing
+`hust` with `hustc`; source files and `settings.config` do not change.
+
+### Manual core install (advanced)
+
+If you only need the Rust core binary:
+
+```bash
+cp target/release/hust_rust ~/.local/bin/
+```
 
 | Location | Command | Notes |
 |----------|---------|-------|
-| `~/.local/bin` (recommended) | `cp target/release/hust ~/.local/bin/` | User-level, in PATH on most distros |
-| `~/.cargo/bin` | `cp target/release/hust ~/.cargo/bin/` | Already in PATH if you use rustup |
-| `/usr/local/bin` | `sudo cp target/release/hust /usr/local/bin/` | System-wide, all users |
-| Custom dir | `cp target/release/hust ~/bin/` | Only if the dir is in your `$PATH` |
+| `~/.local/bin` (recommended) | `cp target/release/hust_rust ~/.local/bin/` | User-level, in PATH on most distros |
+| `~/.cargo/bin` | `cp target/release/hust_rust ~/.cargo/bin/` | Already in PATH if you use rustup |
+| `/usr/local/bin` | `sudo cp target/release/hust_rust /usr/local/bin/` | System-wide, all users |
+| Custom dir | `cp target/release/hust_rust ~/bin/` | Only if the dir is in your `$PATH` |
 
-Remember the portable build directory follows the binary: installing to
-`~/.local/bin` creates `~/.local/bin/build/` on first `hust run`.
+The portable build directory follows the core binary: a legacy
+`hust_rust run` creates `build/` next to `hust_rust`.
 
 ### One-command script
 
-The repo root (one level above `Hust-Rust/`) contains `install.sh`, which
-builds release and installs to `~/.local/bin` in a single step:
-
 ```bash
 ./install.sh
-hust --version
+hustc --version
+hustc --cores
 ```
 
 ### Windows
 
 Either:
 
-- Copy `target\release\hust.exe` into a directory already on your `PATH`
+- Copy `target\release\hust_rust.exe` into a directory already on your `PATH`
   (e.g. create `C:\tools\hust\` and add it via *System Properties →
   Environment Variables*), or
-- Keep `hust.exe` in a project folder and invoke it by full path — the
+- Keep `hust_rust.exe` in a project folder and invoke it by full path — the
   portable `build\` directory will be created next to the exe.
+
+Normal use goes through `hustc.exe`.
 
 ## Verify installation
 
 ```bash
-hust --version
+hustc --version
 # Wood format output: 0.1.11.20260908
 
-hust --help
+hustc --cores
+hustc --help
 ```
 
 ## Running the test suite
@@ -157,7 +172,7 @@ hust --help
 Single test:
 
 ```bash
-hust run tests/all_arrays.hust
+hustc run tests/all_arrays.hust
 ```
 
 Full suite (43 files). **Use a per-file timeout** — two pre-existing cases
@@ -167,7 +182,7 @@ Full suite (43 files). **Use a per-file timeout** — two pre-existing cases
 cd Hust-Rust
 pass=0; fail=0
 for f in tests/*.hust; do
-  if timeout 30 hust run "$f" > /dev/null 2>&1; then
+  if timeout 30 hustc run "$f" > /dev/null 2>&1; then
     pass=$((pass+1))
   else
     fail=$((fail+1)); echo "FAIL: $f"
@@ -182,9 +197,9 @@ echo "PASS: $pass  FAIL: $fail"
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `Read-only file system (os error 30)` during build | `~/.cargo` on a read-only mount | `CARGO_HOME=/tmp/cargo-home cargo build --release` |
-| `hust run` hangs with no output | Stale lock from a killed run, or a test that times out (q3/q3_test) | Remove `build/dist/debug/.cargo-build-lock`; always `timeout` individual runs |
+| `hustc run` hangs with no output | Stale lock from a killed legacy core run, or a test that times out (q3/q3_test) | Remove `build/dist/debug/.cargo-build-lock`; always `timeout` individual runs |
 | `Permission denied` installing to `/usr/local/bin` | Need root | Use `sudo`, or install to `~/.local/bin` instead |
-| `hust: command not found` after install | Target dir not in `$PATH` | Use full path, or add the dir to `$PATH` / restart shell |
+| `hustc: command not found` after install | Target dir not in `$PATH` | Use full path, or add the dir to `$PATH` / restart shell |
 | `expected one of . ; ? } ...` on array code | Hust source file has unbalanced braces | Count `{` vs `}` — generate literals programmatically for high dimensions |
 
 ## Version history note

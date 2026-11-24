@@ -1,5 +1,5 @@
 //! Hust-Rust CLI Entry
-//! Usage: hust run main.hust
+//! Binary: hust_rust (language core; users normally invoke the hustc conductor)
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +18,7 @@ use hust_rust::{Translator, ProjectConfig, PackageConfig, ModuleResolver};
 /// Hust Language Transpiler - Rust Adapter
 #[derive(Parser)]
 #[command(
-    name = "hust",
+    name = "hust_rust",
     about = "Hust language transpiler for Rust",
     version = get_hust_version(),
 )]

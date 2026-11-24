@@ -41,7 +41,7 @@ name = "hust_rust"
 path = "src/lib.rs"
 
 [[bin]]
-name = "hust"
+name = "hust_rust"
 path = "src/main.rs"
 
 [build-dependencies]

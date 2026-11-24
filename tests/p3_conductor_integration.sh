@@ -17,13 +17,13 @@
 #   - build with -o and installed executable
 #   - check on both cores
 #   - auto selection does not fall back on a dialect error
-#   - legacy `hust run` and `hust_c <entry> -o` still work
+#   - legacy core `run` and `hust_c <entry> -o` still work
 
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HUSTC="${HUSTC_BIN:-$ROOT/Conductor/target/debug/hustc}"
-HUST_RUST="${HUST_RUST_BIN:-$ROOT/Hust-Rust/target/debug/hust}"
+HUST_RUST="${HUST_RUST_BIN:-$ROOT/Hust-Rust/target/debug/hust_rust}"
 HUST_C="${HUST_C_BIN:-$ROOT/Hust-C/hust_c}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
