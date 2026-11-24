@@ -152,7 +152,10 @@ make
 ./tests/run_tests.sh          # 全部
 ./tests/run_tests.sh m1       # 只跑 M1
 ./tests/run_tests.sh m2
+./tests/run_tests.sh negative # 只跑 10 个负向用例
 ```
+
+汇总会分别给出 `Total / Passed / Failed / Negative`。
 
 报告必须分别给出：
 
@@ -190,7 +193,7 @@ make
 - M3 已修复：类方法体解析、value 语义构造/隐式构造、字段/方法/可见性/readonly、clone/moveit、类返回、对象数组、继承、super()、父类字段/方法调用、接口 vtable/handle、接口变量/参数/返回/多态容器、嵌套类扁平化。
 - M4 已修复：enum 类型注册与成员改写、match/switch/case/块分支、self 弃用、接口类型字、重复构造、先导入才能用 I/O 的负向检查、用户模块/命名空间/use（项目模式、settings.config 路径、依赖链、类模块、别名导入）。
 - C-specific 边界（2026-11-22 owner 确认，暂定先用）：允许指针、C 风格数组、`null`、`sizeof`、C 库调用；`struct` 后续再补。
-- 当前全部测试组通过。
+- 当前全部测试组通过：178/178，负向 10/10。
 - 下一步：内存/越界安全闭环、错误处理、C 方言 struct/函数指针、HUST.* 与真实项目级用例。
 
 ---
@@ -206,3 +209,32 @@ make
 - 旧 `hust_c <entry> -o <file>` 仍可编译运行
 
 运行：`make contract-tests`。
+
+---
+
+## 9. 负向测试
+
+完整测试指引：`Hust-Docs/doc/core_testing_guide.md`。
+
+负向用例位于 `tests/m4/negative/`，每个 `.hust` 配一个 `.expected.err`：
+
+| 用例 | 校验点 |
+|------|--------|
+| `duplicate_ctor` | 重复构造函数被拒绝 |
+| `hust_not_available` | `HUST.*` 未实现期必须报错 |
+| `improper_c_import` | 非通配 `use C.stdio;` 被拒绝 |
+| `missing_import_printf` | 未导入 `C.stdio` 就使用 `printf` |
+| `mixed_import` | `C.*` 与 `RUST.*` 混核 |
+| `rust_import` | C 核拒绝 `RUST.*` |
+| `rust_macro` | C 核拒绝 `println!` |
+| `self_deprecated` | `self` 关键字已弃用 |
+| `shape_type_in_interface` | 接口正文出现类型字（r44） |
+| `unknown_c_module` | 未知 `C.*` 模块被拒绝 |
+
+判定：
+
+- 转译必须失败；
+- stderr 必须包含 `.expected.err` 首行文本；
+- 负向用例成功转译会被判为失败。
+
+单独运行：`./tests/run_tests.sh negative`；全量汇总显示 `Negative: 10/10`。

@@ -153,6 +153,8 @@
 
 ## 十、全量测试方法
 
+完整测试指引（含 Hust-C 与 Conductor）：`Hust-Docs/doc/core_testing_guide.md`。
+
 ```bash
 cd Hust-Rust
 ./tests/run_tests.sh            # 基线感知：已知失败记为 KNOWN，不算新失败

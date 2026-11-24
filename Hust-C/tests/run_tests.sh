@@ -9,6 +9,7 @@
 #   ./tests/run_tests.sh          # m1..m4 + c_specific
 #   ./tests/run_tests.sh m1
 #   ./tests/run_tests.sh m2
+#   ./tests/run_tests.sh negative # only m4/negative
 
 set -u
 
@@ -22,7 +23,8 @@ MILESTONE="${1:-all}"
 case "$MILESTONE" in
     all) SEARCH_DIRS="m1 m2 m3 m4 c_specific" ;;
     m1|m2|m3|m4|c_specific) SEARCH_DIRS="$MILESTONE" ;;
-    *) echo "Usage: $0 [m1|m2|m3|m4|c_specific|all]"; exit 2 ;;
+    negative) SEARCH_DIRS="m4/negative" ;;
+    *) echo "Usage: $0 [m1|m2|m3|m4|c_specific|negative|all]"; exit 2 ;;
 esac
 
 if [ ! -x "$HUST_C" ]; then
@@ -36,6 +38,8 @@ rm -rf "$OUT_DIR"/*
 total=0
 passed=0
 failed=0
+negative_total=0
+negative_passed=0
 failed_list=""
 
 fail_test() {
@@ -71,6 +75,9 @@ run_one() {
     fi
 
     total=$((total + 1))
+    if [ -f "$expected_err" ]; then
+        negative_total=$((negative_total + 1))
+    fi
     local project_flag=""
     if [ -f "$src_dir/settings.config" ]; then
         project_flag="--project"
@@ -83,6 +90,7 @@ run_one() {
             needle="$(head -n 1 "$expected_err")"
             if grep -Fq -- "$needle" "$tr_err"; then
                 passed=$((passed + 1))
+                negative_passed=$((negative_passed + 1))
                 printf "PASS %-52s negative\n" "$name"
             else
                 fail_test "$name" "negative stderr mismatch"
@@ -154,9 +162,10 @@ for d in $SEARCH_DIRS; do
 done
 
 echo "=== Summary ==="
-echo "Total:   $total"
-echo "Passed:  $passed"
-echo "Failed:  $failed"
+echo "Total:    $total"
+echo "Passed:   $passed"
+echo "Failed:   $failed"
+echo "Negative: $negative_passed/$negative_total"
 if [ "$failed" -gt 0 ]; then
     echo ""
     echo "Failures:"
