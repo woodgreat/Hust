@@ -175,22 +175,19 @@ Single test:
 hustc run tests/all_arrays.hust
 ```
 
-Full suite (43 files). **Use a per-file timeout** — two pre-existing cases
-(`q3.hust`, `q3_test.hust`) currently hang and would stall an unguarded loop:
+Full suite:
 
 ```bash
 cd Hust-Rust
-pass=0; fail=0
-for f in tests/*.hust; do
-  if timeout 30 hustc run "$f" > /dev/null 2>&1; then
-    pass=$((pass+1))
-  else
-    fail=$((fail+1)); echo "FAIL: $f"
-  fi
-done
-echo "PASS: $pass  FAIL: $fail"
-# Expected baseline at 0.1.11: 38 pass / 8 fail
+./tests/run_tests.sh            # baseline-aware: documented known failures do not fail
+./tests/run_tests.sh --strict   # require a fully green suite
+./tests/run_tests.sh --quick    # top-level and project builds only
 ```
+
+The runner covers top-level files, project directories, unit tests, the core
+contract, and representative runtime samples. Project directories are copied
+to a temporary directory, so the runner does not overwrite tracked binaries.
+Known failures are listed in `tests/tests.md` and reported as `KNOWN`.
 
 ## Troubleshooting
 
