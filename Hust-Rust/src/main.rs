@@ -45,7 +45,29 @@ enum Commands {
         /// Force project mode (use settings.config for modules)
         #[arg(long)]
         project: bool,
+        /// Core protocol: generate the crate here and report the executable
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Core protocol: build in release mode (default with --out-dir)
+        #[arg(long, conflicts_with = "debug")]
+        release: bool,
+        /// Core protocol: build in debug mode
+        #[arg(long, conflicts_with = "release")]
+        debug: bool,
     },
+    /// Transpile to a Rust crate without building it (core protocol)
+    Transpile {
+        /// Source file or project directory
+        target: PathBuf,
+        /// Force project mode (use settings.config for modules)
+        #[arg(long)]
+        project: bool,
+        /// Directory for the generated Rust crate
+        #[arg(long)]
+        out_dir: PathBuf,
+    },
+    /// Print machine-readable core information
+    Info,
     /// Check syntax of Hust source file or project (no output)
     Check {
         /// Source file or project directory
@@ -138,19 +160,43 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Build { dir, project } => {
-            match resolve_target(&dir, project)? {
-                TargetMode::Project(project_dir) => {
-                    println!("[Hust] Building project: {:?}", project_dir);
-                    build_project(&project_dir)
+        Commands::Build {
+            dir,
+            project,
+            out_dir,
+            release,
+            debug,
+        } => {
+            if let Some(out_dir) = out_dir {
+                // Core protocol mode. Unlike the legacy command, release is
+                // the default and stdout is reserved for executable=<path>.
+                contract_build(&dir, project, &out_dir, !debug)
+            } else {
+                if release || debug {
+                    anyhow::bail!("--release and --debug require --out-dir");
                 }
-                TargetMode::Single(file) => {
-                    println!("[Hust] Building: {:?}", file);
-                    compile_single(&file, false, false)?;
-                    println!("[Hust] Build complete");
-                    Ok(())
+                match resolve_target(&dir, project)? {
+                    TargetMode::Project(project_dir) => {
+                        println!("[Hust] Building project: {:?}", project_dir);
+                        build_project(&project_dir)
+                    }
+                    TargetMode::Single(file) => {
+                        println!("[Hust] Building: {:?}", file);
+                        compile_single(&file, false, false)?;
+                        println!("[Hust] Build complete");
+                        Ok(())
+                    }
                 }
             }
+        }
+        Commands::Transpile {
+            target,
+            project,
+            out_dir,
+        } => contract_transpile(&target, project, &out_dir),
+        Commands::Info => {
+            print_core_info();
+            Ok(())
         }
         Commands::Check { target, project } => {
             match resolve_target(&target, project)? {
@@ -189,6 +235,199 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// A crate produced for the core protocol (`transpile` / `build --out-dir`).
+struct ContractUnit {
+    name: String,
+    version: String,
+    code: String,
+}
+
+/// Transpile a target into the data needed for a self-contained Rust crate.
+/// This does not invoke cargo and does not touch the legacy build directory.
+fn prepare_contract_unit(target: &Path, project: bool) -> anyhow::Result<ContractUnit> {
+    match resolve_target(target, project)? {
+        TargetMode::Project(project_dir) => {
+            let config = ProjectConfig::load(&project_dir)
+                .context("Failed to load project configuration")?;
+            let entry_file = project_dir.join(&config.package.entry);
+            if !entry_file.exists() {
+                anyhow::bail!(
+                    "Entry file '{}' not found in project directory",
+                    config.package.entry
+                );
+            }
+
+            let mut resolver = ModuleResolver::new();
+            let modules = resolver
+                .resolve(&entry_file, &config, &project_dir)
+                .context("Failed to resolve module dependencies")?;
+            let translator = Translator::default();
+            let entry_module = modules.last().context("No entry module found")?;
+            let code = translator
+                .transpile_modules(&modules, entry_module)
+                .context("Transpilation failed")?;
+
+            let name = if config.package.name.is_empty() {
+                "hust_app".to_string()
+            } else {
+                config.package.name.clone()
+            };
+            let version = match config.package.cargo_version() {
+                version if version.is_empty() => "0.1.0".to_string(),
+                version => version,
+            };
+
+            Ok(ContractUnit {
+                name,
+                version,
+                code,
+            })
+        }
+        TargetMode::Single(file) => {
+            let source =
+                std::fs::read_to_string(&file).context("Failed to read source file")?;
+            let name = file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("hust_temp")
+                .to_string();
+
+            let code = if source.contains("use ") {
+                let current_dir = file
+                    .parent()
+                    .context("Failed to get parent directory")?;
+                let mut resolver = ModuleResolver::new();
+                let config = ProjectConfig {
+                    package: PackageConfig {
+                        name: name.clone(),
+                        version: "0.1.0".to_string(),
+                        entry: file
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("main.hust")
+                            .to_string(),
+                        author: None,
+                        description: None,
+                    },
+                    module_paths: vec![current_dir.to_path_buf()],
+                    dependencies: HashMap::new(),
+                };
+                let modules = resolver
+                    .resolve(&file, &config, current_dir)
+                    .context("Failed to resolve module dependencies")?;
+                let translator = Translator::default();
+                let entry_module = modules.last().context("No entry module found")?;
+                translator
+                    .transpile_modules(&modules, entry_module)
+                    .context("Transpilation failed")?
+            } else {
+                Translator::default()
+                    .transpile(&source)
+                    .context("Transpilation failed")?
+            };
+
+            Ok(ContractUnit {
+                name,
+                version: "0.1.0".to_string(),
+                code,
+            })
+        }
+    }
+}
+
+fn write_contract_crate(out_dir: &Path, unit: &ContractUnit) -> anyhow::Result<()> {
+    let src_dir = out_dir.join("src");
+    std::fs::create_dir_all(&src_dir)
+        .with_context(|| format!("Failed to create '{}'", src_dir.display()))?;
+    std::fs::write(src_dir.join("main.rs"), &unit.code)
+        .context("Failed to write generated Rust source")?;
+
+    let cargo_toml = format!(
+        r#"[package]
+name = "{}"
+version = "{}"
+edition = "2021"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+"#,
+        unit.name, unit.version
+    );
+    std::fs::write(out_dir.join("Cargo.toml"), cargo_toml)
+        .context("Failed to write Cargo.toml")?;
+    Ok(())
+}
+
+/// Core protocol: write a Rust crate to --out-dir and do not compile it.
+fn contract_transpile(target: &Path, project: bool, out_dir: &Path) -> anyhow::Result<()> {
+    let unit = prepare_contract_unit(target, project)?;
+    write_contract_crate(out_dir, &unit)
+}
+
+/// Core protocol: build in --out-dir and print executable=<absolute path>.
+fn contract_build(
+    target: &Path,
+    project: bool,
+    out_dir: &Path,
+    release: bool,
+) -> anyhow::Result<()> {
+    let unit = prepare_contract_unit(target, project)?;
+    write_contract_crate(out_dir, &unit)?;
+
+    let target_dir = out_dir.join("target");
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("--target-dir")
+        .arg(&target_dir)
+        .current_dir(out_dir);
+    if release {
+        cmd.arg("--release");
+    }
+    let output = cmd.output().context("Failed to invoke cargo")?;
+    // Keep stdout machine-readable even if cargo emits text there.
+    if !output.stdout.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stdout));
+    }
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    if !output.status.success() {
+        anyhow::bail!("Compilation failed");
+    }
+
+    let profile = if release { "release" } else { "debug" };
+    let exe_name = if cfg!(windows) {
+        format!("{}.exe", unit.name)
+    } else {
+        unit.name.clone()
+    };
+    let exe = target_dir.join(profile).join(exe_name);
+    if !exe.is_file() {
+        anyhow::bail!("Compiled executable not found: {}", exe.display());
+    }
+    let absolute = std::fs::canonicalize(&exe)
+        .with_context(|| format!("Failed to resolve '{}'", exe.display()))?;
+    println!("executable={}", absolute.display());
+    Ok(())
+}
+
+fn print_core_info() {
+    let toolchain = ["cargo", "rustc"].iter().all(|name| {
+        Command::new(name)
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    });
+    println!(
+        r#"{{"protocol":1,"name":"rust","language":"rust","transpile":true,"build":true,"toolchain":{}}}"#,
+        toolchain
+    );
 }
 
 /// Transpile a single Hust file and compile it.

@@ -55,8 +55,13 @@ integration-tests: $(TARGET)
 	@echo "=== Running Integration Tests ==="
 	cd tests && bash run_tests.sh
 
+# Core protocol tests (transpile/build/info, legacy compatibility)
+contract-tests: $(TARGET)
+	@echo "=== Running Core Contract Tests ==="
+	./tests/core_contract.sh
+
 # Run all tests
-test: unit-tests integration-tests
+test: unit-tests integration-tests contract-tests
 
 # Clean build artifacts
 clean:
@@ -71,4 +76,4 @@ install: $(TARGET)
 uninstall:
 	rm -f /usr/local/bin/$(TARGET)
 
-.PHONY: all clean test unit-tests integration-tests install uninstall
+.PHONY: all clean test unit-tests integration-tests contract-tests install uninstall

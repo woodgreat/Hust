@@ -192,3 +192,17 @@ make
 - C-specific 边界（2026-11-22 owner 确认，暂定先用）：允许指针、C 风格数组、`null`、`sizeof`、C 库调用；`struct` 后续再补。
 - 当前全部测试组通过。
 - 下一步：内存/越界安全闭环、错误处理、C 方言 struct/函数指针、HUST.* 与真实项目级用例。
+
+---
+
+## 8. 核心契约测试
+
+`tests/core_contract.sh` 独立于 178 个语言用例，验证 Conductor 核心契约与旧 CLI 兼容：
+
+- `hust_c info` 输出 protocol/name/capabilities
+- `transpile --out-dir` 生成 C 文件与 runtime 头文件
+- `build --out-dir` 默认 release、`--debug` 覆盖，stdout 仅 `executable=`
+- 项目模式 `--project`
+- 旧 `hust_c <entry> -o <file>` 仍可编译运行
+
+运行：`make contract-tests`。
