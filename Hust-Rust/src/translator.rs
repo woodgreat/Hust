@@ -5664,8 +5664,9 @@ impl Translator {
         let assocs = self.extract_trait_assocs(source);
         // parameter position after Rule 2 is `name: __hdyn_Iface_T`;
         // dyn methods take &mut self, so the binding must be mutable
-        // (free-function path marks it mut too).
-        let param_re = Regex::new(r"(?m)([ \t,(])([a-zA-Z_]\w*): __hdyn_([A-Za-z_]\w*)")
+        // (free-function path marks it mut too). Consume an existing `mut `
+        // and re-emit exactly one, avoiding `mut mut p`.
+        let param_re = Regex::new(r"(?m)([ \t,(])(?:mut )?([a-zA-Z_]\w*): __hdyn_([A-Za-z_]\w*)")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
         let decoded_param = |caps: &regex::Captures| -> String {
             let word = &caps[3];

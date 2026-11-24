@@ -1,5 +1,5 @@
 interface Printer {
-    public void print(content);
+    public print(content);
 }
 
 class TextPrinter implements Printer {

@@ -155,11 +155,22 @@
 
 ```bash
 cd Hust-Rust
+# 顶层单文件
 for f in tests/*.hust; do
-  if cargo run -q -- build "$f" 2>&1 | grep -q 'Build complete'; then
+  if target/debug/hust_rust build "$f" 2>&1 | grep -q 'Build complete'; then
     echo "PASS $f"
   else
     echo "FAIL $f"
+  fi
+done
+
+# 项目目录（模块文件不单独运行）
+for c in $(find tests -name settings.config | grep -v archive | grep -v obsolete); do
+  d="$(dirname "$c")"
+  if target/debug/hust_rust build "$d" 2>&1 | grep -q 'Build complete'; then
+    echo "PASS $d"
+  else
+    echo "FAIL $d"
   fi
 done
 ```
@@ -168,3 +179,19 @@ done
 - `tests/expect_fail_*` 出现 FAIL → 正确
 - `tests/expect_fail_*` 出现 PASS → **真事故**，校验失效
 - 其他文件出现 FAIL → 真 bug
+- 接口正文不得出现 `void` 等类型字（r44）；实现类的方法才写 `void`
+
+## 十一、已知失败（2026-11-24）
+
+以下问题在 P4 改名之前即存在，用旧 `hust` 二进制同样复现，不是改名引入：
+
+| 用例 | 现象 | 原因 |
+|------|------|------|
+| `private_field_external_test.hust` | 预期失败，实际构建成功 | 外部访问私有字段尚未被拒绝 |
+| `unrecognized_use_test.hust` | 预期失败，实际构建成功 | 未知 `RUST.UNKNOWN.*` 路径被当作系统命名空间接受 |
+| `interface_var_test/multiblank_param` | 构建失败 | 自由函数中的接口参数 `Container(i32, i32) c` 未改写成 dyn 类型 |
+| `shape_interface_test/container_pairmap_shape` | rustc E0053 | 接口方法的 blank 返回类型未生成关联返回类型 |
+
+2026-11-24 已修复：
+- 8 个项目夹具的接口正文去掉 `void`，符合 r44。
+- 接口动态参数重复生成 `mut mut p` 的翻译 bug。

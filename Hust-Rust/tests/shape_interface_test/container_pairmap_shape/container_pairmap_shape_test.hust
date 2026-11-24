@@ -1,7 +1,7 @@
 // r44 shape interface test 2: return blanks + multi-blank cross-method
 // sameness (put key == getValue key, same assoc type Key).
 interface Container {
-    public void add(item);
+    public add(item);
     public get(index);
 }
 
@@ -21,7 +21,7 @@ class IntStack implements Container {
 }
 
 interface PairMap {
-    public void put(key, value);
+    public put(key, value);
     public getValue(key);
 }
 

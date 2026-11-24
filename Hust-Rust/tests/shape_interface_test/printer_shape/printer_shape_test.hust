@@ -1,7 +1,7 @@
 // r44 shape interface test 1: single param blank, void return.
 // Two implementors fill the same slot with different types.
 interface Printer {
-    public void print(content);
+    public print(content);
 }
 
 class TextPrinter implements Printer {
