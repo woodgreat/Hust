@@ -12,6 +12,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -167,10 +168,14 @@ impl Sandbox {
 
         fs::create_dir_all(dir).unwrap();
         let path = dir.join(&name);
-        fs::write(&path, script).unwrap();
-        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        let staged = dir.join(format!("{}.tmp", name));
+        // Write and close before the script becomes visible; executing a file
+        // that is still open for writing can fail with ETXTBSY on Linux.
+        fs::write(&staged, script).unwrap();
+        let mut permissions = fs::metadata(&staged).unwrap().permissions();
         permissions.set_mode(0o755);
-        fs::set_permissions(&path, permissions).unwrap();
+        fs::set_permissions(&staged, permissions).unwrap();
+        fs::rename(&staged, &path).unwrap();
         path
     }
 
@@ -211,6 +216,22 @@ fn text(output: &Output) -> (String, String) {
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
     )
+}
+
+/// Execute a freshly copied binary. Linux can transiently reject exec with
+/// ETXTBSY while the copy's write count is still settling, so retry briefly.
+fn output_with_retry(mut command: Command) -> Output {
+    const ETXTBSY: i32 = 26;
+    for attempt in 0..20 {
+        match command.output() {
+            Ok(output) => return output,
+            Err(error) if error.raw_os_error() == Some(ETXTBSY) && attempt < 19 => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("failed to execute command: {}", error),
+        }
+    }
+    unreachable!("retry loop always returns or panics")
 }
 
 fn executable_line(stdout: &str) -> PathBuf {
@@ -609,23 +630,27 @@ fn same_directory_core_wins_over_path() {
     let bin = sandbox.root.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let hustc = bin.join("hustc");
-    fs::copy(env!("CARGO_BIN_EXE_hustc"), &hustc).unwrap();
-    let mut permissions = fs::metadata(&hustc).unwrap().permissions();
+    // Copy to a temporary name and rename into place: executing a freshly
+    // copied file can race with the closing writer and fail with ETXTBSY.
+    let staged = bin.join("hustc.tmp");
+    fs::copy(env!("CARGO_BIN_EXE_hustc"), &staged).unwrap();
+    let mut permissions = fs::metadata(&staged).unwrap().permissions();
     permissions.set_mode(0o755);
-    fs::set_permissions(&hustc, permissions).unwrap();
+    fs::set_permissions(&staged, permissions).unwrap();
+    fs::rename(&staged, &hustc).unwrap();
 
     sandbox.install_core_in(&bin, "rust", FakeCore::working());
     sandbox.install_core("c", FakeCore::working());
 
-    let output = Command::new(&hustc)
+    let mut command = Command::new(&hustc);
+    command
         .current_dir(sandbox.project())
         .env_remove("HUST_RUST_BIN")
         .env_remove("HUST_C_BIN")
         .env("PATH", sandbox.search_path())
         .env("FAKE_LOG", sandbox.log_path())
-        .args(["run", "main.hust"])
-        .output()
-        .unwrap();
+        .args(["run", "main.hust"]);
+    let output = output_with_retry(command);
     let (stdout, stderr) = text(&output);
     assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr);
     assert!(stdout.contains("hello from rust"), "stdout: {}", stdout);

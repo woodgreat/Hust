@@ -17,6 +17,9 @@ pub enum ProjectError {
     #[error("Module not found: {0}")]
     ModuleNotFound(String),
 
+    #[error("C dialect import `{0}` cannot run on the Rust core.\n  Fix: use --core-c or remove C.* imports.")]
+    DialectMismatch(String),
+
     #[error("Circular dependency detected: {0}")]
     CircularDependency(String),
 }
@@ -327,6 +330,11 @@ impl ModuleResolver {
 
         // Load each imported module
         for import_name in &module.imports {
+            // C dialect imports are not modules on the Rust core. Report the
+            // dialect mismatch explicitly instead of "module not found".
+            if import_name == "C" || import_name.starts_with("C.") {
+                return Err(ProjectError::DialectMismatch(import_name.clone()));
+            }
             // Fix B1: skip system library imports (RUST.*, HUST.*)
             if import_name.starts_with("RUST.") || import_name.starts_with("HUST.") {
                 continue;

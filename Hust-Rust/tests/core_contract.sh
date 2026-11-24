@@ -52,6 +52,21 @@ case "$debug_out" in
     *) fail "debug build did not use the debug profile: $debug_out" ;;
 esac
 
+# C dialect code must not be silently treated as a missing module.
+cat > "$TMP/c_dialect.hust" <<'EOF'
+use C.stdio.*;
+void main() {
+    printf("wrong core\n");
+}
+EOF
+if dialect_out="$("$HUST" build "$TMP/c_dialect.hust" --out-dir "$TMP/c-dialect-out" 2>&1)"; then
+    fail "C dialect code unexpectedly built on the Rust core"
+fi
+case "$dialect_out" in
+    *"cannot run on the Rust core"*"--core-c"*) ;;
+    *) fail "missing C dialect hint: $dialect_out" ;;
+esac
+
 mkdir -p "$TMP/project"
 cat > "$TMP/project/settings.config" <<'EOF'
 [project]
