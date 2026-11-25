@@ -1,57 +1,108 @@
 #!/usr/bin/env bash
-# Hust installer/updater - build release artifacts and install them.
-# Usage: ./install.sh
-#   PREFIX=/custom/prefix ./install.sh
+# Hust installer — install hustc and cores to ~/.local/bin/hust_work/
+# 
+# Layout:
+#   ~/.local/bin/hustc                          # Conductor CLI
+#   ~/.local/bin/hust_work/
+#   ├── hustc/                                  # Conductor extra files (reserved)
+#   └── hust_core/
+#       ├── hust_c/
+#       │   ├── hust_c                          # C core executable
+#       │   ├── include/                        # C headers
+#       │   └── lib/                            # C libraries
+#       └── hust_rust/
+#           ├── hust_rust                       # Rust core executable
+#           ├── include/                        # Rust headers (if any)
+#           └── lib/                            # Rust libraries (if any)
+#
+# Usage: ./install.sh   (from Hust repo root, or any path)
+
 set -e
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
-PREFIX="${PREFIX:-$HOME/.local}"
-BIN_DIR="$PREFIX/bin"
-INCLUDE_DIR="$PREFIX/include"
-CARGO_HOME="${CARGO_HOME:-/tmp/cargo-home}"
-export CARGO_HOME
+INSTALL_DIR="$HOME/.local/bin"
+HUST_WORK="$INSTALL_DIR/hust_work"
 
-echo "==> Building Conductor"
-(cd "$REPO_ROOT/Conductor" && cargo build --release)
+echo "=== Hust Installer ==="
+echo "Repo: $REPO_ROOT"
+echo "Install to: $INSTALL_DIR"
+echo ""
 
-echo "==> Building Rust core"
-(cd "$REPO_ROOT/Hust-Rust" && cargo build --release)
+# 1. Build and install Conductor (hustc)
+echo "[1/3] Building Conductor (hustc)..."
+cd "$REPO_ROOT/Conductor"
+cargo build --release
 
-echo "==> Building C core"
-(cd "$REPO_ROOT/Hust-C" && make)
-
-for artifact in \
-    "$REPO_ROOT/Conductor/target/release/hustc" \
-    "$REPO_ROOT/Hust-Rust/target/release/hust_rust" \
-    "$REPO_ROOT/Hust-C/hust_c"; do
-    [ -x "$artifact" ] || { echo "build failed: $artifact missing" >&2; exit 1; }
-done
-
-mkdir -p "$BIN_DIR" "$INCLUDE_DIR"
-install -m 755 "$REPO_ROOT/Conductor/target/release/hustc" "$BIN_DIR/hustc"
-install -m 755 "$REPO_ROOT/Hust-Rust/target/release/hust_rust" "$BIN_DIR/hust_rust"
-install -m 755 "$REPO_ROOT/Hust-C/hust_c" "$BIN_DIR/hust_c"
-
-# Installed hust_c finds runtime headers at <exe_dir>/../include.
-install -m 644 "$REPO_ROOT/Hust-C/include/hust_error.h" "$INCLUDE_DIR/hust_error.h"
-install -m 644 "$REPO_ROOT/Hust-C/include/hust_vec.h" "$INCLUDE_DIR/hust_vec.h"
-install -m 644 "$REPO_ROOT/Hust-C/include/hust_string.h" "$INCLUDE_DIR/hust_string.h"
-
-echo
-echo "Installed:"
-echo "  $BIN_DIR/hustc"
-echo "  $BIN_DIR/hust_rust"
-echo "  $BIN_DIR/hust_c"
-echo "  $INCLUDE_DIR/hust_error.h"
-echo "  $INCLUDE_DIR/hust_vec.h"
-echo "  $INCLUDE_DIR/hust_string.h"
-
-if [ -e "$BIN_DIR/hust" ]; then
-    echo
-    echo "Note: the retired '$BIN_DIR/hust' binary is still present."
-    echo "      Remove it manually; use '$BIN_DIR/hustc' from now on."
+CONDUCTOR_BIN="$REPO_ROOT/Conductor/target/release/hustc"
+if [ ! -x "$CONDUCTOR_BIN" ]; then
+    # Fallback: try 'hust' binary name if 'hustc' not found
+    CONDUCTOR_BIN="$REPO_ROOT/Conductor/target/release/hust"
 fi
+[ -x "$CONDUCTOR_BIN" ] || { echo "error: build failed - conductor binary not found"; exit 1; }
 
-echo
-echo "Self-check:"
-"$BIN_DIR/hustc" --cores
+mkdir -p "$HUST_WORK/hustc"
+cp "$CONDUCTOR_BIN" "$INSTALL_DIR/hustc"
+echo "  Installed: $INSTALL_DIR/hustc"
+
+# 2. Build and install C core
+echo "[2/3] Building C core (hust_c)..."
+cd "$REPO_ROOT/Hust-C"
+make clean >/dev/null 2>&1 || true
+make
+
+C_BIN="$REPO_ROOT/Hust-C/hust_c"
+[ -x "$C_BIN" ] || { echo "error: build failed - hust_c binary not found"; exit 1; }
+
+C_CORE_DIR="$HUST_WORK/hust_core/hust_c"
+mkdir -p "$C_CORE_DIR/include" "$C_CORE_DIR/lib"
+cp "$C_BIN" "$C_CORE_DIR/hust_c"
+# Copy headers if they exist
+if [ -d "$REPO_ROOT/Hust-C/include" ]; then
+    cp "$REPO_ROOT/Hust-C/include/"*.h "$C_CORE_DIR/include/" 2>/dev/null || true
+fi
+echo "  Installed: $C_CORE_DIR/hust_c"
+
+# 3. Build and install Rust core
+echo "[3/3] Building Rust core (hust_rust)..."
+cd "$REPO_ROOT/Hust-Rust"
+CARGO_HOME="${CARGO_HOME:-/tmp/cargo-home}" cargo build --release
+
+RUST_BIN="$REPO_ROOT/Hust-Rust/target/release/hust_rust"
+if [ ! -x "$RUST_BIN" ]; then
+    # Fallback: try 'hust' binary name if 'hust_rust' not found
+    RUST_BIN="$REPO_ROOT/Hust-Rust/target/release/hust"
+fi
+[ -x "$RUST_BIN" ] || { echo "error: build failed - hust_rust binary not found"; exit 1; }
+
+RUST_CORE_DIR="$HUST_WORK/hust_core/hust_rust"
+mkdir -p "$RUST_CORE_DIR/include" "$RUST_CORE_DIR/lib"
+cp "$RUST_BIN" "$RUST_CORE_DIR/hust_rust"
+echo "  Installed: $RUST_CORE_DIR/hust_rust"
+
+# Summary
+echo ""
+echo "=== Installation Complete ==="
+echo ""
+echo "Installed files:"
+echo "  Conductor:  $INSTALL_DIR/hustc"
+echo "  C core:     $C_CORE_DIR/hust_c"
+echo "  Rust core:  $RUST_CORE_DIR/hust_rust"
+echo ""
+echo "Directory structure:"
+echo "  $INSTALL_DIR/hustc"
+echo "  $HUST_WORK/"
+echo "  ├── hustc/          (reserved for conductor extras)"
+echo "  └── hust_core/"
+echo "      ├── hust_c/"
+echo "      │   ├── hust_c"
+echo "      │   ├── include/"
+echo "      │   └── lib/"
+echo "      └── hust_rust/"
+echo "          ├── hust_rust"
+echo "          ├── include/"
+echo "          └── lib/"
+echo ""
+echo "Verify installation:"
+echo "  $INSTALL_DIR/hustc --version"
+echo "  $INSTALL_DIR/hustc --cores"
+echo ""

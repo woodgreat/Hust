@@ -1,9 +1,13 @@
 //! Language core discovery, probing, and selection.
 //!
-//! Discovery order: conductor executable directory, then `PATH`, then the
-//! `HUST_RUST_BIN` / `HUST_C_BIN` override. The first usable candidate wins.
-//! A core is usable when `info` succeeds, speaks the conductor protocol, and
-//! reports an available target toolchain.
+//! Discovery order (2026-11-25 updated):
+//! 1. `hustc同目录/hust_work/hust_core/<core_name>/<core_name>` (new default)
+//! 2. `hustc同目录/<core_name>` (legacy fallback)
+//! 3. `PATH`
+//! 4. `HUST_RUST_BIN` / `HUST_C_BIN` override
+//!
+//! The first usable candidate wins. A core is usable when `info` succeeds,
+//! speaks the conductor protocol, and reports an available target toolchain.
 
 use std::env;
 use std::ffi::OsString;
@@ -210,11 +214,23 @@ impl SearchSpec {
     }
 
     /// Candidate paths in priority order, without duplicates.
+    ///
+    /// 2026-11-25: New default location is `hust_work/hust_core/<core>/<core>`,
+    /// with legacy fallback to same-directory lookup.
     pub fn candidates(&self, kind: CoreKind) -> Vec<PathBuf> {
         let file_name = format!("{}{}", kind.binary_name(), EXE_SUFFIX);
         let mut candidates = Vec::new();
 
         if let Some(dir) = &self.exe_dir {
+            // New default: hust_work/hust_core/<core_name>/<core_name>
+            let hust_work_path = dir
+                .join("hust_work")
+                .join("hust_core")
+                .join(kind.binary_name())
+                .join(&file_name);
+            candidates.push(hust_work_path);
+
+            // Legacy fallback: same directory as hustc
             candidates.push(dir.join(&file_name));
         }
         if let Some(path_var) = &self.path_var {
@@ -261,7 +277,7 @@ fn discover_kind(
 
     if existing.is_empty() {
         return Err(format!(
-            "{} not found (searched executable directory, PATH, and {})",
+            "{} not found (searched hust_work/hust_core/{0}/, executable directory, PATH, and {})",
             kind.binary_name(),
             kind.env_var()
         ));
@@ -503,13 +519,19 @@ mod tests {
             c_bin: Some(OsString::from("/custom/c")),
         };
         let rust = spec.candidates(CoreKind::Rust);
-        assert_eq!(rust[0], PathBuf::from("/exe/hust_rust"));
-        assert_eq!(rust[1], PathBuf::from("/one/hust_rust"));
-        assert_eq!(rust[2], PathBuf::from("/two/hust_rust"));
-        assert_eq!(rust[3], PathBuf::from("/custom/rust"));
+        // New default: hust_work/hust_core/hust_rust/hust_rust
+        assert_eq!(rust[0], PathBuf::from("/exe/hust_work/hust_core/hust_rust/hust_rust"));
+        // Legacy fallback: same directory as hustc
+        assert_eq!(rust[1], PathBuf::from("/exe/hust_rust"));
+        assert_eq!(rust[2], PathBuf::from("/one/hust_rust"));
+        assert_eq!(rust[3], PathBuf::from("/two/hust_rust"));
+        assert_eq!(rust[4], PathBuf::from("/custom/rust"));
 
         let c = spec.candidates(CoreKind::C);
-        assert_eq!(c[0], PathBuf::from("/exe/hust_c"));
+        // New default: hust_work/hust_core/hust_c/hust_c
+        assert_eq!(c[0], PathBuf::from("/exe/hust_work/hust_core/hust_c/hust_c"));
+        // Legacy fallback: same directory as hustc
+        assert_eq!(c[1], PathBuf::from("/exe/hust_c"));
         assert_eq!(c.last().unwrap(), &PathBuf::from("/custom/c"));
     }
 
@@ -521,7 +543,8 @@ mod tests {
             rust_bin: None,
             c_bin: None,
         };
-        assert_eq!(spec.candidates(CoreKind::Rust).len(), 1);
+        // hust_work path + legacy path = 2 unique candidates (PATH duplicates removed)
+        assert_eq!(spec.candidates(CoreKind::Rust).len(), 2);
     }
 
     #[test]
