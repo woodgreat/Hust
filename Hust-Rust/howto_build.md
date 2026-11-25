@@ -113,8 +113,9 @@ cd ..          # repo root
 hustc --version
 ```
 
-This installs `hustc`, `hust_rust`, `hust_c` to `$PREFIX/bin` (default
-`~/.local/bin`) and the C runtime headers to `$PREFIX/include`.
+This installs `hustc` to `$PREFIX/bin` (default `~/.local/bin`) and each core
+to `$PREFIX/bin/hust_work/hust_core/<core>/` with its own `include/` and
+`lib/` directories.
 
 The old `hust` binary is retired. Update existing scripts by replacing
 `hust` with `hustc`; source files and `settings.config` do not change.

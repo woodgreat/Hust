@@ -106,6 +106,8 @@ step_install() {
     local prefix="$TMP/prefix"
     local rust_dir="$TMP/installed/rust"
     local c_dir="$TMP/installed/c"
+    local rust_core="$prefix/bin/hust_work/hust_core/hust_rust"
+    local c_core="$prefix/bin/hust_work/hust_core/hust_c"
     local tool_path
     local cores
     local output
@@ -114,10 +116,10 @@ step_install() {
     PREFIX="$prefix" "$ROOT/install.sh"
 
     [ -x "$prefix/bin/hustc" ] || return 1
-    [ -x "$prefix/bin/hust_rust" ] || return 1
-    [ -x "$prefix/bin/hust_c" ] || return 1
+    [ -x "$rust_core/hust_rust" ] || return 1
+    [ -x "$c_core/hust_c" ] || return 1
+    [ -f "$c_core/include/hust_vec.h" ] || return 1
     [ ! -e "$prefix/bin/hust" ] || return 1
-    [ -f "$prefix/include/hust_vec.h" ] || return 1
 
     tool_path="$(dirname "$(command -v cargo)"):$(dirname "$(command -v rustc)"):$(dirname "$(command -v gcc)"):/usr/bin:/bin"
     export PATH="$prefix/bin:$tool_path"

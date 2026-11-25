@@ -80,6 +80,7 @@ cd Hust-C   && ./tests/run_tests.sh negative
 ## 文档
 
 - `../Hust-Docs/doc/develop_guide.md`：开发指引
+- `../Hust-Docs/doc/core_development_playbook.md`：新语言核开发与 Conductor 接入
 - `../Hust-Docs/doc/core_testing_guide.md`：语言核测试指引
 - `../Hust-Docs/doc/conductor_multicore_design.md`：Conductor 多核设计
 

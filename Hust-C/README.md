@@ -98,6 +98,7 @@ hust_c --version
 - `../README.md` - Repo root quick start
 - `../Hust-Docs/doc/core_c_write_guide_dg_cpt2.md` - C core development guide
 - `../Hust-Docs/doc/core_testing_guide.md` - Testing guide
+- `../Hust-Docs/doc/core_development_playbook.md` - Adding a new core
 
 ## License
 

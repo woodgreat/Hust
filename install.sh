@@ -16,11 +16,13 @@
 #           └── lib/                            # Rust libraries (if any)
 #
 # Usage: ./install.sh   (from Hust repo root, or any path)
+#        PREFIX=/custom/prefix ./install.sh
 
 set -e
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
-INSTALL_DIR="$HOME/.local/bin"
+PREFIX="${PREFIX:-$HOME/.local}"
+INSTALL_DIR="$PREFIX/bin"
 HUST_WORK="$INSTALL_DIR/hust_work"
 
 echo "=== Hust Installer ==="

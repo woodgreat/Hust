@@ -78,6 +78,7 @@ cd .. && ./tests/run_all.sh         # Full regression gate
 - `../README.md` - Repo root quick start
 - `../Hust-Docs/doc/develop_guide.md` - Full development guide
 - `../Hust-Docs/doc/conductor_multicore_design.md` - Multi-core design
+- `../Hust-Docs/doc/core_development_playbook.md` - Adding a new core
 
 ## License
 
