@@ -15,14 +15,37 @@ Hust 是面向 Rust 与 C 的源到源转译语言。当前仓库包含指导器
 
 ## 快速开始
 
-构建并安装三件套（默认到 `~/.local`）：
+### 一体式构建安装（推荐）
 
 ```bash
 ./install.sh
 hustc --cores
 ```
 
-常用命令：
+安装到 `~/.local/bin/`：
+- `hustc` - Conductor CLI
+- `hust_work/hust_core/hust_c/` - C 核心（含 include/ 和 lib/）
+- `hust_work/hust_core/hust_rust/` - Rust 核心（含 include/ 和 lib/）
+
+### 单独构建各部件
+
+```bash
+# Conductor
+cd Conductor && cargo build --release
+
+# Rust 核心
+cd Hust-Rust && cargo build --release
+
+# C 核心
+cd Hust-C && make
+```
+
+详见各部件的 README.md：
+- `Conductor/README.md`
+- `Hust-Rust/howto_build.md`
+- `Hust-C/README.md`
+
+### 常用命令
 
 ```bash
 hustc run main.hust                 # 单文件运行（默认 Rust 核）
