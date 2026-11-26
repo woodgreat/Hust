@@ -1,0 +1,19 @@
+use C#.Console.*;
+
+class Animal {
+    void speak() {
+        Console.WriteLine("Animal sound");
+    }
+}
+
+class Dog : Animal {
+    void bark() {
+        Console.WriteLine("Woof!");
+    }
+}
+
+void main() {
+    Dog d = new Dog();
+    d.speak();
+    d.bark();
+}

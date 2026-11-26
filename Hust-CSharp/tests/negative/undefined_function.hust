@@ -1,0 +1,5 @@
+use C#.Console.*;
+
+void main() {
+    undefined_function();
+}

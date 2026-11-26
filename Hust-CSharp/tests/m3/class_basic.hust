@@ -1,0 +1,18 @@
+use C#.Console.*;
+
+class Person {
+    string name;
+    int age;
+    
+    void introduce() {
+        Console.WriteLine("Name: " + name);
+        Console.WriteLine("Age: " + age);
+    }
+}
+
+void main() {
+    Person p = new Person();
+    p.name = "Alice";
+    p.age = 25;
+    p.introduce();
+}

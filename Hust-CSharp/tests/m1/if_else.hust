@@ -1,0 +1,10 @@
+use C#.Console.*;
+
+void main() {
+    int x = 10;
+    if (x > 5) {
+        Console.WriteLine("big");
+    } else {
+        Console.WriteLine("small");
+    }
+}

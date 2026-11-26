@@ -1,0 +1,7 @@
+use C#.Console.*;
+
+void main() {
+    string name = "Hust";
+    string greeting = "Hello, " + name + "!";
+    Console.WriteLine(greeting);
+}

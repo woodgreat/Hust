@@ -1,0 +1,18 @@
+use C#.Console.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Color c = Color.Red;
+    if (c == Color.Red) {
+        Console.WriteLine("Red");
+    } else if (c == Color.Green) {
+        Console.WriteLine("Green");
+    } else {
+        Console.WriteLine("Blue");
+    }
+}

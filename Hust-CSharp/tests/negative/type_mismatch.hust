@@ -1,0 +1,6 @@
+use C#.Console.*;
+
+void main() {
+    int x = "hello";
+    Console.WriteLine(x);
+}
