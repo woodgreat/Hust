@@ -17,6 +17,9 @@ public class Translator
     private readonly StringBuilder _output = new();
     private int _indentLevel = 0;
     private bool _hasMainMethod = false;
+    private int _currentMethodIndent = 0; // Track current method body indentation
+    private bool _inMethod = false; // Track if we are inside a method
+    private bool _methodStartLine = false; // Track if next line is first line of method body
     
     /// <summary>
     /// Translation result
@@ -177,7 +180,9 @@ public class Translator
             }
             
             // Default: emit as-is (preprocessor already handled indentation)
-            _output.AppendLine(TranslateExpression(line)); // Keep original indentation
+            // If inside method, add 4 extra spaces (for class wrapper)
+            var outputLine = _inMethod ? "    " + line : line;
+            _output.AppendLine(TranslateExpression(outputLine));
         }
         
         // Close Program class
@@ -266,7 +271,8 @@ public class Translator
             }
             
             _output.AppendLine($"    {{");
-            _output.AppendLine(); // Add empty line after opening brace
+            _currentMethodIndent = 8; // Method body should be 8 spaces (4 for class + 4 for method)
+            _inMethod = true;
         }
         else
         {
@@ -297,8 +303,10 @@ public class Translator
             var name = match.Groups[2].Value;
             var rest = match.Groups[3].Value;
             
-            // Get indentation from original line
-            var indent = line.Substring(0, line.Length - line.TrimStart().Length);
+            // Use current method indent if inside a method, otherwise use line indent
+            var indent = _inMethod && _currentMethodIndent > 0 
+                ? new string(' ', _currentMethodIndent) 
+                : line.Substring(0, line.Length - line.TrimStart().Length);
             
             _output.AppendLine($"{indent}{type} {name}{rest}");
         }
