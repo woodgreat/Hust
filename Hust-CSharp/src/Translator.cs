@@ -27,6 +27,10 @@ public class Translator
     private bool _inClass = false;      // Inside a class declaration
     private bool _inMethod = false;     // Inside a method
     
+    // Semantic analysis
+    private readonly HashSet<string> _definedFunctions = new();  // Track defined functions
+    private readonly List<string> _semanticErrors = new();       // Collect semantic errors
+    
     // Indent constants (2 spaces per level)
     private const string INDENT_1 = "  ";      // 1 level: Program class body
     private const string INDENT_2 = "    ";    // 2 levels: class members / top-level method body
@@ -38,6 +42,13 @@ public class Translator
         
         try
         {
+            // Reset state
+            _definedFunctions.Clear();
+            _semanticErrors.Clear();
+            _inClass = false;
+            _inMethod = false;
+            _braceDepth = 0;
+            
             // Step 1: Preprocess (protect strings/comments, normalize blocks)
             var (processed, dialect) = _preprocessor.Process(source);
             
@@ -152,6 +163,14 @@ public class Translator
             // Restore protected strings and comments
             var finalOutput = _preprocessor.Restore(_output.ToString());
             
+            // Check for semantic errors
+            if (_semanticErrors.Count > 0)
+            {
+                result.Success = false;
+                result.Errors.AddRange(_semanticErrors);
+                return result;
+            }
+            
             result.Success = true;
             result.Code = finalOutput;
             result.HasMainMethod = hasMainMethod;
@@ -226,6 +245,9 @@ public class Translator
         var parameters = match.Groups[3].Value;
         var isMain = methodName.ToLower() == "main";
         
+        // Record defined function for semantic analysis
+        _definedFunctions.Add(methodName);
+        
         if (isMain)
         {
             methodName = "Main";
@@ -266,6 +288,9 @@ public class Translator
         var name = match.Groups[2].Value;
         var rest = match.Groups[3].Value;
         
+        // Semantic check: type mismatch
+        CheckTypeMismatch(type, rest);
+        
         string indent;
         if (_inClass && !_inMethod)
         {
@@ -284,6 +309,33 @@ public class Translator
             // Top level (shouldn't happen)
             indent = INDENT_1;
             _output.AppendLine($"{indent}{type} {name}{rest}");
+        }
+    }
+
+    private void CheckTypeMismatch(string declaredType, string rest)
+    {
+        // Check for type mismatch in initialization
+        // e.g., int x = "hello"; -> error
+        if (string.IsNullOrWhiteSpace(rest)) return;
+        
+        // Match: = value;
+        var match = Regex.Match(rest, @"^\s*=\s*(.+);$");
+        if (!match.Success) return;
+        
+        var value = match.Groups[1].Value.Trim();
+        
+        // Check string literal assigned to non-string type
+        // Note: preprocessor protects strings as __STRING_N__
+        if (declaredType != "string" && 
+            (value.StartsWith("\"") && value.EndsWith("\"") || value.StartsWith("__STRING_")))
+        {
+            _semanticErrors.Add($"Type mismatch: cannot assign string to {declaredType}");
+        }
+        
+        // Check numeric literal assigned to string
+        if (declaredType == "string" && Regex.IsMatch(value, @"^\d+$"))
+        {
+            _semanticErrors.Add($"Type mismatch: cannot assign number to string");
         }
     }
 
@@ -326,9 +378,35 @@ public class Translator
 
     private void TranslateExpressionStatement(string line, string trimmed)
     {
+        // Check for undefined function calls
+        CheckUndefinedFunction(trimmed);
+        
         // Method body statements: fixed indent, ignore preprocessor indent
         var indent = _inClass ? INDENT_3 : INDENT_2;
         _output.AppendLine($"{indent}{TranslateExpression(trimmed)}");
+    }
+
+    private void CheckUndefinedFunction(string trimmed)
+    {
+        // Check for function calls: identifier(...)
+        // Skip known patterns: Console.WriteLine, new, etc.
+        var match = Regex.Match(trimmed, @"^(\w+)\s*\(");
+        if (!match.Success) return;
+        
+        var funcName = match.Groups[1].Value;
+        
+        // Skip known built-in functions and keywords
+        var knownFunctions = new HashSet<string> { "Console", "new", "if", "for", "while", "return", "switch", "catch" };
+        if (knownFunctions.Contains(funcName)) return;
+        
+        // Skip if it's a method call on an object (contains .)
+        if (trimmed.Contains(".")) return;
+        
+        // Check if function is defined
+        if (!_definedFunctions.Contains(funcName))
+        {
+            _semanticErrors.Add($"Undefined function: {funcName}");
+        }
     }
 
     private string GetOriginalIndent(string line)
