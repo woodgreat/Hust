@@ -180,13 +180,14 @@ public class Preprocessor
 
     /// <summary>
     /// Normalize block structure: ensure braces are properly paired and formatted
-    /// Output: standard format with 4-space indentation per level
+    /// Output: standard format with 2-space indentation per level (relative to current block)
     /// </summary>
     private string NormalizeBlockStructure(string source)
     {
         var lines = source.Split('\n');
         var result = new StringBuilder();
         var indentLevel = 0;
+        const int IndentSize = 2;  // 2 spaces per level
         
         foreach (var line in lines)
         {
@@ -210,7 +211,7 @@ public class Preprocessor
                 if (!string.IsNullOrEmpty(rest))
                 {
                     // Line like "} else {" or "} else if (x) {"
-                    result.AppendLine(new string(' ', indentLevel * 4) + "} " + rest);
+                    result.AppendLine(new string(' ', indentLevel * IndentSize) + "} " + rest);
                     // Check if rest ends with opening brace
                     if (rest.EndsWith("{"))
                     {
@@ -220,7 +221,7 @@ public class Preprocessor
                 else
                 {
                     // Just "}"
-                    result.AppendLine(new string(' ', indentLevel * 4) + "}");
+                    result.AppendLine(new string(' ', indentLevel * IndentSize) + "}");
                 }
                 continue;
             }
@@ -232,11 +233,11 @@ public class Preprocessor
                 var code = trimmed.Substring(0, trimmed.Length - 1).Trim();
                 if (!string.IsNullOrEmpty(code))
                 {
-                    result.AppendLine(new string(' ', indentLevel * 4) + code + " {");
+                    result.AppendLine(new string(' ', indentLevel * IndentSize) + code + " {");
                 }
                 else
                 {
-                    result.AppendLine(new string(' ', indentLevel * 4) + "{");
+                    result.AppendLine(new string(' ', indentLevel * IndentSize) + "{");
                 }
                 indentLevel++;
                 continue;
@@ -245,13 +246,13 @@ public class Preprocessor
             // Handle lines with only opening brace
             if (trimmed == "{")
             {
-                result.AppendLine(new string(' ', indentLevel * 4) + "{");
+                result.AppendLine(new string(' ', indentLevel * IndentSize) + "{");
                 indentLevel++;
                 continue;
             }
             
             // Regular line: output with current indentation
-            result.AppendLine(new string(' ', indentLevel * 4) + trimmed);
+            result.AppendLine(new string(' ', indentLevel * IndentSize) + trimmed);
         }
         
         return result.ToString();
