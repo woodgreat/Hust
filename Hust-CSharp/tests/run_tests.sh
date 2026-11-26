@@ -34,9 +34,19 @@ echo -e "${GREEN}Core built successfully${NC}"
 echo ""
 
 # Find the executable
-CORE_EXE="$CORE_DIR/bin/Release/net8.0/hust_csharp"
-if [ ! -f "$CORE_EXE" ]; then
-    echo -e "${RED}Core executable not found: $CORE_EXE${NC}"
+CORE_DLL="$CORE_DIR/bin/Release/net8.0/hust_csharp.dll"
+if [ ! -f "$CORE_DLL" ]; then
+    echo -e "${RED}Core DLL not found: $CORE_DLL${NC}"
+    exit 1
+fi
+
+# Use dotnet to run the DLL
+DOTNET_CMD="${DOTNET_CMD:-$HOME/.dotnet/dotnet}"
+if [ ! -f "$DOTNET_CMD" ]; then
+    DOTNET_CMD="dotnet"
+fi
+if ! command -v "$DOTNET_CMD" &> /dev/null; then
+    echo -e "${RED}dotnet command not found${NC}"
     exit 1
 fi
 
@@ -57,7 +67,7 @@ run_test() {
     
     # Transpile
     local transpile_output
-    transpile_output=$("$CORE_EXE" transpile "$test_file" --out-dir "$out_dir" 2>&1)
+    transpile_output=$("$DOTNET_CMD" "$CORE_DLL" transpile "$test_file" --out-dir "$out_dir" 2>&1)
     local transpile_exit=$?
     
     if [ $transpile_exit -ne 0 ]; then
@@ -105,7 +115,7 @@ run_test() {
     fi
     
     # Try to compile with dotnet (if available)
-    if command -v dotnet &> /dev/null; then
+    if [ -f "$DOTNET_CMD" ] || command -v "$DOTNET_CMD" &> /dev/null; then
         # Create a minimal project file
         cat > "$out_dir/test.csproj" << 'EOF'
 <Project Sdk="Microsoft.NET.Sdk">
@@ -117,7 +127,7 @@ run_test() {
 EOF
         
         local build_output
-        build_output=$(cd "$out_dir" && dotnet build -c Release 2>&1)
+        build_output=$(cd "$out_dir" && "$DOTNET_CMD" build -c Release 2>&1)
         local build_exit=$?
         
         if [ $build_exit -ne 0 ]; then
@@ -130,10 +140,11 @@ EOF
         
         # Run if expected output exists
         if [ -f "$expected_file" ]; then
-            local exe_file=$(find "$out_dir/bin" -name "*.exe" -o -name "test" | head -1)
-            if [ -n "$exe_file" ]; then
+            # Find the generated DLL (not the executable)
+            local dll_file=$(find "$out_dir/bin" -name "*.dll" | grep -v "ref" | head -1)
+            if [ -n "$dll_file" ]; then
                 local run_output
-                run_output=$("$exe_file" 2>&1)
+                run_output=$("$DOTNET_CMD" "$dll_file" 2>&1)
                 local expected_output=$(cat "$expected_file")
                 
                 if [ "$run_output" == "$expected_output" ]; then

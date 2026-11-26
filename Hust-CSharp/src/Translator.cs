@@ -8,86 +8,165 @@ using System.Text.RegularExpressions;
 namespace HustCSharp;
 
 /// <summary>
-/// Translator for Hust-CSharp
-/// Transpiles Hust source code to C#
+/// Hust to C# translator with simplified indent handling.
+/// 
+/// Indent strategy:
+/// - Preprocessor outputs relative indent (2 spaces per level, starting from 0)
+/// - Translator adds absolute indent based on context:
+///   - Program class wrapper: +1 level (2 spaces)
+///   - Class inside Program: +2 levels (4 spaces) for members
+///   - Method inside class: +3 levels (6 spaces) for body
 /// </summary>
 public class Translator
 {
-    private readonly Preprocessor _preprocessor = new();
     private readonly StringBuilder _output = new();
+    private readonly Preprocessor _preprocessor = new();
     
-    // Configuration
-    private const int IndentSize = 2;  // 2 spaces per indent level
+    // Context tracking
+    private int _braceDepth = 0;        // Track { } depth
+    private bool _inClass = false;      // Inside a class declaration
+    private bool _inMethod = false;     // Inside a method
     
-    // State tracking
-    private bool _inMethod = false;
-    
-    /// <summary>
-    /// Translation result
-    /// </summary>
-    public class TranslationResult
-    {
-        public bool Success { get; set; } = true;
-        public string Output { get; set; } = string.Empty;
-        public List<string> Errors { get; } = new();
-        public List<string> Warnings { get; } = new();
-    }
+    // Indent constants (2 spaces per level)
+    private const string INDENT_1 = "  ";      // 1 level: Program class body
+    private const string INDENT_2 = "    ";    // 2 levels: class members / top-level method body
+    private const string INDENT_3 = "      ";  // 3 levels: class method body
 
-    /// <summary>
-    /// Generate indent string for given level
-    /// </summary>
-    private string Indent(int level) => new string(' ', level * IndentSize);
-
-    /// <summary>
-    /// Translate Hust source to C#
-    /// </summary>
-    public TranslationResult Translate(string source, string fileName = "")
+    public TranslationResult Translate(string source, string fileName = "output")
     {
+        var result = new TranslationResult();
+        
         try
         {
-            // Preprocess
-            var (preprocessed, dialect) = _preprocessor.Process(source);
+            // Step 1: Preprocess (protect strings/comments, normalize blocks)
+            var (processed, dialect) = _preprocessor.Process(source);
             
-            if (!dialect.IsValid)
+            if (dialect.DetectedDialect != Preprocessor.DialectType.PureHust && 
+                dialect.DetectedDialect != Preprocessor.DialectType.CSharpDialect)
             {
-                var result = new TranslationResult { Success = false };
-                result.Errors.AddRange(dialect.Errors);
+                result.Success = false;
+                var errorMsg = dialect.DetectedDialect switch
+                {
+                    Preprocessor.DialectType.CDialect => "C.* imports detected in C# core project",
+                    Preprocessor.DialectType.RustDialect => "RUST.* imports detected in C# core project",
+                    Preprocessor.DialectType.MixedDialect => "Mixed dialects detected",
+                    _ => $"Unsupported dialect: {dialect.DetectedDialect}"
+                };
+                result.Errors.Add(errorMsg);
                 return result;
             }
             
-            // Translate
-            var csharpCode = TranslateSource(preprocessed);
+            // Step 2: Translate line by line
+            var lines = processed.Split('\n');
             
-            // Restore protected strings/comments
-            csharpCode = _preprocessor.Restore(csharpCode);
+            // Emit header
+            EmitHeader();
             
-            var translationResult = new TranslationResult
+            // Emit Program class start
+            _output.AppendLine("public class Program");
+            _output.AppendLine("{");
+            _output.AppendLine();
+            
+            // Track if we need to emit Main method
+            bool hasMainMethod = false;
+            
+            foreach (var line in lines)
             {
-                Success = true,
-                Output = csharpCode
-            };
-            translationResult.Warnings.AddRange(dialect.Warnings);
+                var trimmed = line.Trim();
+                
+                // Skip empty lines
+                if (string.IsNullOrWhiteSpace(trimmed))
+                {
+                    continue;
+                }
+                
+                // Skip use statements (handled in header)
+                if (trimmed.StartsWith("use "))
+                {
+                    TranslateUseStatement(trimmed);
+                    continue;
+                }
+                
+                // Translate class declaration
+                if (trimmed.StartsWith("class "))
+                {
+                    TranslateClassDeclaration(trimmed);
+                    continue;
+                }
+                
+                // Translate method declaration
+                if (IsMethodDeclaration(trimmed))
+                {
+                    var isMain = TranslateMethodDeclaration(trimmed);
+                    if (isMain) hasMainMethod = true;
+                    continue;
+                }
+                
+                // Translate variable declaration
+                if (IsVariableDeclaration(trimmed))
+                {
+                    TranslateVariableDeclaration(line, trimmed);
+                    continue;
+                }
+                
+                // Translate control flow statements
+                if (trimmed.StartsWith("if ") || trimmed.StartsWith("if("))
+                {
+                    TranslateControlStatement(line, trimmed);
+                    continue;
+                }
+                
+                if (trimmed.StartsWith("for ") || trimmed.StartsWith("for("))
+                {
+                    TranslateControlStatement(line, trimmed);
+                    continue;
+                }
+                
+                if (trimmed.StartsWith("while ") || trimmed.StartsWith("while("))
+                {
+                    TranslateControlStatement(line, trimmed);
+                    continue;
+                }
+                
+                if (trimmed.StartsWith("return "))
+                {
+                    TranslateReturnStatement(line, trimmed);
+                    continue;
+                }
+                
+                // Handle closing brace
+                if (trimmed == "}")
+                {
+                    TranslateClosingBrace();
+                    continue;
+                }
+                
+                // Default: translate expression
+                TranslateExpressionStatement(line, trimmed);
+            }
             
-            return translationResult;
+            // Emit Program class end
+            _output.AppendLine();
+            _output.AppendLine("}");
+            
+            // Restore protected strings and comments
+            var finalOutput = _preprocessor.Restore(_output.ToString());
+            
+            result.Success = true;
+            result.Code = finalOutput;
+            result.HasMainMethod = hasMainMethod;
         }
         catch (Exception ex)
         {
-            var result = new TranslationResult { Success = false };
+            result.Success = false;
             result.Errors.Add($"Translation error: {ex.Message}");
-            return result;
         }
+        
+        return result;
     }
 
-    /// <summary>
-    /// Translate preprocessed source to C#
-    /// Preprocessor outputs relative indent (0-based), we add 1 level for class wrapper
-    /// </summary>
-    private string TranslateSource(string source)
+    private void EmitHeader()
     {
-        _output.Clear();
-        _inMethod = false;
-        
-        // Add C# header
         _output.AppendLine("// Generated by Hust-CSharp");
         _output.AppendLine("// Do not edit manually");
         _output.AppendLine();
@@ -95,289 +174,173 @@ public class Translator
         _output.AppendLine("using System.Collections.Generic;");
         _output.AppendLine("using System.Linq;");
         _output.AppendLine();
-        
-        // Start Program class
-        _output.AppendLine("public class Program");
-        _output.AppendLine("{");
-        
-        // Parse and translate line by line
-        var lines = source.Split('\n');
-        
-        foreach (var line in lines)
-        {
-            var trimmed = line.Trim();
-            
-            // Skip empty lines
-            if (string.IsNullOrWhiteSpace(trimmed))
-            {
-                _output.AppendLine();
-                continue;
-            }
-            
-            // Skip comments (already protected)
-            if (trimmed.StartsWith("__COMMENT_"))
-            {
-                _output.AppendLine(AddClassIndent(line));
-                continue;
-            }
-            
-            // Translate use statements
-            if (trimmed.StartsWith("use "))
-            {
-                TranslateUseStatement(trimmed);
-                continue;
-            }
-            
-            // Translate class declaration
-            if (trimmed.StartsWith("class "))
-            {
-                TranslateClassDeclaration(line);
-                continue;
-            }
-            
-            // Translate method declaration
-            if (IsMethodDeclaration(trimmed))
-            {
-                TranslateMethodDeclaration(line);
-                continue;
-            }
-            
-            // Translate variable declaration
-            if (IsVariableDeclaration(trimmed))
-            {
-                TranslateVariableDeclaration(line);
-                continue;
-            }
-            
-            // Translate if statement
-            if (trimmed.StartsWith("if "))
-            {
-                TranslateIfStatement(line);
-                continue;
-            }
-            
-            // Translate for statement
-            if (trimmed.StartsWith("for "))
-            {
-                TranslateForStatement(line);
-                continue;
-            }
-            
-            // Translate while statement
-            if (trimmed.StartsWith("while "))
-            {
-                TranslateWhileStatement(line);
-                continue;
-            }
-            
-            // Translate return statement
-            if (trimmed.StartsWith("return "))
-            {
-                TranslateReturnStatement(line);
-                continue;
-            }
-            
-            // Default: add class indent and emit
-            _output.AppendLine(AddClassIndent(TranslateExpression(line)));
-        }
-        
-        // Close Program class
-        _output.AppendLine("}");
-        
-        return _output.ToString();
     }
 
-    /// <summary>
-    /// Add 1 level indent for class wrapper
-    /// Preprocessor outputs relative indent (0-based), we add 1 level (2 spaces)
-    /// </summary>
-    private string AddClassIndent(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-            return line;
-            
-        // Add 1 level (2 spaces) for class wrapper
-        return Indent(1) + line;
-    }
-
-    /// <summary>
-    /// Translate use statement
-    /// </summary>
     private void TranslateUseStatement(string line)
     {
-        // use C#.Console.* -> using System; (already added)
-        // use C#.System.* -> using System;
-        // For now, skip C#.* imports as they're handled in header
-        if (line.Contains("C#."))
+        // use C#.Console.* -> already in header
+        // Other imports -> comment for now
+        if (!line.Contains("C#."))
         {
-            // Already handled in header
-            return;
+            _output.AppendLine($"// {line}");
         }
-        
-        // Other imports
-        _output.AppendLine($"// {line}");
     }
 
-    /// <summary>
-    /// Translate class declaration
-    /// </summary>
-    private void TranslateClassDeclaration(string line)
+    private void TranslateClassDeclaration(string trimmed)
     {
         // class Foo { -> public class Foo {
-        var match = Regex.Match(line, @"class\s+(\w+)");
+        // class Dog : Animal { -> public class Dog : Animal {
+        var match = Regex.Match(trimmed, @"class\s+(\w+)(?:\s*:\s*(\w+))?");
         if (match.Success)
         {
             var className = match.Groups[1].Value;
-            var indent = GetLineIndent(line);
+            var baseClass = match.Groups[2].Success ? match.Groups[2].Value : null;
             
-            _output.AppendLine($"{indent}public class {className}");
-            _output.AppendLine($"{indent}{{");
-        }
-        else
-        {
-            _output.AppendLine(AddClassIndent(line));
-        }
-    }
-
-    /// <summary>
-    /// Check if line is method declaration
-    /// </summary>
-    private bool IsMethodDeclaration(string line)
-    {
-        // void main() { or int foo(int x) {
-        return Regex.IsMatch(line, @"^(void|int|float|double|string|bool)\s+\w+\s*\(");
-    }
-
-    /// <summary>
-    /// Translate method declaration
-    /// </summary>
-    private void TranslateMethodDeclaration(string line)
-    {
-        // void main() { -> public static void Main() {
-        var match = Regex.Match(line, @"^(void|int|float|double|string|bool)\s+(\w+)\s*\((.*?)\)");
-        if (match.Success)
-        {
-            var returnType = TranslateType(match.Groups[1].Value);
-            var methodName = match.Groups[2].Value;
-            var parameters = match.Groups[3].Value;
-            
-            // Special handling for main
-            if (methodName.ToLower() == "main")
+            if (baseClass != null)
             {
-                methodName = "Main";
-                // Main method: 1 level indent (inside Program class)
-                _output.AppendLine($"{Indent(1)}public static {returnType} {methodName}({TranslateParameters(parameters)})");
+                _output.AppendLine($"{INDENT_1}public class {className} : {baseClass}");
             }
             else
             {
-                // Other methods: 1 level indent (inside Program class)
-                _output.AppendLine($"{Indent(1)}public {returnType} {methodName}({TranslateParameters(parameters)})");
+                _output.AppendLine($"{INDENT_1}public class {className}");
             }
-            
-            // Method body starts: 1 level indent for {
-            _output.AppendLine($"{Indent(1)}{{");
-            
-            // Set state for method body
-            _inMethod = true;
+            _output.AppendLine($"{INDENT_1}{{");
+            _inClass = true;
+            _braceDepth++;
+        }
+    }
+
+    private bool IsMethodDeclaration(string trimmed)
+    {
+        return Regex.IsMatch(trimmed, @"^(void|int|float|double|string|bool)\s+\w+\s*\(");
+    }
+
+    private bool TranslateMethodDeclaration(string trimmed)
+    {
+        // void main() { -> public static void Main() {
+        var match = Regex.Match(trimmed, @"^(void|int|float|double|string|bool)\s+(\w+)\s*\((.*?)\)");
+        if (!match.Success) return false;
+        
+        var returnType = TranslateType(match.Groups[1].Value);
+        var methodName = match.Groups[2].Value;
+        var parameters = match.Groups[3].Value;
+        var isMain = methodName.ToLower() == "main";
+        
+        if (isMain)
+        {
+            methodName = "Main";
+            _output.AppendLine($"{INDENT_1}public static {returnType} {methodName}({TranslateParameters(parameters)})");
+            _output.AppendLine($"{INDENT_1}{{");
+        }
+        else if (_inClass)
+        {
+            _output.AppendLine($"{INDENT_2}public {returnType} {methodName}({TranslateParameters(parameters)})");
+            _output.AppendLine($"{INDENT_2}{{");
         }
         else
         {
-            _output.AppendLine(AddClassIndent(line));
+            _output.AppendLine($"{INDENT_1}public {returnType} {methodName}({TranslateParameters(parameters)})");
+            _output.AppendLine($"{INDENT_1}{{");
         }
+        
+        _inMethod = true;
+        _braceDepth++;
+        return isMain;
     }
 
-    /// <summary>
-    /// Check if line is variable declaration
-    /// </summary>
-    private bool IsVariableDeclaration(string line)
+    private bool IsVariableDeclaration(string trimmed)
     {
-        // int x = 5; or string name;
-        return Regex.IsMatch(line, @"^(int|float|double|string|bool)\s+\w+");
+        return Regex.IsMatch(trimmed, @"^(int|float|double|string|bool)\s+\w+");
     }
 
-    /// <summary>
-    /// Translate variable declaration
-    /// </summary>
-    private void TranslateVariableDeclaration(string line)
+    private void TranslateVariableDeclaration(string line, string trimmed)
     {
-        // int x = 5; -> int x = 5;
-        // string name; -> string name;
-        var match = Regex.Match(line, @"^(int|float|double|string|bool)\s+(\w+)(.*)$");
-        if (match.Success)
+        var match = Regex.Match(trimmed, @"^(int|float|double|string|bool)\s+(\w+)(.*)$");
+        if (!match.Success)
         {
-            var type = TranslateType(match.Groups[1].Value);
-            var name = match.Groups[2].Value;
-            var rest = match.Groups[3].Value;
-            
-            // Add class indent (1 level) + original relative indent
-            var originalIndent = GetLineIndent(line);
-            var newIndent = Indent(1) + originalIndent;
-            _output.AppendLine($"{newIndent}{type} {name}{rest}");
+            TranslateExpressionStatement(line, trimmed);
+            return;
+        }
+        
+        var type = TranslateType(match.Groups[1].Value);
+        var name = match.Groups[2].Value;
+        var rest = match.Groups[3].Value;
+        
+        string indent;
+        if (_inClass && !_inMethod)
+        {
+            // Class field: 2 levels
+            indent = INDENT_2;
+            _output.AppendLine($"{indent}public {type} {name}{rest}");
+        }
+        else if (_inMethod)
+        {
+            // Method local: fixed indent, ignore preprocessor indent
+            indent = _inClass ? INDENT_3 : INDENT_2;
+            _output.AppendLine($"{indent}{type} {name}{rest}");
         }
         else
         {
-            _output.AppendLine(AddClassIndent(line));
+            // Top level (shouldn't happen)
+            indent = INDENT_1;
+            _output.AppendLine($"{indent}{type} {name}{rest}");
         }
     }
 
-    /// <summary>
-    /// Translate if statement
-    /// </summary>
-    private void TranslateIfStatement(string line)
+    private void TranslateControlStatement(string line, string trimmed)
     {
-        // if (x > 5) { -> if (x > 5) {
-        var originalIndent = GetLineIndent(line);
-        var newIndent = Indent(1) + originalIndent;
-        _output.AppendLine($"{newIndent}{TranslateExpression(line.Trim())}");
+        // Method body statements: fixed indent, ignore preprocessor indent
+        var indent = _inClass ? INDENT_3 : INDENT_2;
+        _output.AppendLine($"{indent}{TranslateExpression(trimmed)}");
     }
 
-    /// <summary>
-    /// Translate for statement
-    /// </summary>
-    private void TranslateForStatement(string line)
+    private void TranslateReturnStatement(string line, string trimmed)
     {
-        // for (int i = 0; i < 10; i++) { -> for (int i = 0; i < 10; i++) {
-        var originalIndent = GetLineIndent(line);
-        var newIndent = Indent(1) + originalIndent;
-        _output.AppendLine($"{newIndent}{TranslateExpression(line.Trim())}");
+        var indent = _inClass ? INDENT_3 : INDENT_2;
+        _output.AppendLine($"{indent}{TranslateExpression(trimmed)}");
     }
 
-    /// <summary>
-    /// Translate while statement
-    /// </summary>
-    private void TranslateWhileStatement(string line)
+    private void TranslateClosingBrace()
     {
-        // while (x > 0) { -> while (x > 0) {
-        var originalIndent = GetLineIndent(line);
-        var newIndent = Indent(1) + originalIndent;
-        _output.AppendLine($"{newIndent}{TranslateExpression(line.Trim())}");
+        _braceDepth--;
+        
+        if (_inMethod)
+        {
+            // End of method
+            var indent = _inClass ? INDENT_2 : INDENT_1;
+            _output.AppendLine($"{indent}}}");
+            _inMethod = false;
+        }
+        else if (_inClass)
+        {
+            // End of class
+            _output.AppendLine($"{INDENT_1}}}");
+            _inClass = false;
+        }
+        else
+        {
+            // End of Program (shouldn't happen here)
+            _output.AppendLine("}");
+        }
     }
 
-    /// <summary>
-    /// Translate return statement
-    /// </summary>
-    private void TranslateReturnStatement(string line)
+    private void TranslateExpressionStatement(string line, string trimmed)
     {
-        // return x; -> return x;
-        var originalIndent = GetLineIndent(line);
-        var newIndent = Indent(1) + originalIndent;
-        _output.AppendLine($"{newIndent}{TranslateExpression(line.Trim())}");
+        // Method body statements: fixed indent, ignore preprocessor indent
+        var indent = _inClass ? INDENT_3 : INDENT_2;
+        _output.AppendLine($"{indent}{TranslateExpression(trimmed)}");
     }
 
-    /// <summary>
-    /// Get indentation of a line
-    /// </summary>
-    private string GetLineIndent(string line)
+    private string GetOriginalIndent(string line)
     {
-        return line.Substring(0, line.Length - line.TrimStart().Length);
+        // Get the relative indent from preprocessor output
+        var match = Regex.Match(line, @"^(\s*)");
+        return match.Success ? match.Groups[1].Value : "";
     }
 
-    /// <summary>
-    /// Translate Hust type to C# type
-    /// </summary>
-    private string TranslateType(string hustType)
+    private string TranslateType(string type)
     {
-        return hustType switch
+        return type switch
         {
             "int" => "int",
             "float" => "float",
@@ -385,52 +348,49 @@ public class Translator
             "string" => "string",
             "bool" => "bool",
             "void" => "void",
-            _ => hustType
+            _ => type
         };
     }
 
-    /// <summary>
-    /// Translate parameters
-    /// </summary>
     private string TranslateParameters(string parameters)
     {
         if (string.IsNullOrWhiteSpace(parameters))
             return "";
-            
-        // Split by comma and translate each parameter
-        var parts = parameters.Split(',');
-        var translated = new List<string>();
         
-        foreach (var part in parts)
+        // Simple parameter translation: int x, string y -> int x, string y
+        var parts = parameters.Split(',');
+        var translated = parts.Select(p =>
         {
-            var trimmed = part.Trim();
-            if (string.IsNullOrEmpty(trimmed))
-                continue;
-                
-            // int x -> int x
+            var trimmed = p.Trim();
             var match = Regex.Match(trimmed, @"^(int|float|double|string|bool)\s+(\w+)$");
             if (match.Success)
             {
-                var type = TranslateType(match.Groups[1].Value);
-                var name = match.Groups[2].Value;
-                translated.Add($"{type} {name}");
+                return $"{TranslateType(match.Groups[1].Value)} {match.Groups[2].Value}";
             }
-            else
-            {
-                translated.Add(trimmed);
-            }
-        }
+            return trimmed;
+        });
         
         return string.Join(", ", translated);
     }
 
-    /// <summary>
-    /// Translate expressions (basic)
-    /// </summary>
     private string TranslateExpression(string expr)
     {
-        // Note: strings and comments are restored by _preprocessor.Restore() after translation
-        // This method only handles expression-level transformations
+        // Translate Hust expressions to C#
+        // For now, mostly pass-through with some replacements
+        
+        // Console.WriteLine -> Console.WriteLine (already correct)
+        // new Person() -> new Person() (already correct)
+        
         return expr;
+    }
+
+    public class TranslationResult
+    {
+        public bool Success { get; set; }
+        public string Code { get; set; } = "";
+        public string Output => Code;  // Alias for compatibility
+        public List<string> Errors { get; set; } = new();
+        public List<string> Warnings { get; set; } = new();
+        public bool HasMainMethod { get; set; }
     }
 }
