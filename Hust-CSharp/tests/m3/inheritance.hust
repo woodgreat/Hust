@@ -1,4 +1,4 @@
-use C#.Console.*;
+use CSHARP.Console.*;
 
 class Animal {
     void speak() {

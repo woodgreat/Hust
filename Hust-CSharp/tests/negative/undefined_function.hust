@@ -1,4 +1,4 @@
-use C#.Console.*;
+use CSHARP.Console.*;
 
 void main() {
     undefined_function();

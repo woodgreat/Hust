@@ -1,4 +1,4 @@
-use C#.Console.*;
+use CSHARP.Console.*;
 
 void main() {
     Console.WriteLine("Project mode test");

@@ -114,7 +114,7 @@ public class Preprocessor
             // Check for system imports
             if (trimmed.StartsWith("use "))
             {
-                if (trimmed.Contains("C#."))
+                if (trimmed.Contains("CSHARP."))
                 {
                     hasCSharpImport = true;
                 }

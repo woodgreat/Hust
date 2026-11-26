@@ -197,9 +197,9 @@ public class Translator
 
     private void TranslateUseStatement(string line)
     {
-        // use C#.Console.* -> already in header
+        // use CSHARP.Console.* -> already in header
         // Other imports -> comment for now
-        if (!line.Contains("C#."))
+        if (!line.Contains("CSHARP."))
         {
             _output.AppendLine($"// {line}");
         }
