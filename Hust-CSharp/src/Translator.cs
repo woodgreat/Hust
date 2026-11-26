@@ -25,6 +25,7 @@ public class Translator
     // Context tracking
     private int _braceDepth = 0;        // Track { } depth
     private bool _inClass = false;      // Inside a class declaration
+    private bool _inInterface = false;  // Inside an interface declaration
     private bool _inMethod = false;     // Inside a method
     
     // Semantic analysis
@@ -102,6 +103,13 @@ public class Translator
                 if (trimmed.StartsWith("class "))
                 {
                     TranslateClassDeclaration(trimmed);
+                    continue;
+                }
+                
+                // Translate interface declaration
+                if (trimmed.StartsWith("interface ") || trimmed.StartsWith("shape "))
+                {
+                    TranslateInterfaceDeclaration(trimmed);
                     continue;
                 }
                 
@@ -209,15 +217,18 @@ public class Translator
     {
         // class Foo { -> public class Foo {
         // class Dog : Animal { -> public class Dog : Animal {
-        var match = Regex.Match(trimmed, @"class\s+(\w+)(?:\s*:\s*(\w+))?");
+        // class Circle : Shape { -> public class Circle : Shape {
+        var match = Regex.Match(trimmed, @"class\s+(\w+)(?:\s*:\s*([\w,\s]+))?");
         if (match.Success)
         {
             var className = match.Groups[1].Value;
-            var baseClass = match.Groups[2].Success ? match.Groups[2].Value : null;
+            var baseList = match.Groups[2].Success ? match.Groups[2].Value : null;
             
-            if (baseClass != null)
+            if (baseList != null)
             {
-                _output.AppendLine($"{INDENT_1}public class {className} : {baseClass}");
+                // Split multiple interfaces/base classes
+                var bases = baseList.Split(',').Select(b => b.Trim()).ToArray();
+                _output.AppendLine($"{INDENT_1}public class {className} : {string.Join(", ", bases)}");
             }
             else
             {
@@ -225,6 +236,21 @@ public class Translator
             }
             _output.AppendLine($"{INDENT_1}{{");
             _inClass = true;
+            _braceDepth++;
+        }
+    }
+
+    private void TranslateInterfaceDeclaration(string trimmed)
+    {
+        // interface Foo { -> public interface Foo {
+        // shape Foo { -> public interface Foo { (shape is Hust's interface keyword)
+        var match = Regex.Match(trimmed, @"(?:interface|shape)\s+(\w+)");
+        if (match.Success)
+        {
+            var interfaceName = match.Groups[1].Value;
+            _output.AppendLine($"{INDENT_1}public interface {interfaceName}");
+            _output.AppendLine($"{INDENT_1}{{");
+            _inInterface = true;
             _braceDepth++;
         }
     }
@@ -237,12 +263,14 @@ public class Translator
     private bool TranslateMethodDeclaration(string trimmed)
     {
         // void main() { -> public static void Main() {
-        var match = Regex.Match(trimmed, @"^(void|int|float|double|string|bool)\s+(\w+)\s*\((.*?)\)");
+        // void draw(); -> void draw(); (interface method, no body)
+        var match = Regex.Match(trimmed, @"^(void|int|float|double|string|bool)\s+(\w+)\s*\((.*?)\)(\s*;)?");
         if (!match.Success) return false;
         
         var returnType = TranslateType(match.Groups[1].Value);
         var methodName = match.Groups[2].Value;
         var parameters = match.Groups[3].Value;
+        var isInterfaceMethod = match.Groups[4].Success; // Ends with ;
         var isMain = methodName.ToLower() == "main";
         
         // Record defined function for semantic analysis
@@ -253,19 +281,27 @@ public class Translator
             methodName = "Main";
             _output.AppendLine($"{INDENT_1}public static {returnType} {methodName}({TranslateParameters(parameters)})");
             _output.AppendLine($"{INDENT_1}{{");
+            _inMethod = true;
+        }
+        else if (_inInterface)
+        {
+            // Interface method: no body, just signature
+            _output.AppendLine($"{INDENT_2}{returnType} {methodName}({TranslateParameters(parameters)});");
+            // Don't set _inMethod for interface methods
         }
         else if (_inClass)
         {
             _output.AppendLine($"{INDENT_2}public {returnType} {methodName}({TranslateParameters(parameters)})");
             _output.AppendLine($"{INDENT_2}{{");
+            _inMethod = true;
         }
         else
         {
             _output.AppendLine($"{INDENT_1}public {returnType} {methodName}({TranslateParameters(parameters)})");
             _output.AppendLine($"{INDENT_1}{{");
+            _inMethod = true;
         }
         
-        _inMethod = true;
         _braceDepth++;
         return isMain;
     }
@@ -363,6 +399,12 @@ public class Translator
             _output.AppendLine($"{indent}}}");
             _inMethod = false;
         }
+        else if (_inInterface)
+        {
+            // End of interface
+            _output.AppendLine($"{INDENT_1}}}");
+            _inInterface = false;
+        }
         else if (_inClass)
         {
             // End of class
@@ -378,12 +420,20 @@ public class Translator
 
     private void TranslateExpressionStatement(string line, string trimmed)
     {
+        // Handle comments: preserve but fix indent
+        if (trimmed.StartsWith("//"))
+        {
+            var indent = _inClass ? INDENT_2 : INDENT_1;
+            _output.AppendLine($"{indent}{trimmed}");
+            return;
+        }
+        
         // Check for undefined function calls
         CheckUndefinedFunction(trimmed);
         
         // Method body statements: fixed indent, ignore preprocessor indent
-        var indent = _inClass ? INDENT_3 : INDENT_2;
-        _output.AppendLine($"{indent}{TranslateExpression(trimmed)}");
+        var stmtIndent = _inClass ? INDENT_3 : INDENT_2;
+        _output.AppendLine($"{stmtIndent}{TranslateExpression(trimmed)}");
     }
 
     private void CheckUndefinedFunction(string trimmed)
@@ -458,6 +508,10 @@ public class Translator
         
         // Console.WriteLine -> Console.WriteLine (already correct)
         // new Person() -> new Person() (already correct)
+        
+        // Fix float literals: add F suffix for C#
+        // Match: number.number (not followed by F/f)
+        expr = Regex.Replace(expr, @"(\d+\.\d+)(?![Ff\d])", "$1f");
         
         return expr;
     }

@@ -1,0 +1,28 @@
+use CSHARP.Console.*;
+
+interface Drawable {
+    void draw();
+}
+
+interface Printable {
+    void print();
+}
+
+class Document : Drawable, Printable {
+    string title;
+    
+    void draw() {
+        Console.WriteLine("Drawing: " + title);
+    }
+    
+    void print() {
+        Console.WriteLine("Printing: " + title);
+    }
+}
+
+void main() {
+    Document doc = new Document();
+    doc.title = "Report";
+    doc.draw();
+    doc.print();
+}

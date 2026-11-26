@@ -1,0 +1,54 @@
+use CSHARP.Console.*;
+
+// Shape interface - Hust 特色：形状接口定义行为契约
+shape Drawable {
+    void draw();
+    void resize(float factor);
+}
+
+shape Serializable {
+    string serialize();
+    void deserialize(string data);
+}
+
+// 实现形状接口
+class Circle : Drawable {
+    float radius;
+    
+    void draw() {
+        Console.WriteLine("Drawing circle with radius: " + radius);
+    }
+    
+    void resize(float factor) {
+        radius = radius * factor;
+        Console.WriteLine("Resized to radius: " + radius);
+    }
+}
+
+class DataRecord : Serializable {
+    string id;
+    string content;
+    
+    string serialize() {
+        return id + ":" + content;
+    }
+    
+    void deserialize(string data) {
+        // Simple parsing
+        Console.WriteLine("Deserializing: " + data);
+    }
+}
+
+void main() {
+    Circle c = new Circle();
+    c.radius = 5.0;
+    c.draw();
+    c.resize(2.0);
+    
+    DataRecord rec = new DataRecord();
+    rec.id = "001";
+    rec.content = "test data";
+    string serialized = rec.serialize();
+    Console.WriteLine("Serialized: " + serialized);
+    rec.deserialize(serialized);
+}

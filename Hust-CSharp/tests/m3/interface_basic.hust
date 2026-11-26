@@ -1,0 +1,44 @@
+use CSHARP.Console.*;
+
+interface Shape {
+    float area();
+    float perimeter();
+}
+
+class Circle : Shape {
+    float radius;
+    
+    float area() {
+        return 3.14159 * radius * radius;
+    }
+    
+    float perimeter() {
+        return 2 * 3.14159 * radius;
+    }
+}
+
+class Rectangle : Shape {
+    float width;
+    float height;
+    
+    float area() {
+        return width * height;
+    }
+    
+    float perimeter() {
+        return 2 * (width + height);
+    }
+}
+
+void main() {
+    Circle c = new Circle();
+    c.radius = 5.0;
+    Console.WriteLine("Circle area: " + c.area());
+    Console.WriteLine("Circle perimeter: " + c.perimeter());
+    
+    Rectangle r = new Rectangle();
+    r.width = 4.0;
+    r.height = 6.0;
+    Console.WriteLine("Rectangle area: " + r.area());
+    Console.WriteLine("Rectangle perimeter: " + r.perimeter());
+}
