@@ -65,7 +65,7 @@ fi
 echo "  Installed: $C_CORE_DIR/hust_c"
 
 # 3. Build and install Rust core
-echo "[3/3] Building Rust core (hust_rust)..."
+echo "[3/4] Building Rust core (hust_rust)..."
 cd "$REPO_ROOT/Hust-Rust"
 CARGO_HOME="${CARGO_HOME:-/tmp/cargo-home}" cargo build --release
 
@@ -81,6 +81,33 @@ mkdir -p "$RUST_CORE_DIR/include" "$RUST_CORE_DIR/lib"
 cp "$RUST_BIN" "$RUST_CORE_DIR/hust_rust"
 echo "  Installed: $RUST_CORE_DIR/hust_rust"
 
+# 4. Build and install C# core
+echo "[4/4] Building C# core (hust_csharp)..."
+cd "$REPO_ROOT/Hust-CSharp"
+
+# Check for dotnet
+DOTNET_CMD="${DOTNET_CMD:-$HOME/.dotnet/dotnet}"
+if [ ! -f "$DOTNET_CMD" ]; then
+    DOTNET_CMD="dotnet"
+fi
+if ! command -v "$DOTNET_CMD" &> /dev/null; then
+    echo "warning: dotnet not found, skipping C# core"
+else
+    "$DOTNET_CMD" build -c Release
+    
+    CSHARP_DLL="$REPO_ROOT/Hust-CSharp/bin/Release/net8.0/hust_csharp.dll"
+    [ -f "$CSHARP_DLL" ] || { echo "error: build failed - hust_csharp.dll not found"; exit 1; }
+    
+    CSHARP_CORE_DIR="$HUST_WORK/hust_core/hust_csharp"
+    mkdir -p "$CSHARP_CORE_DIR"
+    cp "$CSHARP_DLL" "$CSHARP_CORE_DIR/hust_csharp.dll"
+    # Copy runtime config if exists
+    if [ -f "$REPO_ROOT/Hust-CSharp/bin/Release/net8.0/hust_csharp.runtimeconfig.json" ]; then
+        cp "$REPO_ROOT/Hust-CSharp/bin/Release/net8.0/hust_csharp.runtimeconfig.json" "$CSHARP_CORE_DIR/"
+    fi
+    echo "  Installed: $CSHARP_CORE_DIR/hust_csharp.dll"
+fi
+
 # Summary
 echo ""
 echo "=== Installation Complete ==="
@@ -89,6 +116,9 @@ echo "Installed files:"
 echo "  Conductor:  $INSTALL_DIR/hustc"
 echo "  C core:     $C_CORE_DIR/hust_c"
 echo "  Rust core:  $RUST_CORE_DIR/hust_rust"
+if [ -n "$CSHARP_CORE_DIR" ]; then
+    echo "  C# core:    $CSHARP_CORE_DIR/hust_csharp.dll"
+fi
 echo ""
 echo "Directory structure:"
 echo "  $INSTALL_DIR/hustc"
@@ -99,10 +129,14 @@ echo "      ├── hust_c/"
 echo "      │   ├── hust_c"
 echo "      │   ├── include/"
 echo "      │   └── lib/"
-echo "      └── hust_rust/"
-echo "          ├── hust_rust"
-echo "          ├── include/"
-echo "          └── lib/"
+echo "      ├── hust_rust/"
+echo "      │   ├── hust_rust"
+echo "      │   ├── include/"
+echo "      │   └── lib/"
+if [ -n "$CSHARP_CORE_DIR" ]; then
+    echo "      └── hust_csharp/"
+    echo "          └── hust_csharp.dll"
+fi
 echo ""
 echo "Verify installation:"
 echo "  $INSTALL_DIR/hustc --version"

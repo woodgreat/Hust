@@ -98,6 +98,10 @@ step_c_contract() {
     (cd "$ROOT/Hust-C" && make contract-tests)
 }
 
+step_csharp() {
+    (cd "$ROOT/Hust-CSharp" && ./tests/run_tests.sh)
+}
+
 step_p3() {
     "$ROOT/tests/p3_conductor_integration.sh"
 }
@@ -172,6 +176,7 @@ run_step "Hust-Rust suite" "$LOGS/rust.log" step_rust
 run_step "Hust-C build" "$LOGS/c-build.log" step_c_build
 run_step "Hust-C suite" "$LOGS/c.log" step_c_tests
 run_step "Hust-C core contract" "$LOGS/c-contract.log" step_c_contract
+run_step "Hust-CSharp suite" "$LOGS/csharp.log" step_csharp
 run_step "P3 real-core integration" "$LOGS/p3.log" step_p3
 if [ "$WITH_INSTALL" -eq 1 ]; then
     run_step "Install smoke" "$LOGS/install.log" step_install
