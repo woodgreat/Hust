@@ -107,7 +107,7 @@ public class Translator
                 }
                 
                 // Translate interface declaration
-                if (trimmed.StartsWith("interface ") || trimmed.StartsWith("shape "))
+                if (trimmed.StartsWith("interface "))
                 {
                     TranslateInterfaceDeclaration(trimmed);
                     continue;
@@ -243,8 +243,9 @@ public class Translator
     private void TranslateInterfaceDeclaration(string trimmed)
     {
         // interface Foo { -> public interface Foo {
-        // shape Foo { -> public interface Foo { (shape is Hust's interface keyword)
-        var match = Regex.Match(trimmed, @"(?:interface|shape)\s+(\w+)");
+        // Hust 只有一种接口：interface
+        // 形状接口是接口的一种形态（无类型参数），不是独立关键字
+        var match = Regex.Match(trimmed, @"interface\s+(\w+)");
         if (match.Success)
         {
             var interfaceName = match.Groups[1].Value;
@@ -257,14 +258,77 @@ public class Translator
 
     private bool IsMethodDeclaration(string trimmed)
     {
-        return Regex.IsMatch(trimmed, @"^(void|int|float|double|string|bool)\s+\w+\s*\(");
+        // Regular method: void main() { or int foo(int x) {
+        // Also match: public void draw() { (with public prefix)
+        if (Regex.IsMatch(trimmed, @"^(public\s+)?(void|int|float|double|string|bool)\s+\w+\s*\("))
+            return true;
+        
+        // Shape interface method: draw(); or public draw();
+        // Only match if we're inside an interface
+        if (_inInterface)
+        {
+            var trimmedForShape = trimmed;
+            if (trimmedForShape.StartsWith("public "))
+            {
+                trimmedForShape = trimmedForShape.Substring(7).Trim();
+            }
+            // Match: methodName(...); or methodName(...)
+            // But not if it starts with a type keyword (that's a regular method)
+            if (!Regex.IsMatch(trimmedForShape, @"^(void|int|float|double|string|bool)\s+") &&
+                Regex.IsMatch(trimmedForShape, @"^\w+\s*\(.*?\)(\s*;)?$"))
+                return true;
+        }
+        
+        return false;
     }
 
     private bool TranslateMethodDeclaration(string trimmed)
     {
         // void main() { -> public static void Main() {
         // void draw(); -> void draw(); (interface method, no body)
-        var match = Regex.Match(trimmed, @"^(void|int|float|double|string|bool)\s+(\w+)\s*\((.*?)\)(\s*;)?");
+        // public void draw() { -> public void draw() { (class method with public)
+        // draw(); -> void draw(); (shape interface method, no type)
+        // public draw(); -> void draw(); (shape interface method with public)
+        
+        // Check for shape interface method first (no return type)
+        if (_inInterface)
+        {
+            var trimmedForShape = trimmed;
+            if (trimmedForShape.StartsWith("public "))
+            {
+                trimmedForShape = trimmedForShape.Substring(7).Trim();
+            }
+            
+            // Match shape interface method: methodName(...); or methodName(...)
+            // But not if it starts with a type keyword
+            if (!Regex.IsMatch(trimmedForShape, @"^(void|int|float|double|string|bool)\s+") &&
+                Regex.IsMatch(trimmedForShape, @"^\w+\s*\(.*?\)(\s*;)?$"))
+            {
+                var shapeMatch = Regex.Match(trimmedForShape, @"^(\w+)\s*\((.*?)\)(\s*;)?$");
+                if (shapeMatch.Success)
+                {
+                    var shapeMethodName = shapeMatch.Groups[1].Value;
+                    var shapeParameters = shapeMatch.Groups[2].Value;
+                    
+                    // Record defined function for semantic analysis
+                    _definedFunctions.Add(shapeMethodName);
+                    
+                    // Translate to C# interface method (no access modifier in interface)
+                    // C# interface methods are implicitly public
+                    _output.AppendLine($"{INDENT_2}void {shapeMethodName}({TranslateShapeParameters(shapeParameters)});");
+                    return false;
+                }
+            }
+        }
+        
+        // Regular method with return type
+        var trimmedForParse = trimmed;
+        if (trimmedForParse.StartsWith("public "))
+        {
+            trimmedForParse = trimmedForParse.Substring(7).Trim();
+        }
+        
+        var match = Regex.Match(trimmedForParse, @"^(void|int|float|double|string|bool)\s+(\w+)\s*\((.*?)\)(\s*;)?");
         if (!match.Success) return false;
         
         var returnType = TranslateType(match.Groups[1].Value);
@@ -286,6 +350,7 @@ public class Translator
         else if (_inInterface)
         {
             // Interface method: no body, just signature
+            // C# interface methods are implicitly public, no access modifier needed
             _output.AppendLine($"{INDENT_2}{returnType} {methodName}({TranslateParameters(parameters)});");
             // Don't set _inMethod for interface methods
         }
@@ -304,6 +369,27 @@ public class Translator
         
         _braceDepth++;
         return isMain;
+    }
+
+    private string TranslateShapeParameters(string parameters)
+    {
+        // Shape interface parameters: just names, no types
+        // e.g., "item" -> "object item", "key, value" -> "object key, object value"
+        // Special case: "object factor" -> "object factor" (already has type)
+        if (string.IsNullOrWhiteSpace(parameters))
+            return "";
+        
+        // Add object type for each parameter (unless already typed)
+        var parts = parameters.Split(',');
+        var translated = parts.Select(p =>
+        {
+            var trimmed = p.Trim();
+            // Check if already has type (e.g., "object factor")
+            if (trimmed.StartsWith("object ") || trimmed.StartsWith("dynamic "))
+                return trimmed;
+            return $"object {trimmed}";
+        });
+        return string.Join(", ", translated);
     }
 
     private bool IsVariableDeclaration(string trimmed)
