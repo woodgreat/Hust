@@ -1,18 +1,20 @@
 use CSHARP.Console.*;
 
+// 形状接口：无返回类型，无参数类型
+// C# 中接口和实现必须使用兼容类型，这里使用 object 作为通用类型
 interface Shape {
-    float area();
-    float perimeter();
+    public object area();
+    public object perimeter();
 }
 
 class Circle : Shape {
     float radius;
     
-    float area() {
+    public object area() {
         return 3.14159 * radius * radius;
     }
     
-    float perimeter() {
+    public object perimeter() {
         return 2 * 3.14159 * radius;
     }
 }
@@ -21,11 +23,11 @@ class Rectangle : Shape {
     float width;
     float height;
     
-    float area() {
+    public object area() {
         return width * height;
     }
     
-    float perimeter() {
+    public object perimeter() {
         return 2 * (width + height);
     }
 }

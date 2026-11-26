@@ -304,6 +304,24 @@ public class Translator
             if (!Regex.IsMatch(trimmedForShape, @"^(void|int|float|double|string|bool)\s+") &&
                 Regex.IsMatch(trimmedForShape, @"^\w+\s*\(.*?\)(\s*;)?$"))
             {
+                // Check for return variable name: returnVar methodName(...)
+                var shapeMatchWithReturn = Regex.Match(trimmedForShape, @"^(\w+)\s+(\w+)\s*\((.*?)\)(\s*;)?$");
+                if (shapeMatchWithReturn.Success)
+                {
+                    // Has return variable name
+                    var returnVarName = shapeMatchWithReturn.Groups[1].Value;
+                    var shapeMethodName = shapeMatchWithReturn.Groups[2].Value;
+                    var shapeParameters = shapeMatchWithReturn.Groups[3].Value;
+                    
+                    // Record defined function for semantic analysis
+                    _definedFunctions.Add(shapeMethodName);
+                    
+                    // Translate to C# interface method with object return type
+                    _output.AppendLine($"{INDENT_2}object {shapeMethodName}({TranslateShapeParameters(shapeParameters)});");
+                    return false;
+                }
+                
+                // No return variable name (void)
                 var shapeMatch = Regex.Match(trimmedForShape, @"^(\w+)\s*\((.*?)\)(\s*;)?$");
                 if (shapeMatch.Success)
                 {

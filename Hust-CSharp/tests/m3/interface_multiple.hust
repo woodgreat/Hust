@@ -1,21 +1,22 @@
 use CSHARP.Console.*;
 
+// 形状接口：无返回类型，无参数类型
 interface Drawable {
-    void draw();
+    public draw();
 }
 
 interface Printable {
-    void print();
+    public print();
 }
 
 class Document : Drawable, Printable {
     string title;
     
-    void draw() {
+    public void draw() {
         Console.WriteLine("Drawing: " + title);
     }
     
-    void print() {
+    public void print() {
         Console.WriteLine("Printing: " + title);
     }
 }
