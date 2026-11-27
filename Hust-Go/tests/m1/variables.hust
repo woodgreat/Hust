@@ -1,0 +1,8 @@
+use GO.fmt.*;
+
+void main() {
+    i32 x = 42;
+    i32 y = 10;
+    i32 sum = x + y;
+    fmt.Println(sum);
+}

@@ -1,0 +1,6 @@
+use GO.fmt.*;
+
+void main() {
+    i32 x = "hello";
+    fmt.Println(x);
+}

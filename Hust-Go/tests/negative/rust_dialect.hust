@@ -1,0 +1,5 @@
+use RUST.std.*;
+
+void main() {
+    println!("Hello");
+}

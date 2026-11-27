@@ -1,0 +1,7 @@
+use GO.fmt.*;
+
+void main() {
+    for (i32 i = 0; i < 3; i++) {
+        fmt.Println(i);
+    }
+}

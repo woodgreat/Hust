@@ -1,0 +1,5 @@
+use C.stdio.*;
+
+void main() {
+    printf("Hello");
+}

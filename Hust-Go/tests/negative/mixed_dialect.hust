@@ -1,0 +1,6 @@
+use GO.fmt.*;
+use RUST.std.*;
+
+void main() {
+    fmt.Println("Hello");
+}

@@ -35,7 +35,7 @@ func main() {
 		fmt.Printf("Building %s...\n", entry)
 		// TODO: Implement build
 	case "info":
-		fmt.Printf(`{"protocol":1,"name":"go","language":"go","transpile":true,"build":true}`)
+		fmt.Printf(`{"protocol":1,"name":"go","language":"go","transpile":true,"build":true,"toolchain":true}`)
 	case "--version", "-V":
 		fmt.Printf("hust_go %s\n", Version)
 	case "--help", "-h":

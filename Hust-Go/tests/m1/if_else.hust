@@ -1,0 +1,10 @@
+use GO.fmt.*;
+
+void main() {
+    i32 x = 10;
+    if (x > 5) {
+        fmt.Println("big");
+    } else {
+        fmt.Println("small");
+    }
+}
