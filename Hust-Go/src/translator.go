@@ -7,16 +7,21 @@ import (
 
 // Translator handles Hust to Go translation
 type Translator struct {
-	preprocessor *Preprocessor
-	output       strings.Builder
-	indentLevel  int
+	preprocessor     *Preprocessor
+	output           strings.Builder
+	indentLevel      int
+	definedFunctions map[string]bool // Track defined functions for semantic analysis
+	semanticErrors   []string        // Collect semantic errors
+	inClass          bool            // Track if we're inside a class definition
 }
 
 // NewTranslator creates a new translator
 func NewTranslator() *Translator {
 	return &Translator{
-		preprocessor: NewPreprocessor(),
-		indentLevel:  0,
+		preprocessor:     NewPreprocessor(),
+		indentLevel:      0,
+		definedFunctions: make(map[string]bool),
+		semanticErrors:   make([]string, 0),
 	}
 }
 
@@ -74,6 +79,12 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 			continue
 		}
 		
+		// Translate class declaration
+		if strings.HasPrefix(trimmed, "class ") {
+			t.translateClassDeclaration(trimmed)
+			continue
+		}
+		
 		// Translate function declaration
 		if t.isFunctionDeclaration(trimmed) {
 			isMain := t.translateFunctionDeclaration(trimmed)
@@ -123,6 +134,12 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 	// Restore protected strings and comments
 	finalOutput := t.preprocessor.Restore(t.output.String())
 	
+	// Check for semantic errors
+	if len(t.semanticErrors) > 0 {
+		result.Errors = append(result.Errors, t.semanticErrors...)
+		return result
+	}
+	
 	result.Success = true
 	result.Code = finalOutput
 	return result
@@ -151,6 +168,37 @@ func (t *Translator) isFunctionDeclaration(trimmed string) bool {
 	return re.MatchString(trimmed)
 }
 
+// translateClassDeclaration translates a class declaration
+func (t *Translator) translateClassDeclaration(trimmed string) {
+	// class Foo { -> type Foo struct {
+	// class Foo extends Bar { -> type Foo struct { Bar; ... }
+	re := regexp.MustCompile(`class\s+(\w+)(?:\s+extends\s+(\w+))?`)
+	match := re.FindStringSubmatch(trimmed)
+	
+	if len(match) < 2 {
+		return
+	}
+	
+	className := match[1]
+	baseClass := ""
+	if len(match) >= 3 {
+		baseClass = match[2]
+	}
+	
+	// Set inClass flag
+	t.inClass = true
+	
+	// Emit struct declaration
+	if baseClass != "" {
+		t.output.WriteString("type " + className + " struct {\n")
+		t.output.WriteString("\t" + baseClass + "\n")
+	} else {
+		t.output.WriteString("type " + className + " struct {\n")
+	}
+	
+	t.indentLevel++
+}
+
 // translateFunctionDeclaration translates a function declaration
 func (t *Translator) translateFunctionDeclaration(trimmed string) bool {
 	// Match: returnType funcName(params) {
@@ -170,6 +218,9 @@ func (t *Translator) translateFunctionDeclaration(trimmed string) bool {
 	if goReturnType == "void" {
 		goReturnType = ""
 	}
+	
+	// Record defined function for semantic analysis
+	t.definedFunctions[funcName] = true
 	
 	// Translate parameters
 	goParams := t.translateParameters(params)
@@ -235,6 +286,9 @@ func (t *Translator) translateVariableDeclaration(line, trimmed string) {
 	
 	goType := t.mapType(hustType)
 	
+	// Check for type mismatch in initialization
+	t.checkTypeMismatch(goType, rest)
+	
 	// Check if there's an initialization
 	if strings.Contains(rest, "=") {
 		// var name type = value
@@ -242,6 +296,31 @@ func (t *Translator) translateVariableDeclaration(line, trimmed string) {
 	} else {
 		// var name type
 		t.output.WriteString(t.getIndent() + "var " + name + " " + goType + "\n")
+	}
+}
+
+// checkTypeMismatch checks for type mismatch in variable initialization
+func (t *Translator) checkTypeMismatch(declaredType, rest string) {
+	// Check for string assigned to numeric type
+	if strings.Contains(rest, "=") {
+		parts := strings.Split(rest, "=")
+		if len(parts) >= 2 {
+			value := strings.TrimSpace(parts[1])
+			// Check if value is a string literal
+			if strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") {
+				// String literal assigned to non-string type
+				if declaredType != "string" {
+					t.semanticErrors = append(t.semanticErrors, "Type mismatch: cannot assign string to "+declaredType)
+				}
+			}
+			// Check if value is a number assigned to string
+			if declaredType == "string" {
+				// Check if value looks like a number
+				if matched, _ := regexp.MatchString(`^\d+(\.\d+)?$`, value); matched {
+					t.semanticErrors = append(t.semanticErrors, "Type mismatch: cannot assign number to string")
+				}
+			}
+		}
 	}
 }
 
@@ -261,6 +340,12 @@ func (t *Translator) translateReturnStatement(line, trimmed string) {
 // translateClosingBrace handles closing braces
 func (t *Translator) translateClosingBrace() {
 	t.indentLevel--
+	
+	// Check if we're closing a class
+	if t.inClass && t.indentLevel == 0 {
+		t.inClass = false
+	}
+	
 	t.output.WriteString(t.getIndent() + "}\n")
 }
 
@@ -272,9 +357,79 @@ func (t *Translator) translateExpressionStatement(line, trimmed string) {
 		return
 	}
 	
+	// Check for function calls and validate them
+	t.checkFunctionCalls(trimmed)
+	
 	// Translate expression
 	expr := t.translateExpression(trimmed)
 	t.output.WriteString(t.getIndent() + expr + "\n")
+}
+
+// checkFunctionCalls checks for undefined function calls
+func (t *Translator) checkFunctionCalls(expr string) {
+	// Skip if inside a class (methods are defined in class)
+	if t.inClass {
+		return
+	}
+	
+	// Skip if expression contains a dot (method call or field access)
+	if strings.Contains(expr, ".") {
+		return
+	}
+	
+	// Skip if it's a method definition (public ... methodName())
+	if strings.HasPrefix(expr, "public ") {
+		return
+	}
+	
+	// Match standalone function calls: funcName(...) but not obj.method()
+	// Use negative lookbehind to avoid matching method calls
+	re := regexp.MustCompile(`(^|[^\w.])(\w+)\s*\(`)
+	matches := re.FindAllStringSubmatch(expr, -1)
+	
+	for _, match := range matches {
+		if len(match) >= 3 {
+			funcName := match[2]
+			// Skip keywords and built-in functions
+			if t.isKeyword(funcName) || t.isBuiltIn(funcName) {
+				continue
+			}
+			// Skip if it looks like a type name (starts with uppercase)
+			if len(funcName) > 0 && funcName[0] >= 'A' && funcName[0] <= 'Z' {
+				continue
+			}
+			// Check if function is defined
+			if !t.definedFunctions[funcName] {
+				t.semanticErrors = append(t.semanticErrors, "Undefined function: "+funcName)
+			}
+		}
+	}
+}
+
+// isKeyword checks if a name is a Go keyword
+func (t *Translator) isKeyword(name string) bool {
+	keywords := map[string]bool{
+		"if": true, "else": true, "for": true, "while": true,
+		"return": true, "func": true, "var": true, "const": true,
+		"type": true, "struct": true, "interface": true, "package": true,
+		"import": true, "defer": true, "select": true,
+		"case": true, "default": true, "switch": true, "break": true,
+		"continue": true, "fallthrough": true, "range": true, "map": true,
+		"chan": true, "goto": true,
+	}
+	return keywords[name]
+}
+
+// isBuiltIn checks if a name is a built-in function
+func (t *Translator) isBuiltIn(name string) bool {
+	builtIns := map[string]bool{
+		"Println": true, "Print": true, "Printf": true,
+		"Sprintf": true, "Fprintf": true,
+		"len": true, "cap": true, "make": true, "new": true,
+		"append": true, "copy": true, "delete": true,
+		"panic": true, "recover": true, "close": true,
+	}
+	return builtIns[name]
 }
 
 // translateExpression translates expressions
