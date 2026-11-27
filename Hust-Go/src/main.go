@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
 const (
@@ -152,10 +154,16 @@ func handleBuild() {
 		buildMode = "" // debug: keep debug info
 	}
 	
+	// Find go binary
+	goBin := os.Getenv("GO_BIN")
+	if goBin == "" {
+		goBin = "go"
+	}
+	
 	// Run go build
-	cmd := exec.Command("go", "build", "-o", executable, goFile)
+	cmd := exec.Command(goBin, "build", "-o", executable, goFile)
 	if buildMode != "" {
-		cmd = exec.Command("go", "build", "-ldflags=-s -w", "-o", executable, goFile)
+		cmd = exec.Command(goBin, "build", "-ldflags=-s -w", "-o", executable, goFile)
 	}
 	
 	cmd.Stdout = os.Stdout
