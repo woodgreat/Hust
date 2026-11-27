@@ -433,6 +433,12 @@ func (t *Translator) isBuiltIn(name string) bool {
 
 // translateExpression translates expressions
 func (t *Translator) translateExpression(expr string) string {
+	// Translate array methods
+	// .len() -> len()
+	expr = regexp.MustCompile(`\.(\w+)\.len\(\)`).ReplaceAllString(expr, "len($1)")
+	// .push(x) -> append(arr, x)
+	expr = regexp.MustCompile(`(\w+)\.push\(([^)]+)\)`).ReplaceAllString(expr, "$1 = append($1, $2)")
+	
 	// Translate types in expressions
 	// i32 x -> var x int32 (handled in variable declaration)
 	// For now, pass through
@@ -441,6 +447,25 @@ func (t *Translator) translateExpression(expr string) string {
 
 // mapType maps Hust types to Go types
 func (t *Translator) mapType(hustType string) string {
+	// Handle array types: i32[] -> []int32, i32[5] -> [5]int32
+	arrayMatch := regexp.MustCompile(`^(\w+)(\[\d*\])$`).FindStringSubmatch(hustType)
+	if len(arrayMatch) >= 3 {
+		baseType := arrayMatch[1]
+		arraySuffix := arrayMatch[2]
+		mappedBase := t.mapBaseType(baseType)
+		// Dynamic array: i32[] -> []int32
+		// Fixed array: i32[5] -> [5]int32
+		if arraySuffix == "[]" {
+			return "[]" + mappedBase
+		}
+		return arraySuffix + mappedBase
+	}
+	
+	return t.mapBaseType(hustType)
+}
+
+// mapBaseType maps basic Hust types to Go types
+func (t *Translator) mapBaseType(hustType string) string {
 	typeMap := map[string]string{
 		"i8":     "int8",
 		"i16":    "int16",
