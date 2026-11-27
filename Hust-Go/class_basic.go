@@ -6,21 +6,26 @@ package main
 import "fmt"
 
 type Person struct {
-	var name string
-	var age int32
-	public Person(String n, i32 a) {
+	name string
+	age int32
+}
+
+func NewPerson(n string, a int32) *Person {
 	p.name = n;
 	p.age = a;
+	return &Person{}
 }
-public String getName() {
-return this.name;
+
+func (p *Person) getName() string {
+	return p.name;
 }
-public i32 getAge() {
-return this.age;
+
+func (p *Person) getAge() int32 {
+	return p.age;
 }
-}
+
 func main() {
-Person p = NewPerson("Alice", 30);
-fmt.Println(p.getName());
-fmt.Println(p.getAge());
+	Person p = NewPerson("Alice", 30);
+	fmt.Println(p.getName());
+	fmt.Println(p.getAge());
 }

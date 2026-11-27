@@ -7,16 +7,24 @@ import (
 
 // Translator handles Hust to Go translation
 type Translator struct {
-	preprocessor     *Preprocessor
-	output           strings.Builder
-	indentLevel      int
-	definedFunctions map[string]bool // Track defined functions for semantic analysis
-	semanticErrors   []string        // Collect semantic errors
-	inClass          bool            // Track if we're inside a class definition
-	currentClass     string          // Current class name for method receivers
-	inEnum           bool            // Track if we're inside an enum definition
-	currentEnum      string          // Current enum name
-	enumFirstValue   bool            // Track if first enum value (for iota)
+	preprocessor       *Preprocessor
+	output             strings.Builder
+	indentLevel        int
+	definedFunctions   map[string]bool // Track defined functions for semantic analysis
+	semanticErrors     []string        // Collect semantic errors
+	inClass            bool            // Track if we're inside a class definition
+	currentClass       string          // Current class name for method receivers
+	classFields        []string        // Collect class fields
+	classMethods       []string        // Collect class methods
+	classConstructor   string          // Collect class constructor
+	inConstructor      bool            // Track if we're inside a constructor
+	constructorBody    []string        // Collect constructor body lines
+	inMethod           bool            // Track if we're inside a method
+	currentMethodIndex int             // Index of current method in classMethods
+	methodBody         []string        // Collect method body lines
+	inEnum             bool            // Track if we're inside an enum definition
+	currentEnum        string          // Current enum name
+	enumFirstValue     bool            // Track if first enum value (for iota)
 }
 
 // NewTranslator creates a new translator
@@ -139,6 +147,60 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 				t.enumFirstValue = false
 				continue
 			}
+			
+			// Check if we're closing a constructor
+			if t.inConstructor {
+				// End constructor body
+				for _, bodyLine := range t.constructorBody {
+					t.classConstructor += bodyLine + "\n"
+				}
+				t.classConstructor += "\treturn &" + t.currentClass + "{}\n"
+				t.classConstructor += "}\n\n"
+				t.inConstructor = false
+				t.constructorBody = nil
+				continue
+			}
+			
+			// Check if we're closing a method
+			if t.inMethod {
+				// End method body
+				methodIndex := t.currentMethodIndex
+				if methodIndex >= 0 && methodIndex < len(t.classMethods) {
+					for _, bodyLine := range t.methodBody {
+						t.classMethods[methodIndex] += bodyLine + "\n"
+					}
+					t.classMethods[methodIndex] += "}\n\n"
+				}
+				t.inMethod = false
+				t.methodBody = nil
+				t.currentMethodIndex = -1
+				continue
+			}
+			
+			// Check if we're closing a class
+			if t.inClass && t.indentLevel == 1 {
+				// Close struct
+				t.indentLevel--
+				t.output.WriteString(t.getIndent() + "}\n\n")
+				
+				// Output constructor
+				if t.classConstructor != "" {
+					t.output.WriteString(t.classConstructor)
+				}
+				
+				// Output methods
+				for _, method := range t.classMethods {
+					t.output.WriteString(method)
+				}
+				
+				t.inClass = false
+				t.currentClass = ""
+				t.classFields = nil
+				t.classMethods = nil
+				t.classConstructor = ""
+				continue
+			}
+			
 			t.translateClosingBrace()
 			continue
 		}
@@ -199,7 +261,25 @@ func (t *Translator) isFunctionDeclaration(trimmed string) bool {
 	// void main() { -> func main() {
 	// i32 add(i32 a, i32 b) { -> func add(a int32, b int32) int32 {
 	re := regexp.MustCompile(`^(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)\s+\w+\s*\(.*\)\s*\{?`)
-	return re.MatchString(trimmed)
+	if re.MatchString(trimmed) {
+		return true
+	}
+	
+	// In class: public method declaration
+	if t.inClass {
+		// public returnType methodName(...)
+		rePublic := regexp.MustCompile(`^public\s+(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)\s+\w+\s*\(.*\)\s*\{?`)
+		if rePublic.MatchString(trimmed) {
+			return true
+		}
+		// Constructor: public ClassName(...)
+		reConstructor := regexp.MustCompile(`^public\s+` + t.currentClass + `\s*\(.*\)\s*\{?`)
+		if reConstructor.MatchString(trimmed) {
+			return true
+		}
+	}
+	
+	return false
 }
 
 // translateClassDeclaration translates a class declaration
@@ -222,6 +302,9 @@ func (t *Translator) translateClassDeclaration(trimmed string) {
 	// Set inClass flag and store current class name
 	t.inClass = true
 	t.currentClass = className
+	t.classFields = make([]string, 0)
+	t.classMethods = make([]string, 0)
+	t.classConstructor = ""
 	
 	// Emit struct declaration
 	if baseClass != "" {
@@ -262,6 +345,61 @@ func (t *Translator) translateEnumDeclaration(trimmed string) {
 
 // translateFunctionDeclaration translates a function declaration
 func (t *Translator) translateFunctionDeclaration(trimmed string) bool {
+	// Handle public methods in class
+	if t.inClass && strings.HasPrefix(trimmed, "public ") {
+		// Remove "public " prefix
+		trimmed = strings.TrimPrefix(trimmed, "public ")
+		
+		// Check if it's a constructor (ClassName(...))
+		if strings.HasPrefix(trimmed, t.currentClass+"(") {
+			// Constructor
+			re := regexp.MustCompile(`^(\w+)\s*\((.*)\)\s*\{?`)
+			match := re.FindStringSubmatch(trimmed)
+			if len(match) >= 3 {
+				params := match[2]
+				goParams := t.translateParameters(params)
+				
+				// Start collecting constructor
+				t.inConstructor = true
+				t.constructorBody = make([]string, 0)
+				t.classConstructor = "func New" + t.currentClass + "(" + goParams + ") *" + t.currentClass + " {\n"
+			}
+			return false
+		}
+		
+		// Regular method: returnType methodName(params)
+		re := regexp.MustCompile(`^(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)\s+(\w+)\s*\((.*)\)\s*\{?`)
+		match := re.FindStringSubmatch(trimmed)
+		if len(match) >= 4 {
+			returnType := match[1]
+			funcName := match[2]
+			params := match[3]
+			
+			goReturnType := t.mapType(returnType)
+			if goReturnType == "void" {
+				goReturnType = ""
+			}
+			
+			goParams := t.translateParameters(params)
+			
+			// Start collecting method
+			t.inMethod = true
+			t.methodBody = make([]string, 0)
+			
+			// Generate method signature
+			receiver := strings.ToLower(string(t.currentClass[0]))
+			methodSignature := "func (" + receiver + " *" + t.currentClass + ") " + funcName + "(" + goParams + ")"
+			if goReturnType != "" {
+				methodSignature += " " + goReturnType
+			}
+			methodSignature += " {\n"
+			
+			t.classMethods = append(t.classMethods, methodSignature)
+			t.currentMethodIndex = len(t.classMethods) - 1
+		}
+		return false
+	}
+	
 	// Match: returnType funcName(params) {
 	re := regexp.MustCompile(`^(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)\s+(\w+)\s*\((.*)\)\s*\{?`)
 	match := re.FindStringSubmatch(trimmed)
@@ -285,17 +423,6 @@ func (t *Translator) translateFunctionDeclaration(trimmed string) bool {
 	
 	// Translate parameters
 	goParams := t.translateParameters(params)
-	
-	// Check if this is a class method (inside class and not constructor)
-	if t.inClass && t.currentClass != "" && funcName != t.currentClass {
-		// Class method: add receiver
-		receiver := strings.ToLower(string(t.currentClass[0]))
-		if goParams != "" {
-			goParams = receiver + " *" + t.currentClass + ", " + goParams
-		} else {
-			goParams = receiver + " *" + t.currentClass
-		}
-	}
 	
 	// Build function signature
 	if goReturnType == "" {
@@ -358,6 +485,13 @@ func (t *Translator) translateVariableDeclaration(line, trimmed string) {
 	
 	goType := t.mapType(hustType)
 	
+	// Check if we're inside a class (field declaration)
+	if t.inClass {
+		// Class field: name type (no var prefix)
+		t.output.WriteString(t.getIndent() + name + " " + goType + "\n")
+		return
+	}
+	
 	// Check for type mismatch in initialization
 	t.checkTypeMismatch(goType, rest)
 	
@@ -406,6 +540,18 @@ func (t *Translator) translateControlStatement(line, trimmed string) {
 
 // translateReturnStatement translates return statements
 func (t *Translator) translateReturnStatement(line, trimmed string) {
+	// Translate this.field -> receiver.field in return statements
+	if t.inClass && t.currentClass != "" {
+		receiver := strings.ToLower(string(t.currentClass[0]))
+		trimmed = regexp.MustCompile(`\bthis\.`).ReplaceAllString(trimmed, receiver+".")
+	}
+	
+	// Collect method body
+	if t.inMethod {
+		t.methodBody = append(t.methodBody, "\t"+trimmed)
+		return
+	}
+	
 	t.output.WriteString(t.getIndent() + trimmed + "\n")
 }
 
@@ -434,6 +580,19 @@ func (t *Translator) translateExpressionStatement(line, trimmed string) {
 	
 	// Translate expression
 	expr := t.translateExpression(trimmed)
+	
+	// Collect constructor body
+	if t.inConstructor {
+		t.constructorBody = append(t.constructorBody, "\t"+expr)
+		return
+	}
+	
+	// Collect method body
+	if t.inMethod {
+		t.methodBody = append(t.methodBody, "\t"+expr)
+		return
+	}
+	
 	t.output.WriteString(t.getIndent() + expr + "\n")
 }
 
