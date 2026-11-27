@@ -25,6 +25,8 @@ type Translator struct {
 	inEnum             bool            // Track if we're inside an enum definition
 	currentEnum        string          // Current enum name
 	enumFirstValue     bool            // Track if first enum value (for iota)
+	inInterface        bool            // Track if we're inside an interface definition
+	currentInterface   string          // Current interface name
 }
 
 // NewTranslator creates a new translator
@@ -145,6 +147,12 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 			continue
 		}
 		
+		// Translate interface declaration
+		if strings.HasPrefix(trimmed, "interface ") {
+			t.translateInterfaceDeclaration(trimmed)
+			continue
+		}
+		
 		// Translate enum declaration
 		if strings.HasPrefix(trimmed, "enum ") {
 			t.translateEnumDeclaration(trimmed)
@@ -189,6 +197,15 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 		
 		// Handle closing brace
 		if trimmed == "}" {
+			// Check if we're closing an interface
+			if t.inInterface {
+				t.indentLevel--
+				t.output.WriteString(t.getIndent() + "}\n\n")
+				t.inInterface = false
+				t.currentInterface = ""
+				continue
+			}
+			
 			// Check if we're closing an enum
 			if t.inEnum {
 				t.indentLevel--
@@ -267,6 +284,30 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 					t.enumFirstValue = false
 				} else {
 					t.output.WriteString(t.getIndent() + value + "\n")
+				}
+			}
+			continue
+		}
+		
+		// Handle interface methods
+		if t.inInterface {
+			// Interface method: public draw(); -> draw()
+			method := strings.TrimPrefix(trimmed, "public ")
+			method = strings.TrimSuffix(method, ";")
+			method = strings.TrimSpace(method)
+			if method != "" {
+				// Convert to Go interface method signature
+				// draw() -> draw()
+				// draw(i32 x) -> draw(x int32)
+				re := regexp.MustCompile(`^(\w+)\s*\((.*)\)$`)
+				match := re.FindStringSubmatch(method)
+				if len(match) >= 3 {
+					methodName := match[1]
+					params := match[2]
+					goParams := t.translateParameters(params)
+					t.output.WriteString(t.getIndent() + methodName + "(" + goParams + ")\n")
+				} else {
+					t.output.WriteString(t.getIndent() + method + "\n")
 				}
 			}
 			continue
@@ -392,6 +433,27 @@ func (t *Translator) translateEnumDeclaration(trimmed string) {
 	t.inEnum = true
 	t.currentEnum = enumName
 	t.enumFirstValue = true
+}
+
+// translateInterfaceDeclaration translates interface declarations
+func (t *Translator) translateInterfaceDeclaration(trimmed string) {
+	// interface Drawable { -> type Drawable interface {
+	re := regexp.MustCompile(`interface\s+(\w+)\s*\{`)
+	match := re.FindStringSubmatch(trimmed)
+	
+	if len(match) < 2 {
+		return
+	}
+	
+	interfaceName := match[1]
+	
+	// Emit interface declaration
+	t.output.WriteString("type " + interfaceName + " interface {\n")
+	t.indentLevel++
+	
+	// Set flag to indicate we're in an interface
+	t.inInterface = true
+	t.currentInterface = interfaceName
 }
 
 // translateFunctionDeclaration translates a function declaration

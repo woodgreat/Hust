@@ -85,6 +85,20 @@ run_test() {
         return
     fi
     
+    # Check if generated Go code compiles
+    local go_file="$out_dir/${test_name}.go"
+    if [ -f "$go_file" ]; then
+        $GO_BIN build -o "$temp_dir/test_binary" "$go_file" 2>"$temp_dir/build_err.txt"
+        local build_exit=$?
+        if [ $build_exit -ne 0 ]; then
+            echo -e "${RED}FAIL${NC} $test_name (go build failed)"
+            echo "  Build error: $(cat "$temp_dir/build_err.txt")"
+            FAILED=$((FAILED + 1))
+            rm -rf "$temp_dir"
+            return
+        fi
+    fi
+    
     # Check for expected output
     if [ -f "$expected_file" ]; then
         # TODO: Build and run, compare output
