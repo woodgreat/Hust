@@ -1,7 +1,7 @@
 use CSHARP.Console.*;
 
 void main() {
-    string name = "Hust";
-    string greeting = "Hello, " + name + "!";
+    String name = "Hust";
+    String greeting = "Hello, " + name + "!";
     Console.WriteLine(greeting);
 }

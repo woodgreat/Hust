@@ -1,6 +1,6 @@
 use CSHARP.Console.*;
 
 void main() {
-    int x = "hello";
+    i32 x = "hello";
     Console.WriteLine(x);
 }

@@ -1,8 +1,8 @@
 use CSHARP.Console.*;
 
 void main() {
-    int x = 42;
-    int y = 10;
-    int sum = x + y;
+    i32 x = 42;
+    i32 y = 10;
+    i32 sum = x + y;
     Console.WriteLine(sum);
 }

@@ -1,7 +1,7 @@
 use CSHARP.Console.*;
 
 void main() {
-    for (int i = 0; i < 3; i++) {
+    for (i32 i = 0; i < 3; i++) {
         Console.WriteLine(i);
     }
 }

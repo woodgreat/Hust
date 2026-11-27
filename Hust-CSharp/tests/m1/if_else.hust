@@ -1,7 +1,7 @@
 use CSHARP.Console.*;
 
 void main() {
-    int x = 10;
+    i32 x = 10;
     if (x > 5) {
         Console.WriteLine("big");
     } else {

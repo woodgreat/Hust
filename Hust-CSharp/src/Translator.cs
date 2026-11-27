@@ -36,6 +36,41 @@ public class Translator
     private const string INDENT_1 = "  ";      // 1 level: Program class body
     private const string INDENT_2 = "    ";    // 2 levels: class members / top-level method body
     private const string INDENT_3 = "      ";  // 3 levels: class method body
+    
+    // Hust to C# type mapping
+    private static readonly Dictionary<string, string> TypeMap = new()
+    {
+        { "i8", "sbyte" },
+        { "i16", "short" },
+        { "i32", "int" },
+        { "i64", "long" },
+        { "u8", "byte" },
+        { "u16", "ushort" },
+        { "u32", "uint" },
+        { "u64", "ulong" },
+        { "f32", "float" },
+        { "f64", "double" },
+        { "bool", "bool" },
+        { "String", "string" },
+        { "char", "char" },
+        { "void", "void" }
+    };
+    
+    private string MapType(string hustType)
+    {
+        // Handle array types: i32[] -> int[], i32[5] -> int[5]
+        var arrayMatch = Regex.Match(hustType, @"^(\w+)(\[\d*\])$");
+        if (arrayMatch.Success)
+        {
+            var baseType = arrayMatch.Groups[1].Value;
+            var arraySuffix = arrayMatch.Groups[2].Value;
+            var mappedBase = TypeMap.ContainsKey(baseType) ? TypeMap[baseType] : baseType;
+            return mappedBase + arraySuffix;
+        }
+        
+        // Handle simple types
+        return TypeMap.ContainsKey(hustType) ? TypeMap[hustType] : hustType;
+    }
 
     public TranslationResult Translate(string source, string fileName = "output")
     {
@@ -448,19 +483,24 @@ public class Translator
 
     private bool IsVariableDeclaration(string trimmed)
     {
-        return Regex.IsMatch(trimmed, @"^(int|float|double|string|bool)\s+\w+");
+        // Hust types: i8,i16,i32,i64,u8,u16,u32,u64,f32,f64,bool,String,char,void
+        // Also support C# types for compatibility: int,float,double,string
+        return Regex.IsMatch(trimmed, @"^(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char|int|float|double|string)\s+\w+");
     }
 
     private void TranslateVariableDeclaration(string line, string trimmed)
     {
-        var match = Regex.Match(trimmed, @"^(int|float|double|string|bool)\s+(\w+)(.*)$");
+        // Hust types: i8,i16,i32,i64,u8,u16,u32,u64,f32,f64,bool,String,char,void
+        // Also support C# types for compatibility: int,float,double,string
+        var match = Regex.Match(trimmed, @"^(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char|int|float|double|string)\s+(\w+)(.*)$");
         if (!match.Success)
         {
             TranslateExpressionStatement(line, trimmed);
             return;
         }
         
-        var type = TranslateType(match.Groups[1].Value);
+        var hustType = match.Groups[1].Value;
+        var type = MapType(hustType);  // Use type mapping
         var name = match.Groups[2].Value;
         var rest = match.Groups[3].Value;
         
@@ -608,16 +648,8 @@ public class Translator
 
     private string TranslateType(string type)
     {
-        return type switch
-        {
-            "int" => "int",
-            "float" => "float",
-            "double" => "double",
-            "string" => "string",
-            "bool" => "bool",
-            "void" => "void",
-            _ => type
-        };
+        // Use the comprehensive type mapping
+        return MapType(type);
     }
 
     private string TranslateParameters(string parameters)
@@ -625,15 +657,17 @@ public class Translator
         if (string.IsNullOrWhiteSpace(parameters))
             return "";
         
-        // Simple parameter translation: int x, string y -> int x, string y
+        // Simple parameter translation: i32 x, String y -> int x, string y
         var parts = parameters.Split(',');
         var translated = parts.Select(p =>
         {
             var trimmed = p.Trim();
-            var match = Regex.Match(trimmed, @"^(int|float|double|string|bool)\s+(\w+)$");
+            // Hust types: i8,i16,i32,i64,u8,u16,u32,u64,f32,f64,bool,String,char
+            // Also support C# types for compatibility: int,float,double,string
+            var match = Regex.Match(trimmed, @"^(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char|int|float|double|string)\s+(\w+)$");
             if (match.Success)
             {
-                return $"{TranslateType(match.Groups[1].Value)} {match.Groups[2].Value}";
+                return $"{MapType(match.Groups[1].Value)} {match.Groups[2].Value}";
             }
             return trimmed;
         });
@@ -648,6 +682,15 @@ public class Translator
         
         // Console.WriteLine -> Console.WriteLine (already correct)
         // new Person() -> new Person() (already correct)
+        
+        // Translate Hust types to C# types in expressions
+        // Match type keywords followed by space and identifier (variable declarations)
+        expr = Regex.Replace(expr, @"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)\s+(?=\w)", 
+            match => MapType(match.Groups[1].Value) + " ");
+        
+        // Translate array types: i32[] -> int[], new i32[3] -> new int[3]
+        expr = Regex.Replace(expr, @"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)(\[\d*\])", 
+            match => MapType(match.Groups[1].Value) + match.Groups[2].Value);
         
         // Fix float literals: add F suffix for C#
         // Match: number.number (not followed by F/f)
