@@ -1,0 +1,7 @@
+use GO.fmt.*;
+
+void main() {
+    String name = "Hust";
+    String greeting = "Hello, " + name + "!";
+    fmt.Println(greeting);
+}

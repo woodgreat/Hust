@@ -1,0 +1,25 @@
+use GO.fmt.*;
+
+class Person {
+    String name;
+    i32 age;
+    
+    public Person(String n, i32 a) {
+        this.name = n;
+        this.age = a;
+    }
+    
+    public String getName() {
+        return this.name;
+    }
+    
+    public i32 getAge() {
+        return this.age;
+    }
+}
+
+void main() {
+    Person p = new Person("Alice", 30);
+    fmt.Println(p.getName());
+    fmt.Println(p.getAge());
+}

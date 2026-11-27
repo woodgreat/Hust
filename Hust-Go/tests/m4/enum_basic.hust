@@ -1,0 +1,18 @@
+use GO.fmt.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Color c = Color.Red;
+    if (c == Color.Red) {
+        fmt.Println("Red");
+    } else if (c == Color.Green) {
+        fmt.Println("Green");
+    } else {
+        fmt.Println("Blue");
+    }
+}

@@ -1,0 +1,23 @@
+use GO.fmt.*;
+
+class Animal {
+    i32 age;
+    
+    public void speak() {
+        fmt.Println("Animal sound");
+    }
+}
+
+class Dog extends Animal {
+    String name;
+    
+    public void bark() {
+        fmt.Println("Woof!");
+    }
+}
+
+void main() {
+    Dog d = new Dog();
+    d.speak();
+    d.bark();
+}

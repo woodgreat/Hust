@@ -1,0 +1,30 @@
+use GO.fmt.*;
+
+interface Drawable {
+    public draw();
+}
+
+class Circle implements Drawable {
+    i32 radius;
+    
+    public void draw() {
+        fmt.Println("Drawing circle");
+    }
+}
+
+class Rectangle implements Drawable {
+    i32 width;
+    i32 height;
+    
+    public void draw() {
+        fmt.Println("Drawing rectangle");
+    }
+}
+
+void main() {
+    Circle c = new Circle();
+    c.draw();
+    
+    Rectangle r = new Rectangle();
+    r.draw();
+}
