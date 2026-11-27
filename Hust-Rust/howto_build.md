@@ -3,7 +3,7 @@
 This guide covers building the Rust language core from source on Linux and
 Windows. Normal users should invoke the `hustc` conductor; this guide is for
 building the `hust_rust` core itself. Current version at time of writing:
-`0.1.11+20260908` (Wood format display: `0.1.11.20260908`).
+`0.3.12.20261127083900` (Wood format).
 
 ## Prerequisites
 
@@ -120,6 +120,12 @@ to `$PREFIX/bin/hust_work/hust_core/<core>/` with its own `include/` and
 The old `hust` binary is retired. Update existing scripts by replacing
 `hust` with `hustc`; source files and `settings.config` do not change.
 
+Current core versions:
+- Conductor (`hustc`): 0.1.1.20261127083800
+- Rust core (`hust_rust`): 0.3.12.20261127083900
+- C core (`hust_c`): 0.1.1.20261127084000
+- C# core (`hust_csharp`): 0.1.1.20261127083700
+
 ### Manual core install (advanced)
 
 If you only need the Rust core binary:
@@ -162,7 +168,7 @@ Normal use goes through `hustc.exe`.
 
 ```bash
 hustc --version
-# Wood format output: 0.1.11.20260908
+# Wood format output: 0.3.12.20261127083900
 
 hustc --cores
 hustc --help
@@ -202,6 +208,7 @@ Known failures are listed in `tests/tests.md` and reported as `KNOWN`.
 
 ## Version history note
 
+- `0.3.12.20261127083900` — current version; multi-core support, Conductor integration.
 - `0.1.10+20260908` — fixed nested array index transpile + `len()` condition
   conversion; environment migration to Linux.
 - `0.1.11+20260908` — N-dimensional array declarations (N ≥ 2), stress-tested

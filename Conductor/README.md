@@ -4,6 +4,8 @@ The Conductor is the CLI entry point for the Hust language. It reads
 configuration, discovers language cores, selects exactly one core, and
 orchestrates transpilation/build/run.
 
+**Version:** 0.1.1.20261127083800
+
 ## Role
 
 - **User entry point**: `hustc` is what users invoke

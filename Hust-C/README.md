@@ -3,6 +3,8 @@
 The C language core for Hust. Transpiles Hust source code to C and compiles
 with gcc.
 
+**Version:** 0.1.1.20261127084000
+
 ## Role
 
 - **Language**: C (C99)

@@ -2,6 +2,8 @@
 
 Hust language core for C# - transpiles Hust source code to C#.
 
+**Version:** 0.1.1.20261127083700
+
 ## Overview
 
 Hust-CSharp is the C# language core for the Hust programming language. It transpiles Hust source code to C# and builds with the .NET toolchain.
