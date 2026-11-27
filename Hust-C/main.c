@@ -19,7 +19,7 @@
 #include "include/hust_parser.h"
 #include "include/hust_translator.h"
 
-#define HUST_C_VERSION "0.1.0.20261127084000"
+#define HUST_C_VERSION "0.1.1.20261127084000"
 #define HUST_PATH_MAX 4096
 
 /* Print usage information */
