@@ -1,0 +1,29 @@
+use GO.fmt.*;
+use GO.strings.*;
+
+void main() {
+    String s = "Hello, World!";
+    
+    // String length
+    fmt.Println(s.length());
+    
+    // String methods
+    fmt.Println(s.toUpperCase());
+    fmt.Println(s.toLowerCase());
+    fmt.Println(s.trim());
+    
+    // String search
+    fmt.Println(s.contains("World"));
+    fmt.Println(s.startsWith("Hello"));
+    fmt.Println(s.endsWith("!"));
+    fmt.Println(s.indexOf("o"));
+    
+    // String manipulation
+    fmt.Println(s.substring(0, 5));
+    fmt.Println(s.replace("World", "Hust"));
+    
+    // String split
+    String[] parts = s.split(", ");
+    fmt.Println(parts[0]);
+    fmt.Println(parts[1]);
+}

@@ -439,6 +439,32 @@ func (t *Translator) translateExpression(expr string) string {
 	// .push(x) -> append(arr, x)
 	expr = regexp.MustCompile(`(\w+)\.push\(([^)]+)\)`).ReplaceAllString(expr, "$1 = append($1, $2)")
 	
+	// Translate string methods
+	// .length() -> len()
+	expr = regexp.MustCompile(`\.(\w+)\.length\(\)`).ReplaceAllString(expr, "len($1)")
+	// .charAt(i) -> string(s[i])
+	expr = regexp.MustCompile(`(\w+)\.charAt\(([^)]+)\)`).ReplaceAllString(expr, "string($1[$2])")
+	// .substring(start, end) -> s[start:end]
+	expr = regexp.MustCompile(`(\w+)\.substring\(([^,]+),\s*([^)]+)\)`).ReplaceAllString(expr, "$1[$2:$3]")
+	// .toUpperCase() -> strings.ToUpper()
+	expr = regexp.MustCompile(`(\w+)\.toUpperCase\(\)`).ReplaceAllString(expr, "strings.ToUpper($1)")
+	// .toLowerCase() -> strings.ToLower()
+	expr = regexp.MustCompile(`(\w+)\.toLowerCase\(\)`).ReplaceAllString(expr, "strings.ToLower($1)")
+	// .trim() -> strings.TrimSpace()
+	expr = regexp.MustCompile(`(\w+)\.trim\(\)`).ReplaceAllString(expr, "strings.TrimSpace($1)")
+	// .contains(s) -> strings.Contains()
+	expr = regexp.MustCompile(`(\w+)\.contains\(([^)]+)\)`).ReplaceAllString(expr, "strings.Contains($1, $2)")
+	// .startsWith(s) -> strings.HasPrefix()
+	expr = regexp.MustCompile(`(\w+)\.startsWith\(([^)]+)\)`).ReplaceAllString(expr, "strings.HasPrefix($1, $2)")
+	// .endsWith(s) -> strings.HasSuffix()
+	expr = regexp.MustCompile(`(\w+)\.endsWith\(([^)]+)\)`).ReplaceAllString(expr, "strings.HasSuffix($1, $2)")
+	// .indexOf(s) -> strings.Index()
+	expr = regexp.MustCompile(`(\w+)\.indexOf\(([^)]+)\)`).ReplaceAllString(expr, "strings.Index($1, $2)")
+	// .replace(old, new) -> strings.Replace()
+	expr = regexp.MustCompile(`(\w+)\.replace\(([^,]+),\s*([^)]+)\)`).ReplaceAllString(expr, "strings.Replace($1, $2, $3, -1)")
+	// .split(s) -> strings.Split()
+	expr = regexp.MustCompile(`(\w+)\.split\(([^)]+)\)`).ReplaceAllString(expr, "strings.Split($1, $2)")
+	
 	// Translate types in expressions
 	// i32 x -> var x int32 (handled in variable declaration)
 	// For now, pass through
