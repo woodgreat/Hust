@@ -13,6 +13,7 @@ type Translator struct {
 	definedFunctions map[string]bool // Track defined functions for semantic analysis
 	semanticErrors   []string        // Collect semantic errors
 	inClass          bool            // Track if we're inside a class definition
+	currentClass     string          // Current class name for method receivers
 }
 
 // NewTranslator creates a new translator
@@ -184,8 +185,9 @@ func (t *Translator) translateClassDeclaration(trimmed string) {
 		baseClass = match[2]
 	}
 	
-	// Set inClass flag
+	// Set inClass flag and store current class name
 	t.inClass = true
+	t.currentClass = className
 	
 	// Emit struct declaration
 	if baseClass != "" {
@@ -223,6 +225,17 @@ func (t *Translator) translateFunctionDeclaration(trimmed string) bool {
 	
 	// Translate parameters
 	goParams := t.translateParameters(params)
+	
+	// Check if this is a class method (inside class and not constructor)
+	if t.inClass && t.currentClass != "" && funcName != t.currentClass {
+		// Class method: add receiver
+		receiver := strings.ToLower(string(t.currentClass[0]))
+		if goParams != "" {
+			goParams = receiver + " *" + t.currentClass + ", " + goParams
+		} else {
+			goParams = receiver + " *" + t.currentClass
+		}
+	}
 	
 	// Build function signature
 	if goReturnType == "" {
@@ -433,6 +446,9 @@ func (t *Translator) isBuiltIn(name string) bool {
 
 // translateExpression translates expressions
 func (t *Translator) translateExpression(expr string) string {
+	// Translate constructor calls: new ClassName(...) -> NewClassName(...)
+	expr = regexp.MustCompile(`new\s+(\w+)\s*\(`).ReplaceAllString(expr, "New$1(")
+	
 	// Translate array methods
 	// .len() -> len()
 	expr = regexp.MustCompile(`\.(\w+)\.len\(\)`).ReplaceAllString(expr, "len($1)")
@@ -464,6 +480,12 @@ func (t *Translator) translateExpression(expr string) string {
 	expr = regexp.MustCompile(`(\w+)\.replace\(([^,]+),\s*([^)]+)\)`).ReplaceAllString(expr, "strings.Replace($1, $2, $3, -1)")
 	// .split(s) -> strings.Split()
 	expr = regexp.MustCompile(`(\w+)\.split\(([^)]+)\)`).ReplaceAllString(expr, "strings.Split($1, $2)")
+	
+	// Translate this.field -> receiver.field (in class methods)
+	if t.inClass && t.currentClass != "" {
+		receiver := strings.ToLower(string(t.currentClass[0]))
+		expr = regexp.MustCompile(`\bthis\.`).ReplaceAllString(expr, receiver+".")
+	}
 	
 	// Translate types in expressions
 	// i32 x -> var x int32 (handled in variable declaration)
