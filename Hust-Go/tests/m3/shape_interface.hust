@@ -1,0 +1,54 @@
+use GO.fmt.*;
+
+// Shape interface - Hust 特色：形状接口定义行为契约
+// 形状接口：无类型参数，只有名字，类型由实现类填写
+interface Drawable {
+    public draw();
+    public resize(factor);
+}
+
+interface Serializable {
+    public serialize();
+    public deserialize(data);
+}
+
+// 实现形状接口
+class Circle implements Drawable {
+    f32 radius;
+    
+    public void draw() {
+        fmt.Println("Drawing circle with radius: " + this.radius);
+    }
+    
+    public void resize(factor) {
+        this.radius = this.radius * factor;
+        fmt.Println("Resized to radius: " + this.radius);
+    }
+}
+
+class DataRecord implements Serializable {
+    String id;
+    String content;
+    
+    public serialize() {
+        return this.id + ":" + this.content;
+    }
+    
+    public void deserialize(data) {
+        fmt.Println("Deserializing: " + data);
+    }
+}
+
+void main() {
+    Circle c = new Circle();
+    c.radius = 5.0;
+    c.draw();
+    c.resize(2.0);
+    
+    DataRecord rec = new DataRecord();
+    rec.id = "001";
+    rec.content = "test data";
+    serialized = rec.serialize();
+    fmt.Println("Serialized: " + serialized);
+    rec.deserialize(serialized);
+}

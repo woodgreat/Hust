@@ -1,0 +1,29 @@
+use GO.fmt.*;
+
+// 形状接口：无返回类型，无参数类型
+interface Drawable {
+    public draw();
+}
+
+interface Printable {
+    public print();
+}
+
+class Document implements Drawable, Printable {
+    String title;
+    
+    public void draw() {
+        fmt.Println("Drawing: " + this.title);
+    }
+    
+    public void print() {
+        fmt.Println("Printing: " + this.title);
+    }
+}
+
+void main() {
+    Document doc = new Document();
+    doc.title = "Report";
+    doc.draw();
+    doc.print();
+}

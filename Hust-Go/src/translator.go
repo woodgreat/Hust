@@ -493,6 +493,7 @@ func (t *Translator) translateVariableDeclaration(line, trimmed string) {
 	}
 	
 	// Check for type mismatch in initialization
+	// rest contains:  = "hello" or  = 123 or empty
 	t.checkTypeMismatch(goType, rest)
 	
 	// Check if there's an initialization
@@ -509,16 +510,23 @@ func (t *Translator) translateVariableDeclaration(line, trimmed string) {
 func (t *Translator) checkTypeMismatch(declaredType, rest string) {
 	// Check for string assigned to numeric type
 	if strings.Contains(rest, "=") {
-		parts := strings.Split(rest, "=")
+		parts := strings.SplitN(rest, "=", 2)
 		if len(parts) >= 2 {
 			value := strings.TrimSpace(parts[1])
-			// Check if value is a string literal
-			if strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") {
+			// Remove trailing semicolon
+			value = strings.TrimSuffix(value, ";")
+			
+			// Check if value is a string literal (or placeholder)
+			isStringLiteral := strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")
+			isStringPlaceholder := strings.HasPrefix(value, "__STRING_")
+			
+			if isStringLiteral || isStringPlaceholder {
 				// String literal assigned to non-string type
 				if declaredType != "string" {
 					t.semanticErrors = append(t.semanticErrors, "Type mismatch: cannot assign string to "+declaredType)
 				}
 			}
+			
 			// Check if value is a number assigned to string
 			if declaredType == "string" {
 				// Check if value looks like a number
