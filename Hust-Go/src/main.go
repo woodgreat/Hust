@@ -141,11 +141,37 @@ func handleBuild() {
 	}
 	
 	// Build with go
-	// TODO: Implement go build
-	fmt.Fprintf(os.Stderr, "Build not yet implemented\n")
-	os.Exit(5)
+	executable := filepath.Join(outDir, "main")
+	if runtime.GOOS == "windows" {
+		executable += ".exe"
+	}
 	
-	_ = release // TODO: Use for build mode
+	// Determine build mode
+	buildMode := "-ldflags=-s -w" // release: strip debug info
+	if !release {
+		buildMode = "" // debug: keep debug info
+	}
+	
+	// Run go build
+	cmd := exec.Command("go", "build", "-o", executable, goFile)
+	if buildMode != "" {
+		cmd = exec.Command("go", "build", "-ldflags=-s -w", "-o", executable, goFile)
+	}
+	
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: go build failed: %v\n", err)
+		os.Exit(5)
+	}
+	
+	// Output executable path (contract requirement)
+	absPath, err := filepath.Abs(executable)
+	if err != nil {
+		absPath = executable
+	}
+	fmt.Printf("executable=%s\n", absPath)
 }
 
 func printUsage() {
