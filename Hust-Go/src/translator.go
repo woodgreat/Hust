@@ -83,6 +83,12 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 			continue
 		}
 		
+		// Translate enum declaration
+		if strings.HasPrefix(trimmed, "enum ") {
+			t.translateEnumDeclaration(trimmed)
+			continue
+		}
+		
 		// Translate function declaration
 		if t.isFunctionDeclaration(trimmed) {
 			isMain := t.translateFunctionDeclaration(trimmed)
@@ -198,6 +204,38 @@ func (t *Translator) translateClassDeclaration(trimmed string) {
 	}
 	
 	t.indentLevel++
+}
+
+// translateEnumDeclaration translates enum declarations
+func (t *Translator) translateEnumDeclaration(trimmed string) {
+	// enum Color { RED, GREEN, BLUE } -> type Color int; const ( RED Color = iota; ... )
+	re := regexp.MustCompile(`enum\s+(\w+)\s*\{([^}]+)\}`)
+	match := re.FindStringSubmatch(trimmed)
+	
+	if len(match) < 3 {
+		return
+	}
+	
+	enumName := match[1]
+	values := strings.Split(match[2], ",")
+	
+	// Emit type declaration
+	t.output.WriteString("type " + enumName + " int\n\n")
+	
+	// Emit const block with iota
+	t.output.WriteString("const (\n")
+	for i, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if i == 0 {
+			t.output.WriteString("\t" + value + " " + enumName + " = iota\n")
+		} else {
+			t.output.WriteString("\t" + value + "\n")
+		}
+	}
+	t.output.WriteString(")\n\n")
 }
 
 // translateFunctionDeclaration translates a function declaration
