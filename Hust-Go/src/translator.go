@@ -14,6 +14,9 @@ type Translator struct {
 	semanticErrors   []string        // Collect semantic errors
 	inClass          bool            // Track if we're inside a class definition
 	currentClass     string          // Current class name for method receivers
+	inEnum           bool            // Track if we're inside an enum definition
+	currentEnum      string          // Current enum name
+	enumFirstValue   bool            // Track if first enum value (for iota)
 }
 
 // NewTranslator creates a new translator
@@ -127,7 +130,32 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 		
 		// Handle closing brace
 		if trimmed == "}" {
+			// Check if we're closing an enum
+			if t.inEnum {
+				t.indentLevel--
+				t.output.WriteString(t.getIndent() + ")\n\n")
+				t.inEnum = false
+				t.currentEnum = ""
+				t.enumFirstValue = false
+				continue
+			}
 			t.translateClosingBrace()
+			continue
+		}
+		
+		// Handle enum values
+		if t.inEnum {
+			// Remove trailing comma
+			value := strings.TrimSuffix(trimmed, ",")
+			value = strings.TrimSpace(value)
+			if value != "" {
+				if t.enumFirstValue {
+					t.output.WriteString(t.getIndent() + value + " " + t.currentEnum + " = iota\n")
+					t.enumFirstValue = false
+				} else {
+					t.output.WriteString(t.getIndent() + value + "\n")
+				}
+			}
 			continue
 		}
 		
@@ -208,34 +236,28 @@ func (t *Translator) translateClassDeclaration(trimmed string) {
 
 // translateEnumDeclaration translates enum declarations
 func (t *Translator) translateEnumDeclaration(trimmed string) {
-	// enum Color { RED, GREEN, BLUE } -> type Color int; const ( RED Color = iota; ... )
-	re := regexp.MustCompile(`enum\s+(\w+)\s*\{([^}]+)\}`)
+	// enum Color { -> type Color int; const ( RED Color = iota; ... )
+	// Handle multi-line enum declarations
+	re := regexp.MustCompile(`enum\s+(\w+)\s*\{`)
 	match := re.FindStringSubmatch(trimmed)
 	
-	if len(match) < 3 {
+	if len(match) < 2 {
 		return
 	}
 	
 	enumName := match[1]
-	values := strings.Split(match[2], ",")
 	
 	// Emit type declaration
 	t.output.WriteString("type " + enumName + " int\n\n")
 	
-	// Emit const block with iota
+	// Emit const block start
 	t.output.WriteString("const (\n")
-	for i, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if i == 0 {
-			t.output.WriteString("\t" + value + " " + enumName + " = iota\n")
-		} else {
-			t.output.WriteString("\t" + value + "\n")
-		}
-	}
-	t.output.WriteString(")\n\n")
+	t.indentLevel++
+	
+	// Set flag to indicate we're in an enum
+	t.inEnum = true
+	t.currentEnum = enumName
+	t.enumFirstValue = true
 }
 
 // translateFunctionDeclaration translates a function declaration
