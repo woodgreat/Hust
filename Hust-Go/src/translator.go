@@ -58,6 +58,7 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 	
 	// Track if we need to emit main function
 	hasMain := false
+	_ = hasMain // TODO: Use for main function detection
 	
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -311,5 +312,8 @@ func (t *Translator) mapType(hustType string) string {
 
 // getIndent returns the current indentation string
 func (t *Translator) getIndent() string {
+	if t.indentLevel <= 0 {
+		return ""
+	}
 	return strings.Repeat("\t", t.indentLevel)
 }

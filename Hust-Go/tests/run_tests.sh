@@ -3,7 +3,8 @@
 # Hust-Go Test Runner
 # Version: 0.1.0.20261127084900
 
-set -e
+# Don't exit on error, we handle errors manually
+# set -e
 
 # Colors for output
 RED='\033[0;31m'
@@ -20,7 +21,14 @@ SKIPPED=0
 # Build the core
 echo "=== Building Hust-Go Core ==="
 cd "$(dirname "$0")/.."
-go build -o hust_go src/main.go src/preprocessor.go src/translator.go
+
+# Use Go from user directory if not in PATH
+GO_BIN="${GO_BIN:-$HOME/go-sdk/go/bin/go}"
+if [ ! -f "$GO_BIN" ]; then
+    GO_BIN="go"
+fi
+
+$GO_BIN build -o hust_go src/main.go src/preprocessor.go src/translator.go
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build Hust-Go core${NC}"
     exit 1
@@ -113,7 +121,7 @@ run_group() {
 }
 
 # Main
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")"
 
 # Run test groups
 run_group "m1"

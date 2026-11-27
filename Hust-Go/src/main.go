@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 const (
@@ -19,21 +20,9 @@ func main() {
 
 	switch command {
 	case "transpile":
-		if len(os.Args) < 3 {
-			fmt.Fprintf(os.Stderr, "Error: transpile requires entry file\n")
-			os.Exit(2)
-		}
-		entry := os.Args[2]
-		fmt.Printf("Transpiling %s...\n", entry)
-		// TODO: Implement transpile
+		handleTranspile()
 	case "build":
-		if len(os.Args) < 3 {
-			fmt.Fprintf(os.Stderr, "Error: build requires entry file\n")
-			os.Exit(2)
-		}
-		entry := os.Args[2]
-		fmt.Printf("Building %s...\n", entry)
-		// TODO: Implement build
+		handleBuild()
 	case "info":
 		fmt.Printf(`{"protocol":1,"name":"go","language":"go","transpile":true,"build":true,"toolchain":true}`)
 	case "--version", "-V":
@@ -45,6 +34,118 @@ func main() {
 		printUsage()
 		os.Exit(2)
 	}
+}
+
+func handleTranspile() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "Error: transpile requires entry file\n")
+		os.Exit(2)
+	}
+	
+	entry := os.Args[2]
+	outDir := "."
+	
+	// Parse --out-dir
+	for i := 3; i < len(os.Args); i++ {
+		if os.Args[i] == "--out-dir" && i+1 < len(os.Args) {
+			outDir = os.Args[i+1]
+			i++
+		}
+	}
+	
+	// Read source file
+	source, err := os.ReadFile(entry)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot read entry file: %v\n", err)
+		os.Exit(2)
+	}
+	
+	// Transpile
+	translator := NewTranslator()
+	result := translator.Translate(string(source), filepath.Base(entry))
+	
+	if !result.Success {
+		for _, err := range result.Errors {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		}
+		os.Exit(4)
+	}
+	
+	// Write output
+	outputFile := filepath.Join(outDir, filepath.Base(entry[:len(entry)-5])+".go")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot create output directory: %v\n", err)
+		os.Exit(2)
+	}
+	
+	if err := os.WriteFile(outputFile, []byte(result.Code), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot write output file: %v\n", err)
+		os.Exit(2)
+	}
+	
+	fmt.Fprintf(os.Stderr, "Transpiled %s -> %s\n", entry, outputFile)
+}
+
+func handleBuild() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "Error: build requires entry file\n")
+		os.Exit(2)
+	}
+	
+	entry := os.Args[2]
+	outDir := "."
+	release := true
+	
+	// Parse flags
+	for i := 3; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--out-dir":
+			if i+1 < len(os.Args) {
+				outDir = os.Args[i+1]
+				i++
+			}
+		case "--debug":
+			release = false
+		case "--release":
+			release = true
+		}
+	}
+	
+	// First transpile
+	source, err := os.ReadFile(entry)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot read entry file: %v\n", err)
+		os.Exit(2)
+	}
+	
+	translator := NewTranslator()
+	result := translator.Translate(string(source), filepath.Base(entry))
+	
+	if !result.Success {
+		for _, err := range result.Errors {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		}
+		os.Exit(4)
+	}
+	
+	// Write transpiled file
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot create output directory: %v\n", err)
+		os.Exit(2)
+	}
+	
+	goFile := filepath.Join(outDir, "main.go")
+	if err := os.WriteFile(goFile, []byte(result.Code), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot write Go file: %v\n", err)
+		os.Exit(2)
+	}
+	
+	// Build with go
+	// TODO: Implement go build
+	fmt.Fprintf(os.Stderr, "Build not yet implemented\n")
+	os.Exit(5)
+	
+	_ = release // TODO: Use for build mode
 }
 
 func printUsage() {
