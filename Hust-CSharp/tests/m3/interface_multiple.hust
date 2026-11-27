@@ -9,7 +9,7 @@ interface Printable {
     public print();
 }
 
-class Document : Drawable, Printable {
+class Document implements Drawable, Printable {
     string title;
     
     public void draw() {

@@ -14,7 +14,7 @@ interface Serializable {
 }
 
 // 实现形状接口
-class Circle : Drawable {
+class Circle implements Drawable {
     float radius;
     
     public void draw() {
@@ -28,7 +28,7 @@ class Circle : Drawable {
     }
 }
 
-class DataRecord : Serializable {
+class DataRecord implements Serializable {
     string id;
     string content;
     

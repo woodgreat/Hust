@@ -216,27 +216,63 @@ public class Translator
     private void TranslateClassDeclaration(string trimmed)
     {
         // class Foo { -> public class Foo {
-        // class Dog : Animal { -> public class Dog : Animal {
-        // class Circle : Shape { -> public class Circle : Shape {
-        var match = Regex.Match(trimmed, @"class\s+(\w+)(?:\s*:\s*([\w,\s]+))?");
-        if (match.Success)
+        // class Dog extends Animal { -> public class Dog : Animal {
+        // class Circle implements Shape { -> public class Circle : Shape {
+        // class Dog extends Animal implements Drawable { -> public class Dog : Animal, Drawable {
+        
+        // First try: class Name extends Base implements Interface1, Interface2
+        var matchExtImpl = Regex.Match(trimmed, @"class\s+(\w+)\s+extends\s+(\w+)\s+implements\s+([\w,\s]+)");
+        if (matchExtImpl.Success)
         {
-            var className = match.Groups[1].Value;
-            var baseList = match.Groups[2].Success ? match.Groups[2].Value : null;
-            
-            if (baseList != null)
-            {
-                // Split multiple interfaces/base classes
-                var bases = baseList.Split(',').Select(b => b.Trim()).ToArray();
-                _output.AppendLine($"{INDENT_1}public class {className} : {string.Join(", ", bases)}");
-            }
-            else
-            {
-                _output.AppendLine($"{INDENT_1}public class {className}");
-            }
+            var className = matchExtImpl.Groups[1].Value;
+            var baseClass = matchExtImpl.Groups[2].Value;
+            var interfaces = matchExtImpl.Groups[3].Value;
+            var bases = new List<string> { baseClass };
+            bases.AddRange(interfaces.Split(',').Select(i => i.Trim()));
+            _output.AppendLine($"{INDENT_1}public class {className} : {string.Join(", ", bases)}");
             _output.AppendLine($"{INDENT_1}{{");
             _inClass = true;
             _braceDepth++;
+            return;
+        }
+        
+        // Second try: class Name implements Interface1, Interface2
+        var matchImpl = Regex.Match(trimmed, @"class\s+(\w+)\s+implements\s+([\w,\s]+)");
+        if (matchImpl.Success)
+        {
+            var className = matchImpl.Groups[1].Value;
+            var interfaces = matchImpl.Groups[2].Value;
+            var bases = interfaces.Split(',').Select(i => i.Trim()).ToArray();
+            _output.AppendLine($"{INDENT_1}public class {className} : {string.Join(", ", bases)}");
+            _output.AppendLine($"{INDENT_1}{{");
+            _inClass = true;
+            _braceDepth++;
+            return;
+        }
+        
+        // Third try: class Name extends Base
+        var matchExt = Regex.Match(trimmed, @"class\s+(\w+)\s+extends\s+(\w+)");
+        if (matchExt.Success)
+        {
+            var className = matchExt.Groups[1].Value;
+            var baseClass = matchExt.Groups[2].Value;
+            _output.AppendLine($"{INDENT_1}public class {className} : {baseClass}");
+            _output.AppendLine($"{INDENT_1}{{");
+            _inClass = true;
+            _braceDepth++;
+            return;
+        }
+        
+        // Fourth try: class Name (no inheritance)
+        var matchSimple = Regex.Match(trimmed, @"class\s+(\w+)");
+        if (matchSimple.Success)
+        {
+            var className = matchSimple.Groups[1].Value;
+            _output.AppendLine($"{INDENT_1}public class {className}");
+            _output.AppendLine($"{INDENT_1}{{");
+            _inClass = true;
+            _braceDepth++;
+            return;
         }
     }
 

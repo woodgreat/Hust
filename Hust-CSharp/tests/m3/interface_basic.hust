@@ -7,7 +7,7 @@ interface Shape {
     public object perimeter();
 }
 
-class Circle : Shape {
+class Circle implements Shape {
     float radius;
     
     public object area() {
@@ -19,7 +19,7 @@ class Circle : Shape {
     }
 }
 
-class Rectangle : Shape {
+class Rectangle implements Shape {
     float width;
     float height;
     
