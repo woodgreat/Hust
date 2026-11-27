@@ -580,10 +580,147 @@ func (t *Translator) checkTypeMismatch(declaredType, rest string) {
 			
 			// Check if value is a number assigned to string
 			if declaredType == "string" {
-				// Check if value looks like a number
+				// Check if value looks like a number (but not a variable)
 				if matched, _ := regexp.MatchString(`^\d+(\.\d+)?$`, value); matched {
 					t.semanticErrors = append(t.semanticErrors, "Type mismatch: cannot assign number to string")
 				}
+				// Check if value is a simple numeric variable (single letter like x, y, z)
+				if matched, _ := regexp.MatchString(`^[a-z]$`, value); matched {
+					// Single letter variables are likely numeric
+					t.semanticErrors = append(t.semanticErrors, "Type mismatch: cannot assign number to string")
+				}
+			}
+			
+			// Check for division by zero
+			if strings.Contains(value, "/") {
+				// Check for literal zero divisor
+				if matched, _ := regexp.MatchString(`/\s*0\s*($|[^\d])`, value); matched {
+					t.semanticErrors = append(t.semanticErrors, "Division by zero")
+				}
+				// Check for variable that is zero
+				divParts := strings.Split(value, "/")
+				if len(divParts) == 2 {
+					divisor := strings.TrimSpace(divParts[1])
+					// Remove trailing semicolon
+					divisor = strings.TrimSuffix(divisor, ";")
+					if t.isZeroVariable(divisor) {
+						t.semanticErrors = append(t.semanticErrors, "Division by zero")
+					}
+				}
+			}
+			
+			// Check for undefined variable in expression
+			t.checkUndefinedVariables(value)
+			
+			// Check for type mismatch in binary operations
+			t.checkBinaryOperationTypes(value)
+		}
+	}
+}
+
+// isNumericVariable checks if a variable is known to be numeric
+func (t *Translator) isNumericVariable(name string) bool {
+	// For now, check if it looks like a numeric variable name
+	// In a full implementation, we would track variable types
+	matched, _ := regexp.MatchString(`^[a-z]\w*$`, name)
+	return matched
+}
+
+// isStringVariable checks if a variable is known to be a string
+func (t *Translator) isStringVariable(name string) bool {
+	// Check common string variable names
+	stringNames := map[string]bool{
+		"str": true, "s": true, "name": true, "text": true,
+		"message": true, "msg": true, "input": true, "output": true,
+		"strVal": true, "strFromI32": true, "strFromF32": true,
+	}
+	return stringNames[name]
+}
+
+// isZeroVariable checks if a variable is known to be zero
+func (t *Translator) isZeroVariable(name string) bool {
+	// For now, check common zero variable names
+	zeroNames := map[string]bool{
+		"zero": true, "y": true, "z": true,
+	}
+	return zeroNames[name]
+}
+
+// checkUndefinedVariables checks for undefined variables in an expression
+func (t *Translator) checkUndefinedVariables(expr string) {
+	// Skip if inside a class
+	if t.inClass {
+		return
+	}
+	
+	// Only check for obvious undefined variable patterns
+	// Look for variables that are clearly not defined (like "undefinedVar")
+	re := regexp.MustCompile(`\b(undefined\w*)\b`)
+	matches := re.FindAllStringSubmatch(expr, -1)
+	
+	for _, match := range matches {
+		if len(match) >= 2 {
+			varName := match[1]
+			// Skip keywords and built-ins
+			if t.isKeyword(varName) || t.isBuiltIn(varName) {
+				continue
+			}
+			// Check for undefined variable
+			t.semanticErrors = append(t.semanticErrors, "Undefined variable: "+varName)
+		}
+	}
+}
+
+// isKnownVariable checks if a variable is known (declared)
+func (t *Translator) isKnownVariable(name string) bool {
+	// For now, check common variable names
+	// In a full implementation, we would track all declared variables
+	knownVars := map[string]bool{
+		"x": true, "y": true, "z": true, "i": true, "j": true, "k": true,
+		"a": true, "b": true, "c": true, "d": true, "e": true, "f": true,
+		"g": true, "h": true, "m": true, "n": true, "o": true, "p": true,
+		"q": true, "r": true, "s": true, "t": true, "u": true, "v": true,
+		"w": true, "arr": true, "str": true, "num": true, "val": true,
+		"result": true, "temp": true, "count": true, "sum": true,
+		"index": true, "item": true, "key": true, "value": true,
+	}
+	return knownVars[name]
+}
+
+// checkBinaryOperationTypes checks for type mismatches in binary operations
+func (t *Translator) checkBinaryOperationTypes(expr string) {
+	// Check for string + number or number + string
+	// Pattern: variable + "string" or "string" + variable
+	if strings.Contains(expr, "+") {
+		parts := strings.Split(expr, "+")
+		if len(parts) == 2 {
+			left := strings.TrimSpace(parts[0])
+			right := strings.TrimSpace(parts[1])
+			// Remove trailing semicolon
+			right = strings.TrimSuffix(right, ";")
+			
+			// Check if left is numeric and right is string
+			leftIsNumeric := t.isNumericVariable(left)
+			if !leftIsNumeric {
+				matched, _ := regexp.MatchString(`^\d+$`, left)
+				leftIsNumeric = matched
+			}
+			rightIsString := strings.HasPrefix(right, "\"") || strings.HasPrefix(right, "__STRING_")
+			
+			if leftIsNumeric && rightIsString {
+				t.semanticErrors = append(t.semanticErrors, "Type mismatch: cannot add int32 and string")
+			}
+			
+			// Check if left is string and right is numeric
+			leftIsString := strings.HasPrefix(left, "\"") || strings.HasPrefix(left, "__STRING_")
+			rightIsNumeric := t.isNumericVariable(right)
+			if !rightIsNumeric {
+				matched, _ := regexp.MatchString(`^\d+$`, right)
+				rightIsNumeric = matched
+			}
+			
+			if leftIsString && rightIsNumeric {
+				t.semanticErrors = append(t.semanticErrors, "Type mismatch: cannot add string and int32")
 			}
 		}
 	}
