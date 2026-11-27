@@ -44,6 +44,54 @@ type TranslationResult struct {
 	Errors  []string
 }
 
+// preScanFunctionDefinitions scans all lines and registers function definitions
+// This enables forward declaration (functions can be called before they are defined)
+func (t *Translator) preScanFunctionDefinitions(lines []string) {
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		
+		// Check for function definition
+		if isFunctionDefinition(trimmed) {
+			// Extract function name
+			funcName := extractFunctionName(trimmed)
+			if funcName != "" {
+				t.definedFunctions[funcName] = true
+			}
+		}
+	}
+}
+
+// extractFunctionName extracts the function name from a function definition line
+func extractFunctionName(line string) string {
+	// Match patterns like:
+	// void main() {
+	// i32 add(i32 a, i32 b) {
+	// public void method() {
+	
+	// Remove access modifiers
+	line = strings.TrimPrefix(line, "public ")
+	line = strings.TrimPrefix(line, "private ")
+	line = strings.TrimPrefix(line, "protected ")
+	line = strings.TrimPrefix(line, "static ")
+	
+	// Find the opening parenthesis
+	parenIdx := strings.Index(line, "(")
+	if parenIdx == -1 {
+		return ""
+	}
+	
+	// Extract the part before the parenthesis
+	beforeParen := strings.TrimSpace(line[:parenIdx])
+	
+	// The function name is the last word before the parenthesis
+	parts := strings.Fields(beforeParen)
+	if len(parts) == 0 {
+		return ""
+	}
+	
+	return parts[len(parts)-1]
+}
+
 // Translate converts Hust source to Go
 func (t *Translator) Translate(source string, fileName string) TranslationResult {
 	result := TranslationResult{
@@ -64,8 +112,11 @@ func (t *Translator) Translate(source string, fileName string) TranslationResult
 		return result
 	}
 	
-	// Step 2: Translate line by line
+	// Step 2: Pre-scan function definitions for forward declaration
 	lines := strings.Split(processed, "\n")
+	t.preScanFunctionDefinitions(lines)
+	
+	// Step 3: Translate line by line
 	
 	// Emit header (includes package and import)
 	t.emitHeader()

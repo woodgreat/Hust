@@ -34,6 +34,9 @@ func (p *Preprocessor) Process(source string) (string, DialectType, error) {
 	// Step 4: Normalize blocks (brace matching, indent standardization)
 	protected = p.normalizeBlocks(protected)
 	
+	// Step 5: Move function definitions to top (forward declaration)
+	protected = p.moveFunctionsToTop(protected)
+	
 	return protected, dialect, nil
 }
 
@@ -148,4 +151,96 @@ func (p *Preprocessor) Restore(source string) string {
 	}
 	
 	return source
+}
+
+// moveFunctionsToTop moves function definitions to the top of the file
+// This enables forward declaration (functions can be called before they are defined)
+func (p *Preprocessor) moveFunctionsToTop(source string) string {
+	lines := strings.Split(source, "\n")
+	
+	// Collect function definitions and other code separately
+	var functions []string
+	var otherCode []string
+	var currentFunction []string
+	inFunction := false
+	braceCount := 0
+	
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		
+		// Check if this is a function definition
+		if !inFunction && isFunctionDefinition(trimmed) {
+			inFunction = true
+			currentFunction = []string{line}
+			braceCount = strings.Count(line, "{") - strings.Count(line, "}")
+			continue
+		}
+		
+		if inFunction {
+			currentFunction = append(currentFunction, line)
+			braceCount += strings.Count(line, "{") - strings.Count(line, "}")
+			
+			// Function ends when brace count returns to 0
+			if braceCount == 0 {
+				inFunction = false
+				functions = append(functions, strings.Join(currentFunction, "\n"))
+				currentFunction = nil
+			}
+			continue
+		}
+		
+		// Not in a function, add to other code
+		otherCode = append(otherCode, line)
+	}
+	
+	// If we were still in a function at the end, add it
+	if inFunction && len(currentFunction) > 0 {
+		functions = append(functions, strings.Join(currentFunction, "\n"))
+	}
+	
+	// Reconstruct: functions first, then other code
+	var result []string
+	result = append(result, functions...)
+	result = append(result, otherCode...)
+	
+	return strings.Join(result, "\n")
+}
+
+// isFunctionDefinition checks if a line is a function definition
+func isFunctionDefinition(line string) bool {
+	// Match patterns like:
+	// void main() {
+	// i32 add(i32 a, i32 b) {
+	// String greet(String name) {
+	// public void method() { (class method)
+	// private i32 helper() { (class method)
+	
+	// Skip class/enum declarations
+	if strings.HasPrefix(line, "class ") || strings.HasPrefix(line, "enum ") {
+		return false
+	}
+	
+	// Skip control flow statements
+	if strings.HasPrefix(line, "if ") || strings.HasPrefix(line, "for ") ||
+		strings.HasPrefix(line, "while ") || strings.HasPrefix(line, "do ") ||
+		strings.HasPrefix(line, "switch ") || strings.HasPrefix(line, "} else") {
+		return false
+	}
+	
+	// Check for function definition pattern: returnType name(params) {
+	// Must contain ( and ) and end with {
+	if !strings.Contains(line, "(") || !strings.Contains(line, ")") {
+		return false
+	}
+	
+	// Must end with { (possibly with whitespace)
+	if !strings.HasSuffix(strings.TrimSpace(line), "{") {
+		return false
+	}
+	
+	// Check for return type at the beginning
+	// Common return types: void, i32, i64, f32, f64, bool, String, etc.
+	returnTypePattern := regexp.MustCompile(`^(public\s+|private\s+|protected\s+)?(static\s+)?(void|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|[A-Z][a-zA-Z0-9]*)\s+\w+\s*\(`)
+	
+	return returnTypePattern.MatchString(line)
 }
