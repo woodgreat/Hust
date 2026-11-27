@@ -1,0 +1,62 @@
+use GO.fmt.*;
+
+class MathUtils {
+    public i32 abs(i32 n) {
+        if (n < 0) {
+            return -n;
+        }
+        return n;
+    }
+    
+    public i32 max(i32 a, i32 b) {
+        if (a > b) {
+            return a;
+        }
+        return b;
+    }
+    
+    public i32 min(i32 a, i32 b) {
+        if (a < b) {
+            return a;
+        }
+        return b;
+    }
+    
+    public i32 power(i32 base, i32 exp) {
+        i32 result = 1;
+        for (i32 i = 0; i < exp; i++) {
+            result = result * base;
+        }
+        return result;
+    }
+    
+    public i32 sqrt(i32 n) {
+        if (n <= 0) {
+            return 0;
+        }
+        i32 x = n;
+        i32 y = (x + 1) / 2;
+        while (y < x) {
+            x = y;
+            y = (x + n / x) / 2;
+        }
+        return x;
+    }
+}
+
+void main() {
+    MathUtils math = new MathUtils();
+    
+    fmt.Println(math.abs(-5));
+    fmt.Println(math.abs(5));
+    
+    fmt.Println(math.max(10, 20));
+    fmt.Println(math.min(10, 20));
+    
+    fmt.Println(math.power(2, 10));
+    fmt.Println(math.power(3, 4));
+    
+    fmt.Println(math.sqrt(16));
+    fmt.Println(math.sqrt(25));
+    fmt.Println(math.sqrt(100));
+}

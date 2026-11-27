@@ -1,0 +1,89 @@
+use GO.fmt.*;
+
+enum Direction {
+    North,
+    South,
+    East,
+    West
+}
+
+class Robot {
+    i32 x;
+    i32 y;
+    Direction direction;
+    
+    public Robot() {
+        this.x = 0;
+        this.y = 0;
+        this.direction = Direction.North;
+    }
+    
+    public void move() {
+        if (this.direction == Direction.North) {
+            this.y = this.y + 1;
+        } else if (this.direction == Direction.South) {
+            this.y = this.y - 1;
+        } else if (this.direction == Direction.East) {
+            this.x = this.x + 1;
+        } else {
+            this.x = this.x - 1;
+        }
+    }
+    
+    public void turnLeft() {
+        if (this.direction == Direction.North) {
+            this.direction = Direction.West;
+        } else if (this.direction == Direction.West) {
+            this.direction = Direction.South;
+        } else if (this.direction == Direction.South) {
+            this.direction = Direction.East;
+        } else {
+            this.direction = Direction.North;
+        }
+    }
+    
+    public void turnRight() {
+        if (this.direction == Direction.North) {
+            this.direction = Direction.East;
+        } else if (this.direction == Direction.East) {
+            this.direction = Direction.South;
+        } else if (this.direction == Direction.South) {
+            this.direction = Direction.West;
+        } else {
+            this.direction = Direction.North;
+        }
+    }
+    
+    public void printPosition() {
+        fmt.Println("Position: (" + this.x + ", " + this.y + ")");
+        fmt.Println("Direction: " + this.getDirectionName());
+    }
+    
+    public String getDirectionName() {
+        if (this.direction == Direction.North) return "North";
+        if (this.direction == Direction.South) return "South";
+        if (this.direction == Direction.East) return "East";
+        return "West";
+    }
+}
+
+void main() {
+    Robot robot = new Robot();
+    
+    robot.printPosition();
+    
+    robot.move();
+    robot.printPosition();
+    
+    robot.turnRight();
+    robot.move();
+    robot.printPosition();
+    
+    robot.turnRight();
+    robot.move();
+    robot.printPosition();
+    
+    robot.turnLeft();
+    robot.move();
+    robot.printPosition();
+}

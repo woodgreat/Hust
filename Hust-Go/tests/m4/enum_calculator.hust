@@ -1,0 +1,34 @@
+use GO.fmt.*;
+
+enum Operator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide
+}
+
+f32 calculate(f32 a, f32 b, Operator op) {
+    if (op == Operator.Add) {
+        return a + b;
+    } else if (op == Operator.Subtract) {
+        return a - b;
+    } else if (op == Operator.Multiply) {
+        return a * b;
+    } else if (op == Operator.Divide) {
+        if (b != 0) {
+            return a / b;
+        } else {
+            fmt.Println("Division by zero!");
+            return 0;
+        }
+    }
+    return 0;
+}
+
+void main() {
+    fmt.Println(calculate(10.0, 5.0, Operator.Add));
+    fmt.Println(calculate(10.0, 5.0, Operator.Subtract));
+    fmt.Println(calculate(10.0, 5.0, Operator.Multiply));
+    fmt.Println(calculate(10.0, 5.0, Operator.Divide));
+    fmt.Println(calculate(10.0, 0.0, Operator.Divide));
+}

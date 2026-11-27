@@ -1,0 +1,31 @@
+use GO.fmt.*;
+
+void main() {
+    // Array sliding window
+    i32[] numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    i32 windowSize = 3;
+    
+    fmt.Println("Sliding window sums:");
+    for (i32 i = 0; i <= numbers.len() - windowSize; i++) {
+        i32 sum = 0;
+        for (i32 j = 0; j < windowSize; j++) {
+            sum = sum + numbers[i + j];
+        }
+        fmt.Println("Window " + i + ": " + sum);
+    }
+    
+    // Find maximum sum window
+    i32 maxSum = 0;
+    i32 maxStart = 0;
+    for (i32 i = 0; i <= numbers.len() - windowSize; i++) {
+        i32 sum = 0;
+        for (i32 j = 0; j < windowSize; j++) {
+            sum = sum + numbers[i + j];
+        }
+        if (sum > maxSum) {
+            maxSum = sum;
+            maxStart = i;
+        }
+    }
+    fmt.Println("Max sum: " + maxSum + " at index " + maxStart);
+}

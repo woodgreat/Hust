@@ -1,0 +1,43 @@
+use GO.fmt.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+    Yellow,
+    Purple
+}
+
+enum Direction {
+    North,
+    South,
+    East,
+    West
+}
+
+void printColor(Color c) {
+    if (c == Color.Red) {
+        fmt.Println("Red");
+    } else if (c == Color.Green) {
+        fmt.Println("Green");
+    } else if (c == Color.Blue) {
+        fmt.Println("Blue");
+    } else if (c == Color.Yellow) {
+        fmt.Println("Yellow");
+    } else {
+        fmt.Println("Purple");
+    }
+}
+
+void main() {
+    Color c1 = Color.Red;
+    Color c2 = Color.Blue;
+    
+    printColor(c1);
+    printColor(c2);
+    
+    Direction d = Direction.North;
+    if (d == Direction.North) {
+        fmt.Println("Going North");
+    }
+}

@@ -1,0 +1,79 @@
+use GO.fmt.*;
+
+void main() {
+    // Array of arrays (matrix operations)
+    i32[][] matrix = {
+        {1, 2, 3},
+        {4, 5, 6},
+        {7, 8, 9}
+    };
+    
+    // Print matrix
+    fmt.Println("Matrix:");
+    for (i32 i = 0; i < matrix.len(); i++) {
+        for (i32 j = 0; j < matrix[i].len(); j++) {
+            fmt.Print(matrix[i][j] + " ");
+        }
+        fmt.Println("");
+    }
+    
+    // Transpose
+    i32[][] transposed = {};
+    for (i32 i = 0; i < matrix[0].len(); i++) {
+        i32[] row = {};
+        for (i32 j = 0; j < matrix.len(); j++) {
+            row.push(matrix[j][i]);
+        }
+        transposed.push(row);
+    }
+    
+    fmt.Println("Transposed:");
+    for (i32 i = 0; i < transposed.len(); i++) {
+        for (i32 j = 0; j < transposed[i].len(); j++) {
+            fmt.Print(transposed[i][j] + " ");
+        }
+        fmt.Println("");
+    }
+    
+    // Diagonal sum
+    i32 diagSum = 0;
+    for (i32 i = 0; i < matrix.len(); i++) {
+        diagSum = diagSum + matrix[i][i];
+    }
+    fmt.Println("Diagonal sum: " + diagSum);
+    
+    // Anti-diagonal sum
+    i32 antiDiagSum = 0;
+    for (i32 i = 0; i < matrix.len(); i++) {
+        antiDiagSum = antiDiagSum + matrix[i][matrix.len() - 1 - i];
+    }
+    fmt.Println("Anti-diagonal sum: " + antiDiagSum);
+    
+    // Matrix multiplication
+    i32[][] identity = {
+        {1, 0, 0},
+        {0, 1, 0},
+        {0, 0, 1}
+    };
+    
+    i32[][] result = {};
+    for (i32 i = 0; i < matrix.len(); i++) {
+        i32[] row = {};
+        for (i32 j = 0; j < identity[0].len(); j++) {
+            i32 sum = 0;
+            for (i32 k = 0; k < matrix[0].len(); k++) {
+                sum = sum + matrix[i][k] * identity[k][j];
+            }
+            row.push(sum);
+        }
+        result.push(row);
+    }
+    
+    fmt.Println("Matrix * Identity:");
+    for (i32 i = 0; i < result.len(); i++) {
+        for (i32 j = 0; j < result[i].len(); j++) {
+            fmt.Print(result[i][j] + " ");
+        }
+        fmt.Println("");
+    }
+}

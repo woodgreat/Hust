@@ -1,0 +1,138 @@
+use GO.fmt.*;
+
+class Vehicle {
+    String brand;
+    String model;
+    i32 year;
+    f32 price;
+    
+    public Vehicle(String b, String m, i32 y, f32 p) {
+        this.brand = b;
+        this.model = m;
+        this.year = y;
+        this.price = p;
+    }
+    
+    public void start() {
+        fmt.Println(this.brand + " " + this.model + " is starting");
+    }
+    
+    public void stop() {
+        fmt.Println(this.brand + " " + this.model + " is stopping");
+    }
+    
+    public void printInfo() {
+        fmt.Println("Brand: " + this.brand);
+        fmt.Println("Model: " + this.model);
+        fmt.Println("Year: " + this.year);
+        fmt.Println("Price: $" + this.price);
+    }
+}
+
+class Car extends Vehicle {
+    i32 doors;
+    String fuelType;
+    
+    public Car(String b, String m, i32 y, f32 p, i32 d, String f) {
+        this.brand = b;
+        this.model = m;
+        this.year = y;
+        this.price = p;
+        this.doors = d;
+        this.fuelType = f;
+    }
+    
+    public void honk() {
+        fmt.Println(this.brand + " " + this.model + " is honking: Beep! Beep!");
+    }
+    
+    public void printInfo() {
+        fmt.Println("Car Info:");
+        fmt.Println("Brand: " + this.brand);
+        fmt.Println("Model: " + this.model);
+        fmt.Println("Year: " + this.year);
+        fmt.Println("Price: $" + this.price);
+        fmt.Println("Doors: " + this.doors);
+        fmt.Println("Fuel: " + this.fuelType);
+    }
+}
+
+class Motorcycle extends Vehicle {
+    bool hasSidecar;
+    
+    public Motorcycle(String b, String m, i32 y, f32 p, bool s) {
+        this.brand = b;
+        this.model = m;
+        this.year = y;
+        this.price = p;
+        this.hasSidecar = s;
+    }
+    
+    public void wheelie() {
+        fmt.Println(this.brand + " " + this.model + " is doing a wheelie!");
+    }
+    
+    public void printInfo() {
+        fmt.Println("Motorcycle Info:");
+        fmt.Println("Brand: " + this.brand);
+        fmt.Println("Model: " + this.model);
+        fmt.Println("Year: " + this.year);
+        fmt.Println("Price: $" + this.price);
+        fmt.Println("Has Sidecar: " + this.hasSidecar);
+    }
+}
+
+class Truck extends Vehicle {
+    f32 cargoCapacity;
+    
+    public Truck(String b, String m, i32 y, f32 p, f32 c) {
+        this.brand = b;
+        this.model = m;
+        this.year = y;
+        this.price = p;
+        this.cargoCapacity = c;
+    }
+    
+    public void loadCargo(f32 weight) {
+        if (weight <= this.cargoCapacity) {
+            fmt.Println("Loading " + weight + " tons of cargo");
+        } else {
+            fmt.Println("Cargo too heavy! Max capacity: " + this.cargoCapacity + " tons");
+        }
+    }
+    
+    public void printInfo() {
+        fmt.Println("Truck Info:");
+        fmt.Println("Brand: " + this.brand);
+        fmt.Println("Model: " + this.model);
+        fmt.Println("Year: " + this.year);
+        fmt.Println("Price: $" + this.price);
+        fmt.Println("Cargo Capacity: " + this.cargoCapacity + " tons");
+    }
+}
+
+void main() {
+    Car car = new Car("Toyota", "Camry", 2023, 25000.0, 4, "Gasoline");
+    Motorcycle bike = new Motorcycle("Harley-Davidson", "Iron 883", 2022, 15000.0, false);
+    Truck truck = new Truck("Ford", "F-150", 2023, 45000.0, 2.5);
+    
+    car.start();
+    car.honk();
+    car.printInfo();
+    car.stop();
+    
+    fmt.Println("---");
+    
+    bike.start();
+    bike.wheelie();
+    bike.printInfo();
+    bike.stop();
+    
+    fmt.Println("---");
+    
+    truck.start();
+    truck.loadCargo(1.5);
+    truck.loadCargo(3.0);
+    truck.printInfo();
+    truck.stop();
+}

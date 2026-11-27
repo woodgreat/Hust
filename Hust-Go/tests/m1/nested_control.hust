@@ -1,0 +1,22 @@
+use GO.fmt.*;
+
+void main() {
+    // Nested if
+    i32 x = 10;
+    if (x > 5) {
+        if (x > 8) {
+            fmt.Println("x > 8");
+        } else {
+            fmt.Println("x > 5 but <= 8");
+        }
+    } else {
+        fmt.Println("x <= 5");
+    }
+    
+    // Nested loops
+    for (i32 i = 0; i < 3; i++) {
+        for (i32 j = 0; j < 3; j++) {
+            fmt.Println(i * 3 + j);
+        }
+    }
+}

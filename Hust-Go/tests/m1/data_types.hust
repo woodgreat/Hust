@@ -1,0 +1,36 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all data types
+    i8 i8Val = 127;
+    i16 i16Val = 32767;
+    i32 i32Val = 2147483647;
+    i64 i64Val = 9223372036854775807;
+    
+    u8 u8Val = 255;
+    u16 u16Val = 65535;
+    u32 u32Val = 4294967295;
+    u64 u64Val = 18446744073709551615;
+    
+    f32 f32Val = 3.402823e38;
+    f64 f64Val = 1.7976931348623157e308;
+    
+    bool boolVal = true;
+    String strVal = "Hello, World!";
+    
+    fmt.Println(i8Val);
+    fmt.Println(i16Val);
+    fmt.Println(i32Val);
+    fmt.Println(i64Val);
+    
+    fmt.Println(u8Val);
+    fmt.Println(u16Val);
+    fmt.Println(u32Val);
+    fmt.Println(u64Val);
+    
+    fmt.Println(f32Val);
+    fmt.Println(f64Val);
+    
+    fmt.Println(boolVal);
+    fmt.Println(strVal);
+}

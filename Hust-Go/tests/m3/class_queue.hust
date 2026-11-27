@@ -1,0 +1,56 @@
+use GO.fmt.*;
+
+class Queue {
+    i32[] items;
+    
+    public Queue() {
+        this.items = {};
+    }
+    
+    public void enqueue(i32 item) {
+        this.items.push(item);
+    }
+    
+    public i32 dequeue() {
+        if (this.items.len() > 0) {
+            i32 item = this.items[0];
+            this.items = this.items[1:];
+            return item;
+        }
+        return -1;
+    }
+    
+    public i32 front() {
+        if (this.items.len() > 0) {
+            return this.items[0];
+        }
+        return -1;
+    }
+    
+    public bool isEmpty() {
+        return this.items.len() == 0;
+    }
+    
+    public i32 size() {
+        return this.items.len();
+    }
+}
+
+void main() {
+    Queue queue = new Queue();
+    
+    fmt.Println(queue.isEmpty());
+    
+    queue.enqueue(1);
+    queue.enqueue(2);
+    queue.enqueue(3);
+    
+    fmt.Println(queue.size());
+    fmt.Println(queue.front());
+    
+    fmt.Println(queue.dequeue());
+    fmt.Println(queue.dequeue());
+    fmt.Println(queue.dequeue());
+    
+    fmt.Println(queue.isEmpty());
+}

@@ -1,0 +1,45 @@
+use GO.fmt.*;
+
+void main() {
+    // Array intersection
+    i32[] arr1 = {1, 2, 3, 4, 5};
+    i32[] arr2 = {4, 5, 6, 7, 8};
+    
+    i32[] intersection = {};
+    for (i32 i = 0; i < arr1.len(); i++) {
+        for (i32 j = 0; j < arr2.len(); j++) {
+            if (arr1[i] == arr2[j]) {
+                intersection.push(arr1[i]);
+                break;
+            }
+        }
+    }
+    
+    fmt.Println("Intersection:");
+    for (i32 i = 0; i < intersection.len(); i++) {
+        fmt.Println(intersection[i]);
+    }
+    
+    // Array union
+    i32[] union = {};
+    for (i32 i = 0; i < arr1.len(); i++) {
+        union.push(arr1[i]);
+    }
+    for (i32 i = 0; i < arr2.len(); i++) {
+        bool found = false;
+        for (i32 j = 0; j < union.len(); j++) {
+            if (arr2[i] == union[j]) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            union.push(arr2[i]);
+        }
+    }
+    
+    fmt.Println("Union:");
+    for (i32 i = 0; i < union.len(); i++) {
+        fmt.Println(union[i]);
+    }
+}

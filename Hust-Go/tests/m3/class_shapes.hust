@@ -1,0 +1,113 @@
+use GO.fmt.*;
+
+class Shape {
+    String name;
+    
+    public Shape(String n) {
+        this.name = n;
+    }
+    
+    public f32 getArea() {
+        return 0.0;
+    }
+    
+    public f32 getPerimeter() {
+        return 0.0;
+    }
+    
+    public void printInfo() {
+        fmt.Println("Shape: " + this.name);
+        fmt.Println("Area: " + this.getArea());
+        fmt.Println("Perimeter: " + this.getPerimeter());
+    }
+}
+
+class Circle extends Shape {
+    f32 radius;
+    
+    public Circle(f32 r) {
+        this.name = "Circle";
+        this.radius = r;
+    }
+    
+    public f32 getArea() {
+        return 3.14159 * this.radius * this.radius;
+    }
+    
+    public f32 getPerimeter() {
+        return 2 * 3.14159 * this.radius;
+    }
+}
+
+class Rectangle extends Shape {
+    f32 width;
+    f32 height;
+    
+    public Rectangle(f32 w, f32 h) {
+        this.name = "Rectangle";
+        this.width = w;
+        this.height = h;
+    }
+    
+    public f32 getArea() {
+        return this.width * this.height;
+    }
+    
+    public f32 getPerimeter() {
+        return 2 * (this.width + this.height);
+    }
+}
+
+class Triangle extends Shape {
+    f32 base;
+    f32 height;
+    f32 side1;
+    f32 side2;
+    f32 side3;
+    
+    public Triangle(f32 b, f32 h, f32 s1, f32 s2, f32 s3) {
+        this.name = "Triangle";
+        this.base = b;
+        this.height = h;
+        this.side1 = s1;
+        this.side2 = s2;
+        this.side3 = s3;
+    }
+    
+    public f32 getArea() {
+        return 0.5 * this.base * this.height;
+    }
+    
+    public f32 getPerimeter() {
+        return this.side1 + this.side2 + this.side3;
+    }
+}
+
+class Square extends Rectangle {
+    public Square(f32 side) {
+        this.name = "Square";
+        this.width = side;
+        this.height = side;
+    }
+}
+
+void main() {
+    Shape[] shapes = {
+        new Circle(5.0),
+        new Rectangle(4.0, 6.0),
+        new Triangle(3.0, 4.0, 3.0, 4.0, 5.0),
+        new Square(5.0)
+    };
+    
+    for (i32 i = 0; i < shapes.len(); i++) {
+        shapes[i].printInfo();
+        fmt.Println("---");
+    }
+    
+    // Calculate total area
+    f32 totalArea = 0.0;
+    for (i32 i = 0; i < shapes.len(); i++) {
+        totalArea = totalArea + shapes[i].getArea();
+    }
+    fmt.Println("Total Area: " + totalArea);
+}

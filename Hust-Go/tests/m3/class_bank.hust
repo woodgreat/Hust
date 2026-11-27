@@ -1,0 +1,50 @@
+use GO.fmt.*;
+
+class BankAccount {
+    String accountNumber;
+    f32 balance;
+    
+    public BankAccount(String accNum, f32 initialBalance) {
+        this.accountNumber = accNum;
+        this.balance = initialBalance;
+    }
+    
+    public void deposit(f32 amount) {
+        if (amount > 0) {
+            this.balance = this.balance + amount;
+            fmt.Println("Deposited: " + amount);
+        }
+    }
+    
+    public void withdraw(f32 amount) {
+        if (amount > 0 && amount <= this.balance) {
+            this.balance = this.balance - amount;
+            fmt.Println("Withdrew: " + amount);
+        } else {
+            fmt.Println("Insufficient funds");
+        }
+    }
+    
+    public f32 getBalance() {
+        return this.balance;
+    }
+    
+    public void printStatement() {
+        fmt.Println("Account: " + this.accountNumber);
+        fmt.Println("Balance: " + this.balance);
+    }
+}
+
+void main() {
+    BankAccount account = new BankAccount("123456", 1000.0);
+    account.printStatement();
+    
+    account.deposit(500.0);
+    account.printStatement();
+    
+    account.withdraw(200.0);
+    account.printStatement();
+    
+    account.withdraw(2000.0);
+    account.printStatement();
+}

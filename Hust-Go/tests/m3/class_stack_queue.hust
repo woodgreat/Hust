@@ -1,0 +1,117 @@
+use GO.fmt.*;
+
+class Stack {
+    i32[] items;
+    
+    public Stack() {
+        this.items = {};
+    }
+    
+    public void push(i32 item) {
+        this.items.push(item);
+    }
+    
+    public i32 pop() {
+        if (this.isEmpty()) {
+            return -1;
+        }
+        return this.items.pop();
+    }
+    
+    public i32 peek() {
+        if (this.isEmpty()) {
+            return -1;
+        }
+        return this.items[this.items.len() - 1];
+    }
+    
+    public bool isEmpty() {
+        return this.items.len() == 0;
+    }
+    
+    public i32 size() {
+        return this.items.len();
+    }
+    
+    public void print() {
+        fmt.Println("Stack (top to bottom):");
+        for (i32 i = this.items.len() - 1; i >= 0; i--) {
+            fmt.Println(this.items[i]);
+        }
+    }
+}
+
+class Queue {
+    i32[] items;
+    
+    public Queue() {
+        this.items = {};
+    }
+    
+    public void enqueue(i32 item) {
+        this.items.push(item);
+    }
+    
+    public i32 dequeue() {
+        if (this.isEmpty()) {
+            return -1;
+        }
+        i32 item = this.items[0];
+        this.items.removeAt(0);
+        return item;
+    }
+    
+    public i32 front() {
+        if (this.isEmpty()) {
+            return -1;
+        }
+        return this.items[0];
+    }
+    
+    public bool isEmpty() {
+        return this.items.len() == 0;
+    }
+    
+    public i32 size() {
+        return this.items.len();
+    }
+    
+    public void print() {
+        fmt.Println("Queue (front to back):");
+        for (i32 i = 0; i < this.items.len(); i++) {
+            fmt.Println(this.items[i]);
+        }
+    }
+}
+
+void main() {
+    fmt.Println("=== Stack Test ===");
+    Stack stack = new Stack();
+    
+    stack.push(1);
+    stack.push(2);
+    stack.push(3);
+    stack.push(4);
+    stack.push(5);
+    
+    stack.print();
+    fmt.Println("Peek: " + stack.peek());
+    fmt.Println("Pop: " + stack.pop());
+    fmt.Println("Pop: " + stack.pop());
+    stack.print();
+    
+    fmt.Println("=== Queue Test ===");
+    Queue queue = new Queue();
+    
+    queue.enqueue(1);
+    queue.enqueue(2);
+    queue.enqueue(3);
+    queue.enqueue(4);
+    queue.enqueue(5);
+    
+    queue.print();
+    fmt.Println("Front: " + queue.front());
+    fmt.Println("Dequeue: " + queue.dequeue());
+    fmt.Println("Dequeue: " + queue.dequeue());
+    queue.print();
+}

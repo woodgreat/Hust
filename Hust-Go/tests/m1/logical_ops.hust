@@ -1,0 +1,23 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all logical operators
+    bool a = true;
+    bool b = false;
+    
+    fmt.Println(a && a);
+    fmt.Println(a && b);
+    fmt.Println(b && b);
+    
+    fmt.Println(a || a);
+    fmt.Println(a || b);
+    fmt.Println(b || b);
+    
+    fmt.Println(!a);
+    fmt.Println(!b);
+    
+    // Short circuit evaluation
+    i32 x = 0;
+    bool result = (x != 0) && (10 / x > 1);
+    fmt.Println(result);
+}

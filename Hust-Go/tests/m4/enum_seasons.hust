@@ -1,0 +1,61 @@
+use GO.fmt.*;
+
+enum Season {
+    Spring,
+    Summer,
+    Autumn,
+    Winter
+}
+
+class Weather {
+    Season current;
+    
+    public Weather() {
+        this.current = Season.Spring;
+    }
+    
+    public void nextSeason() {
+        if (this.current == Season.Spring) {
+            this.current = Season.Summer;
+        } else if (this.current == Season.Summer) {
+            this.current = Season.Autumn;
+        } else if (this.current == Season.Autumn) {
+            this.current = Season.Winter;
+        } else {
+            this.current = Season.Spring;
+        }
+    }
+    
+    public String getSeasonName() {
+        if (this.current == Season.Spring) return "Spring";
+        if (this.current == Season.Summer) return "Summer";
+        if (this.current == Season.Autumn) return "Autumn";
+        return "Winter";
+    }
+    
+    public f32 getAverageTemp() {
+        if (this.current == Season.Spring) return 15.0;
+        if (this.current == Season.Summer) return 28.0;
+        if (this.current == Season.Autumn) return 12.0;
+        return -2.0;
+    }
+    
+    public String getActivity() {
+        if (this.current == Season.Spring) return "Hiking and planting";
+        if (this.current == Season.Summer) return "Swimming and BBQ";
+        if (this.current == Season.Autumn) return "Leaf peeping and harvest";
+        return "Skiing and hot cocoa";
+    }
+}
+
+void main() {
+    Weather weather = new Weather();
+    
+    for (i32 i = 0; i < 8; i++) {
+        fmt.Println("Season: " + weather.getSeasonName());
+        fmt.Println("Avg Temp: " + weather.getAverageTemp() + "C");
+        fmt.Println("Activity: " + weather.getActivity());
+        fmt.Println("---");
+        weather.nextSeason();
+    }
+}

@@ -1,0 +1,73 @@
+use GO.fmt.*;
+
+enum State {
+    Idle,
+    Running,
+    Paused,
+    Stopped
+}
+
+class StateMachine {
+    State current;
+    
+    public StateMachine() {
+        this.current = State.Idle;
+    }
+    
+    public void transition(String event) {
+        if (this.current == State.Idle && event == "start") {
+            this.current = State.Running;
+        } else if (this.current == State.Running && event == "pause") {
+            this.current = State.Paused;
+        } else if (this.current == State.Paused && event == "resume") {
+            this.current = State.Running;
+        } else if (this.current == State.Running && event == "stop") {
+            this.current = State.Stopped;
+        } else if (this.current == State.Paused && event == "stop") {
+            this.current = State.Stopped;
+        } else if (this.current == State.Stopped && event == "reset") {
+            this.current = State.Idle;
+        }
+    }
+    
+    public String getStateName() {
+        if (this.current == State.Idle) return "Idle";
+        if (this.current == State.Running) return "Running";
+        if (this.current == State.Paused) return "Paused";
+        return "Stopped";
+    }
+    
+    public bool canTransition(String event) {
+        if (this.current == State.Idle && event == "start") return true;
+        if (this.current == State.Running && event == "pause") return true;
+        if (this.current == State.Paused && event == "resume") return true;
+        if (this.current == State.Running && event == "stop") return true;
+        if (this.current == State.Paused && event == "stop") return true;
+        if (this.current == State.Stopped && event == "reset") return true;
+        return false;
+    }
+}
+
+void main() {
+    StateMachine sm = new StateMachine();
+    
+    fmt.Println(sm.getStateName());
+    
+    sm.transition("start");
+    fmt.Println(sm.getStateName());
+    
+    sm.transition("pause");
+    fmt.Println(sm.getStateName());
+    
+    sm.transition("resume");
+    fmt.Println(sm.getStateName());
+    
+    sm.transition("stop");
+    fmt.Println(sm.getStateName());
+    
+    sm.transition("reset");
+    fmt.Println(sm.getStateName());
+    
+    fmt.Println(sm.canTransition("start"));
+    fmt.Println(sm.canTransition("pause"));
+}

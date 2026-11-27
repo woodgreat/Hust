@@ -1,0 +1,38 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all assignment operators
+    i32 x = 10;
+    fmt.Println(x);
+    
+    x += 5;
+    fmt.Println(x);
+    
+    x -= 3;
+    fmt.Println(x);
+    
+    x *= 2;
+    fmt.Println(x);
+    
+    x /= 4;
+    fmt.Println(x);
+    
+    x %= 3;
+    fmt.Println(x);
+    
+    // Bitwise assignment
+    x &= 0b1010;
+    fmt.Println(x);
+    
+    x |= 0b0101;
+    fmt.Println(x);
+    
+    x ^= 0b1111;
+    fmt.Println(x);
+    
+    x <<= 2;
+    fmt.Println(x);
+    
+    x >>= 1;
+    fmt.Println(x);
+}

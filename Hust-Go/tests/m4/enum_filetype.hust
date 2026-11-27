@@ -1,0 +1,69 @@
+use GO.fmt.*;
+
+enum FileType {
+    Text,
+    Image,
+    Audio,
+    Video,
+    Document,
+    Archive,
+    Executable
+}
+
+class File {
+    String name;
+    FileType type;
+    i32 size;
+    
+    public File(String n, FileType t, i32 s) {
+        this.name = n;
+        this.type = t;
+        this.size = s;
+    }
+    
+    public String getTypeName() {
+        if (this.type == FileType.Text) return "Text";
+        if (this.type == FileType.Image) return "Image";
+        if (this.type == FileType.Audio) return "Audio";
+        if (this.type == FileType.Video) return "Video";
+        if (this.type == FileType.Document) return "Document";
+        if (this.type == FileType.Archive) return "Archive";
+        return "Executable";
+    }
+    
+    public bool isMedia() {
+        return this.type == FileType.Image || 
+               this.type == FileType.Audio || 
+               this.type == FileType.Video;
+    }
+    
+    public bool isDocument() {
+        return this.type == FileType.Text || 
+               this.type == FileType.Document;
+    }
+    
+    public void printInfo() {
+        fmt.Println("Name: " + this.name);
+        fmt.Println("Type: " + this.getTypeName());
+        fmt.Println("Size: " + this.size + " bytes");
+        fmt.Println("Is Media: " + this.isMedia());
+        fmt.Println("Is Document: " + this.isDocument());
+    }
+}
+
+void main() {
+    File[] files = {
+        new File("document.txt", FileType.Text, 1024),
+        new File("photo.jpg", FileType.Image, 2048),
+        new File("song.mp3", FileType.Audio, 4096),
+        new File("movie.mp4", FileType.Video, 8192),
+        new File("report.pdf", FileType.Document, 1536),
+        new File("backup.zip", FileType.Archive, 3072),
+        new File("program.exe", FileType.Executable, 5120)
+    };
+    
+    for (i32 i = 0; i < files.len(); i++) {
+        files[i].printInfo();
+        fmt.Println("---");
+    }
+}

@@ -1,0 +1,28 @@
+use GO.fmt.*;
+
+void main() {
+    // Array mapping
+    i32[] numbers = {1, 2, 3, 4, 5};
+    
+    // Square each element
+    i32[] squares = {};
+    for (i32 i = 0; i < numbers.len(); i++) {
+        squares.push(numbers[i] * numbers[i]);
+    }
+    
+    fmt.Println("Squares:");
+    for (i32 i = 0; i < squares.len(); i++) {
+        fmt.Println(squares[i]);
+    }
+    
+    // Double each element
+    i32[] doubles = {};
+    for (i32 i = 0; i < numbers.len(); i++) {
+        doubles.push(numbers[i] * 2);
+    }
+    
+    fmt.Println("Doubles:");
+    for (i32 i = 0; i < doubles.len(); i++) {
+        fmt.Println(doubles[i]);
+    }
+}

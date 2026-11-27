@@ -1,0 +1,33 @@
+use GO.fmt.*;
+
+void main() {
+    // String search
+    String text = "The quick brown fox jumps over the lazy dog";
+    
+    // Find substring
+    i32 index = text.indexOf("fox");
+    fmt.Println("Fox found at: " + index);
+    
+    // Check contains
+    if (text.contains("quick")) {
+        fmt.Println("Contains 'quick'");
+    }
+    
+    // Check starts with
+    if (text.startsWith("The")) {
+        fmt.Println("Starts with 'The'");
+    }
+    
+    // Check ends with
+    if (text.endsWith("dog")) {
+        fmt.Println("Ends with 'dog'");
+    }
+    
+    // Replace
+    String replaced = text.replace("fox", "wolf");
+    fmt.Println(replaced);
+    
+    // Split
+    String[] words = text.split(" ");
+    fmt.Println("Word count: " + words.len());
+}

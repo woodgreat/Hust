@@ -1,0 +1,67 @@
+use GO.fmt.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+    Yellow,
+    Cyan,
+    Magenta,
+    Black,
+    White
+}
+
+class ColorMixer {
+    public Color mix(Color c1, Color c2) {
+        if ((c1 == Color.Red && c2 == Color.Blue) || (c1 == Color.Blue && c2 == Color.Red)) {
+            return Color.Magenta;
+        }
+        if ((c1 == Color.Red && c2 == Color.Yellow) || (c1 == Color.Yellow && c2 == Color.Red)) {
+            return Color.Green;
+        }
+        if ((c1 == Color.Blue && c2 == Color.Yellow) || (c1 == Color.Yellow && c2 == Color.Blue)) {
+            return Color.Cyan;
+        }
+        if (c1 == c2) {
+            return c1;
+        }
+        return Color.Black;
+    }
+    
+    public String getColorName(Color c) {
+        if (c == Color.Red) return "Red";
+        if (c == Color.Green) return "Green";
+        if (c == Color.Blue) return "Blue";
+        if (c == Color.Yellow) return "Yellow";
+        if (c == Color.Cyan) return "Cyan";
+        if (c == Color.Magenta) return "Magenta";
+        if (c == Color.Black) return "Black";
+        return "White";
+    }
+    
+    public bool isPrimary(Color c) {
+        return c == Color.Red || c == Color.Blue || c == Color.Yellow;
+    }
+    
+    public bool isSecondary(Color c) {
+        return c == Color.Green || c == Color.Cyan || c == Color.Magenta;
+    }
+}
+
+void main() {
+    ColorMixer mixer = new ColorMixer();
+    
+    Color result1 = mixer.mix(Color.Red, Color.Blue);
+    fmt.Println(mixer.getColorName(result1));
+    
+    Color result2 = mixer.mix(Color.Red, Color.Yellow);
+    fmt.Println(mixer.getColorName(result2));
+    
+    Color result3 = mixer.mix(Color.Blue, Color.Yellow);
+    fmt.Println(mixer.getColorName(result3));
+    
+    fmt.Println(mixer.isPrimary(Color.Red));
+    fmt.Println(mixer.isPrimary(Color.Green));
+    fmt.Println(mixer.isSecondary(Color.Green));
+    fmt.Println(mixer.isSecondary(Color.Red));
+}

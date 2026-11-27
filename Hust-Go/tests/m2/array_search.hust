@@ -1,0 +1,35 @@
+use GO.fmt.*;
+
+void main() {
+    // Array search
+    i32[] arr = {10, 20, 30, 40, 50};
+    
+    // Linear search
+    i32 target = 30;
+    i32 index = -1;
+    for (i32 i = 0; i < arr.len(); i++) {
+        if (arr[i] == target) {
+            index = i;
+            break;
+        }
+    }
+    fmt.Println("Found at index: " + index);
+    
+    // Binary search (assuming sorted array)
+    i32 left = 0;
+    i32 right = arr.len() - 1;
+    i32 found = -1;
+    
+    while (left <= right) {
+        i32 mid = (left + right) / 2;
+        if (arr[mid] == target) {
+            found = mid;
+            break;
+        } else if (arr[mid] < target) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+    fmt.Println("Binary search found at: " + found);
+}

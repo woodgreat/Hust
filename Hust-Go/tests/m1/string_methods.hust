@@ -1,0 +1,58 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all string operations
+    String s = "Hello, World!";
+    
+    // Length
+    fmt.Println(s.len());
+    
+    // Character access
+    fmt.Println(s.charAt(0));
+    fmt.Println(s.charAt(7));
+    fmt.Println(s.charAt(12));
+    
+    // Substring
+    fmt.Println(s.substring(0, 5));
+    fmt.Println(s.substring(7, 12));
+    
+    // Index of
+    fmt.Println(s.indexOf("o"));
+    fmt.Println(s.indexOf("World"));
+    fmt.Println(s.indexOf("xyz"));
+    
+    // Contains
+    fmt.Println(s.contains("Hello"));
+    fmt.Println(s.contains("xyz"));
+    
+    // Starts with / Ends with
+    fmt.Println(s.startsWith("Hello"));
+    fmt.Println(s.endsWith("!"));
+    
+    // To upper / lower
+    fmt.Println(s.toUpper());
+    fmt.Println(s.toLower());
+    
+    // Trim
+    String padded = "  hello  ";
+    fmt.Println(padded.trim());
+    
+    // Replace
+    fmt.Println(s.replace("World", "Hust"));
+    
+    // Split
+    String[] parts = "a,b,c,d,e".split(",");
+    for (i32 i = 0; i < parts.len(); i++) {
+        fmt.Println(parts[i]);
+    }
+    
+    // Concatenation
+    String s1 = "Hello";
+    String s2 = "World";
+    String s3 = s1 + ", " + s2 + "!";
+    fmt.Println(s3);
+    
+    // Repeat
+    String repeated = "ab" * 3;
+    fmt.Println(repeated);
+}

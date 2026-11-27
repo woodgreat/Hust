@@ -1,0 +1,29 @@
+use GO.fmt.*;
+
+void main() {
+    // Increment and decrement
+    i32 x = 5;
+    
+    x++;
+    fmt.Println(x);
+    
+    x--;
+    fmt.Println(x);
+    
+    ++x;
+    fmt.Println(x);
+    
+    --x;
+    fmt.Println(x);
+    
+    // Post vs pre increment
+    i32 a = 5;
+    i32 b = a++;
+    fmt.Println(a);
+    fmt.Println(b);
+    
+    i32 c = 5;
+    i32 d = ++c;
+    fmt.Println(c);
+    fmt.Println(d);
+}

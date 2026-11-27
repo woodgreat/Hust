@@ -1,0 +1,90 @@
+use GO.fmt.*;
+
+class HashMap {
+    String[] keys;
+    i32[] values;
+    i32 size;
+    
+    public HashMap() {
+        this.keys = {};
+        this.values = {};
+        this.size = 0;
+    }
+    
+    public void put(String key, i32 value) {
+        // Check if key exists
+        for (i32 i = 0; i < this.size; i++) {
+            if (this.keys[i] == key) {
+                this.values[i] = value;
+                return;
+            }
+        }
+        // Add new key-value pair
+        this.keys.push(key);
+        this.values.push(value);
+        this.size = this.size + 1;
+    }
+    
+    public i32 get(String key) {
+        for (i32 i = 0; i < this.size; i++) {
+            if (this.keys[i] == key) {
+                return this.values[i];
+            }
+        }
+        return -1;
+    }
+    
+    public bool containsKey(String key) {
+        for (i32 i = 0; i < this.size; i++) {
+            if (this.keys[i] == key) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    public void remove(String key) {
+        for (i32 i = 0; i < this.size; i++) {
+            if (this.keys[i] == key) {
+                // Shift elements
+                for (i32 j = i; j < this.size - 1; j++) {
+                    this.keys[j] = this.keys[j + 1];
+                    this.values[j] = this.values[j + 1];
+                }
+                this.size = this.size - 1;
+                return;
+            }
+        }
+    }
+    
+    public i32 getSize() {
+        return this.size;
+    }
+    
+    public void printAll() {
+        for (i32 i = 0; i < this.size; i++) {
+            fmt.Println(this.keys[i] + ": " + this.values[i]);
+        }
+    }
+}
+
+void main() {
+    HashMap map = new HashMap();
+    
+    map.put("apple", 1);
+    map.put("banana", 2);
+    map.put("cherry", 3);
+    
+    fmt.Println(map.get("apple"));
+    fmt.Println(map.get("banana"));
+    fmt.Println(map.containsKey("cherry"));
+    fmt.Println(map.containsKey("date"));
+    
+    map.put("apple", 10);
+    fmt.Println(map.get("apple"));
+    
+    map.remove("banana");
+    fmt.Println(map.getSize());
+    
+    map.printAll();
+}

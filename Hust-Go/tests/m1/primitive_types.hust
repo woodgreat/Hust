@@ -1,0 +1,65 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all primitive types
+    bool t = true;
+    bool f = false;
+    
+    i8 i8Min = -128;
+    i8 i8Max = 127;
+    
+    i16 i16Min = -32768;
+    i16 i16Max = 32767;
+    
+    i32 i32Min = -2147483648;
+    i32 i32Max = 2147483647;
+    
+    i64 i64Min = -9223372036854775808;
+    i64 i64Max = 9223372036854775807;
+    
+    u8 u8Min = 0;
+    u8 u8Max = 255;
+    
+    u16 u16Min = 0;
+    u16 u16Max = 65535;
+    
+    u32 u32Min = 0;
+    u32 u32Max = 4294967295;
+    
+    u64 u64Min = 0;
+    u64 u64Max = 18446744073709551615;
+    
+    f32 f32Min = -3.402823e38;
+    f32 f32Max = 3.402823e38;
+    
+    f64 f64Min = -1.7976931348623157e308;
+    f64 f64Max = 1.7976931348623157e308;
+    
+    String empty = "";
+    String hello = "Hello";
+    
+    fmt.Println(t);
+    fmt.Println(f);
+    fmt.Println(i8Min);
+    fmt.Println(i8Max);
+    fmt.Println(i16Min);
+    fmt.Println(i16Max);
+    fmt.Println(i32Min);
+    fmt.Println(i32Max);
+    fmt.Println(i64Min);
+    fmt.Println(i64Max);
+    fmt.Println(u8Min);
+    fmt.Println(u8Max);
+    fmt.Println(u16Min);
+    fmt.Println(u16Max);
+    fmt.Println(u32Min);
+    fmt.Println(u32Max);
+    fmt.Println(u64Min);
+    fmt.Println(u64Max);
+    fmt.Println(f32Min);
+    fmt.Println(f32Max);
+    fmt.Println(f64Min);
+    fmt.Println(f64Max);
+    fmt.Println(empty);
+    fmt.Println(hello);
+}

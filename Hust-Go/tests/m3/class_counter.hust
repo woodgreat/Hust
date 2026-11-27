@@ -1,0 +1,56 @@
+use GO.fmt.*;
+
+class Counter {
+    i32 count;
+    
+    public Counter() {
+        this.count = 0;
+    }
+    
+    public void increment() {
+        this.count = this.count + 1;
+    }
+    
+    public void decrement() {
+        this.count = this.count - 1;
+    }
+    
+    public void reset() {
+        this.count = 0;
+    }
+    
+    public i32 getCount() {
+        return this.count;
+    }
+    
+    public void add(i32 amount) {
+        this.count = this.count + amount;
+    }
+    
+    public void subtract(i32 amount) {
+        this.count = this.count - amount;
+    }
+}
+
+void main() {
+    Counter counter = new Counter();
+    
+    fmt.Println(counter.getCount());
+    
+    counter.increment();
+    counter.increment();
+    counter.increment();
+    fmt.Println(counter.getCount());
+    
+    counter.decrement();
+    fmt.Println(counter.getCount());
+    
+    counter.add(10);
+    fmt.Println(counter.getCount());
+    
+    counter.subtract(5);
+    fmt.Println(counter.getCount());
+    
+    counter.reset();
+    fmt.Println(counter.getCount());
+}

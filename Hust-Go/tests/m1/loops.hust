@@ -1,0 +1,30 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all loop types
+    fmt.Println("For loop:");
+    for (i32 i = 0; i < 5; i++) {
+        fmt.Println(i);
+    }
+    
+    fmt.Println("While loop:");
+    i32 j = 0;
+    while (j < 5) {
+        fmt.Println(j);
+        j = j + 1;
+    }
+    
+    fmt.Println("Do-while loop:");
+    i32 k = 0;
+    do {
+        fmt.Println(k);
+        k = k + 1;
+    } while (k < 5);
+    
+    fmt.Println("Nested loops:");
+    for (i32 i = 0; i < 3; i++) {
+        for (i32 j = 0; j < 3; j++) {
+            fmt.Println(i * 3 + j);
+        }
+    }
+}

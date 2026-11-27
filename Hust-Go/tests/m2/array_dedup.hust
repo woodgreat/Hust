@@ -1,0 +1,42 @@
+use GO.fmt.*;
+
+void main() {
+    // Array deduplication
+    i32[] numbers = {1, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5};
+    
+    i32[] unique = {};
+    for (i32 i = 0; i < numbers.len(); i++) {
+        bool found = false;
+        for (i32 j = 0; j < unique.len(); j++) {
+            if (numbers[i] == unique[j]) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            unique.push(numbers[i]);
+        }
+    }
+    
+    fmt.Println("Original:");
+    for (i32 i = 0; i < numbers.len(); i++) {
+        fmt.Println(numbers[i]);
+    }
+    
+    fmt.Println("Unique:");
+    for (i32 i = 0; i < unique.len(); i++) {
+        fmt.Println(unique[i]);
+    }
+    
+    // Count occurrences
+    fmt.Println("Occurrences:");
+    for (i32 i = 0; i < unique.len(); i++) {
+        i32 count = 0;
+        for (i32 j = 0; j < numbers.len(); j++) {
+            if (numbers[j] == unique[i]) {
+                count = count + 1;
+            }
+        }
+        fmt.Println(unique[i] + ": " + count);
+    }
+}

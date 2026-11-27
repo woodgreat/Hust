@@ -1,0 +1,15 @@
+use GO.fmt.*;
+
+void main() {
+    i32 i = 0;
+    while (i < 5) {
+        fmt.Println(i);
+        i = i + 1;
+    }
+    
+    i32 j = 10;
+    while (j > 0) {
+        fmt.Println(j);
+        j = j - 2;
+    }
+}

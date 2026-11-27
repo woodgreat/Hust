@@ -1,0 +1,29 @@
+use GO.fmt.*;
+
+void main() {
+    i32 x = 5;
+    
+    if (x > 0) {
+        fmt.Println("positive");
+    } else if (x < 0) {
+        fmt.Println("negative");
+    } else {
+        fmt.Println("zero");
+    }
+    
+    if (x >= 5) {
+        fmt.Println("gte 5");
+    }
+    
+    if (x <= 5) {
+        fmt.Println("lte 5");
+    }
+    
+    if (x == 5) {
+        fmt.Println("eq 5");
+    }
+    
+    if (x != 0) {
+        fmt.Println("ne 0");
+    }
+}

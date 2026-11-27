@@ -1,0 +1,86 @@
+use GO.fmt.*;
+
+enum Weekday {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday
+}
+
+class Schedule {
+    String[] tasks;
+    Weekday[] days;
+    
+    public Schedule() {
+        this.tasks = {};
+        this.days = {};
+    }
+    
+    public void addTask(String task, Weekday day) {
+        this.tasks.push(task);
+        this.days.push(day);
+    }
+    
+    public void printSchedule() {
+        fmt.Println("Weekly Schedule:");
+        for (i32 i = 0; i < this.tasks.len(); i++) {
+            fmt.Println(this.getDayName(this.days[i]) + ": " + this.tasks[i]);
+        }
+    }
+    
+    public String getDayName(Weekday day) {
+        if (day == Weekday.Monday) return "Monday";
+        if (day == Weekday.Tuesday) return "Tuesday";
+        if (day == Weekday.Wednesday) return "Wednesday";
+        if (day == Weekday.Thursday) return "Thursday";
+        if (day == Weekday.Friday) return "Friday";
+        if (day == Weekday.Saturday) return "Saturday";
+        return "Sunday";
+    }
+    
+    public bool isWeekend(Weekday day) {
+        return day == Weekday.Saturday || day == Weekday.Sunday;
+    }
+    
+    public bool isWeekday(Weekday day) {
+        return !this.isWeekend(day);
+    }
+    
+    public String[] getTasksForDay(Weekday day) {
+        String[] result = {};
+        for (i32 i = 0; i < this.tasks.len(); i++) {
+            if (this.days[i] == day) {
+                result.push(this.tasks[i]);
+            }
+        }
+        return result;
+    }
+}
+
+void main() {
+    Schedule schedule = new Schedule();
+    
+    schedule.addTask("Team meeting", Weekday.Monday);
+    schedule.addTask("Code review", Weekday.Tuesday);
+    schedule.addTask("Sprint planning", Weekday.Wednesday);
+    schedule.addTask("1-on-1 with manager", Weekday.Thursday);
+    schedule.addTask("Deploy to production", Weekday.Friday);
+    schedule.addTask("Grocery shopping", Weekday.Saturday);
+    schedule.addTask("Family dinner", Weekday.Sunday);
+    
+    schedule.printSchedule();
+    
+    fmt.Println("---");
+    fmt.Println("Monday tasks:");
+    String[] mondayTasks = schedule.getTasksForDay(Weekday.Monday);
+    for (i32 i = 0; i < mondayTasks.len(); i++) {
+        fmt.Println(mondayTasks[i]);
+    }
+    
+    fmt.Println("---");
+    fmt.Println("Is Saturday weekend? " + schedule.isWeekend(Weekday.Saturday));
+    fmt.Println("Is Monday weekday? " + schedule.isWeekday(Weekday.Monday));
+}

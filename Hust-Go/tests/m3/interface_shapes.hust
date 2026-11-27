@@ -1,0 +1,50 @@
+use GO.fmt.*;
+
+interface Shape {
+    public calculateArea();
+    public calculatePerimeter();
+}
+
+class Rectangle implements Shape {
+    f32 width;
+    f32 height;
+    
+    public Rectangle(f32 w, f32 h) {
+        this.width = w;
+        this.height = h;
+    }
+    
+    public calculateArea() {
+        return this.width * this.height;
+    }
+    
+    public calculatePerimeter() {
+        return 2 * (this.width + this.height);
+    }
+}
+
+class Circle implements Shape {
+    f32 radius;
+    
+    public Circle(f32 r) {
+        this.radius = r;
+    }
+    
+    public calculateArea() {
+        return 3.14159 * this.radius * this.radius;
+    }
+    
+    public calculatePerimeter() {
+        return 2 * 3.14159 * this.radius;
+    }
+}
+
+void main() {
+    Rectangle rect = new Rectangle(5.0, 3.0);
+    fmt.Println(rect.calculateArea());
+    fmt.Println(rect.calculatePerimeter());
+    
+    Circle circle = new Circle(2.0);
+    fmt.Println(circle.calculateArea());
+    fmt.Println(circle.calculatePerimeter());
+}

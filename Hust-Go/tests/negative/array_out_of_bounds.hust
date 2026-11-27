@@ -1,0 +1,6 @@
+use GO.fmt.*;
+
+void main() {
+    i32[] arr = {1, 2, 3};
+    fmt.Println(arr[10]);
+}

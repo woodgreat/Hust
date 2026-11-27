@@ -1,0 +1,60 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all operators in one file
+    i32 a = 10;
+    i32 b = 3;
+    
+    // Arithmetic
+    fmt.Println(a + b);
+    fmt.Println(a - b);
+    fmt.Println(a * b);
+    fmt.Println(a / b);
+    fmt.Println(a % b);
+    
+    // Comparison
+    fmt.Println(a == b);
+    fmt.Println(a != b);
+    fmt.Println(a < b);
+    fmt.Println(a > b);
+    fmt.Println(a <= b);
+    fmt.Println(a >= b);
+    
+    // Logical
+    fmt.Println(true && true);
+    fmt.Println(true && false);
+    fmt.Println(false || true);
+    fmt.Println(!true);
+    
+    // Bitwise
+    fmt.Println(a & b);
+    fmt.Println(a | b);
+    fmt.Println(a ^ b);
+    fmt.Println(~a);
+    fmt.Println(a << 1);
+    fmt.Println(a >> 1);
+    
+    // Assignment
+    i32 c = 10;
+    c += 5;
+    fmt.Println(c);
+    c -= 3;
+    fmt.Println(c);
+    c *= 2;
+    fmt.Println(c);
+    c /= 4;
+    fmt.Println(c);
+    c %= 3;
+    fmt.Println(c);
+    
+    // Increment/Decrement
+    i32 d = 10;
+    d++;
+    fmt.Println(d);
+    d--;
+    fmt.Println(d);
+    ++d;
+    fmt.Println(d);
+    --d;
+    fmt.Println(d);
+}

@@ -1,0 +1,47 @@
+use GO.fmt.*;
+
+void main() {
+    // Array statistics
+    i32[] numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    
+    // Sum
+    i32 sum = 0;
+    for (i32 i = 0; i < numbers.len(); i++) {
+        sum = sum + numbers[i];
+    }
+    fmt.Println("Sum: " + sum);
+    
+    // Average
+    f32 avg = sum / numbers.len();
+    fmt.Println("Average: " + avg);
+    
+    // Min
+    i32 min = numbers[0];
+    for (i32 i = 1; i < numbers.len(); i++) {
+        if (numbers[i] < min) {
+            min = numbers[i];
+        }
+    }
+    fmt.Println("Min: " + min);
+    
+    // Max
+    i32 max = numbers[0];
+    for (i32 i = 1; i < numbers.len(); i++) {
+        if (numbers[i] > max) {
+            max = numbers[i];
+        }
+    }
+    fmt.Println("Max: " + max);
+    
+    // Range
+    fmt.Println("Range: " + (max - min));
+    
+    // Median (for sorted array)
+    i32 mid = numbers.len() / 2;
+    if (numbers.len() % 2 == 0) {
+        f32 median = (numbers[mid - 1] + numbers[mid]) / 2.0;
+        fmt.Println("Median: " + median);
+    } else {
+        fmt.Println("Median: " + numbers[mid]);
+    }
+}

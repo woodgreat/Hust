@@ -1,0 +1,21 @@
+use GO.fmt.*;
+
+void main() {
+    // String concatenation performance
+    String result = "";
+    
+    // Concatenate 100 strings
+    for (i32 i = 0; i < 100; i++) {
+        result = result + "a";
+    }
+    
+    fmt.Println(result.length());
+    
+    // String builder pattern
+    String[] parts = {"Hello", " ", "World", "!"};
+    String joined = "";
+    for (i32 i = 0; i < parts.len(); i++) {
+        joined = joined + parts[i];
+    }
+    fmt.Println(joined);
+}

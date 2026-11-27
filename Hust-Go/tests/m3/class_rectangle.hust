@@ -1,0 +1,58 @@
+use GO.fmt.*;
+
+class Rectangle {
+    f32 width;
+    f32 height;
+    
+    public Rectangle(f32 w, f32 h) {
+        this.width = w;
+        this.height = h;
+    }
+    
+    public f32 getArea() {
+        return this.width * this.height;
+    }
+    
+    public f32 getPerimeter() {
+        return 2 * (this.width + this.height);
+    }
+    
+    public bool isSquare() {
+        return this.width == this.height;
+    }
+    
+    public void scale(f32 factor) {
+        this.width = this.width * factor;
+        this.height = this.height * factor;
+    }
+}
+
+class Square extends Rectangle {
+    public Square(f32 side) {
+        this.width = side;
+        this.height = side;
+    }
+    
+    public void setSide(f32 side) {
+        this.width = side;
+        this.height = side;
+    }
+}
+
+void main() {
+    Rectangle rect = new Rectangle(5.0, 3.0);
+    fmt.Println(rect.getArea());
+    fmt.Println(rect.getPerimeter());
+    fmt.Println(rect.isSquare());
+    
+    rect.scale(2.0);
+    fmt.Println(rect.getArea());
+    
+    Square sq = new Square(4.0);
+    fmt.Println(sq.getArea());
+    fmt.Println(sq.getPerimeter());
+    fmt.Println(sq.isSquare());
+    
+    sq.setSide(6.0);
+    fmt.Println(sq.getArea());
+}

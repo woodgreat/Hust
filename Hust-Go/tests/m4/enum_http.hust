@@ -1,0 +1,87 @@
+use GO.fmt.*;
+
+enum HttpStatus {
+    OK,
+    Created,
+    NoContent,
+    BadRequest,
+    Unauthorized,
+    Forbidden,
+    NotFound,
+    InternalServerError,
+    ServiceUnavailable
+}
+
+class HttpResponse {
+    HttpStatus status;
+    String body;
+    
+    public HttpResponse(HttpStatus s, String b) {
+        this.status = s;
+        this.body = b;
+    }
+    
+    public i32 getStatusCode() {
+        if (this.status == HttpStatus.OK) return 200;
+        if (this.status == HttpStatus.Created) return 201;
+        if (this.status == HttpStatus.NoContent) return 204;
+        if (this.status == HttpStatus.BadRequest) return 400;
+        if (this.status == HttpStatus.Unauthorized) return 401;
+        if (this.status == HttpStatus.Forbidden) return 403;
+        if (this.status == HttpStatus.NotFound) return 404;
+        if (this.status == HttpStatus.InternalServerError) return 500;
+        return 503;
+    }
+    
+    public String getStatusText() {
+        if (this.status == HttpStatus.OK) return "OK";
+        if (this.status == HttpStatus.Created) return "Created";
+        if (this.status == HttpStatus.NoContent) return "No Content";
+        if (this.status == HttpStatus.BadRequest) return "Bad Request";
+        if (this.status == HttpStatus.Unauthorized) return "Unauthorized";
+        if (this.status == HttpStatus.Forbidden) return "Forbidden";
+        if (this.status == HttpStatus.NotFound) return "Not Found";
+        if (this.status == HttpStatus.InternalServerError) return "Internal Server Error";
+        return "Service Unavailable";
+    }
+    
+    public bool isSuccess() {
+        return this.status == HttpStatus.OK || 
+               this.status == HttpStatus.Created || 
+               this.status == HttpStatus.NoContent;
+    }
+    
+    public bool isClientError() {
+        return this.status == HttpStatus.BadRequest || 
+               this.status == HttpStatus.Unauthorized || 
+               this.status == HttpStatus.Forbidden || 
+               this.status == HttpStatus.NotFound;
+    }
+    
+    public bool isServerError() {
+        return this.status == HttpStatus.InternalServerError || 
+               this.status == HttpStatus.ServiceUnavailable;
+    }
+    
+    public void print() {
+        fmt.Println("Status: " + this.getStatusCode() + " " + this.getStatusText());
+        fmt.Println("Body: " + this.body);
+        fmt.Println("Success: " + this.isSuccess());
+        fmt.Println("Client Error: " + this.isClientError());
+        fmt.Println("Server Error: " + this.isServerError());
+    }
+}
+
+void main() {
+    HttpResponse[] responses = {
+        new HttpResponse(HttpStatus.OK, "Success"),
+        new HttpResponse(HttpStatus.Created, "Resource created"),
+        new HttpResponse(HttpStatus.NotFound, "Resource not found"),
+        new HttpResponse(HttpStatus.InternalServerError, "Server error")
+    };
+    
+    for (i32 i = 0; i < responses.len(); i++) {
+        responses[i].print();
+        fmt.Println("---");
+    }
+}

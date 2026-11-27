@@ -1,0 +1,71 @@
+use GO.fmt.*;
+
+class Graph {
+    i32[][] adjacencyMatrix;
+    i32 vertices;
+    
+    public Graph(i32 v) {
+        this.vertices = v;
+        this.adjacencyMatrix = {};
+        for (i32 i = 0; i < v; i++) {
+            i32[] row = {};
+            for (i32 j = 0; j < v; j++) {
+                row.push(0);
+            }
+            this.adjacencyMatrix.push(row);
+        }
+    }
+    
+    public void addEdge(i32 from, i32 to) {
+        this.adjacencyMatrix[from][to] = 1;
+        this.adjacencyMatrix[to][from] = 1;
+    }
+    
+    public void removeEdge(i32 from, i32 to) {
+        this.adjacencyMatrix[from][to] = 0;
+        this.adjacencyMatrix[to][from] = 0;
+    }
+    
+    public bool hasEdge(i32 from, i32 to) {
+        return this.adjacencyMatrix[from][to] == 1;
+    }
+    
+    public i32 getDegree(i32 vertex) {
+        i32 degree = 0;
+        for (i32 i = 0; i < this.vertices; i++) {
+            if (this.adjacencyMatrix[vertex][i] == 1) {
+                degree = degree + 1;
+            }
+        }
+        return degree;
+    }
+    
+    public void printGraph() {
+        for (i32 i = 0; i < this.vertices; i++) {
+            for (i32 j = 0; j < this.vertices; j++) {
+                fmt.Print(this.adjacencyMatrix[i][j] + " ");
+            }
+            fmt.Println("");
+        }
+    }
+}
+
+void main() {
+    Graph graph = new Graph(5);
+    
+    graph.addEdge(0, 1);
+    graph.addEdge(0, 2);
+    graph.addEdge(1, 2);
+    graph.addEdge(1, 3);
+    graph.addEdge(2, 4);
+    graph.addEdge(3, 4);
+    
+    graph.printGraph();
+    
+    fmt.Println("Degree of vertex 0: " + graph.getDegree(0));
+    fmt.Println("Degree of vertex 1: " + graph.getDegree(1));
+    fmt.Println("Degree of vertex 2: " + graph.getDegree(2));
+    
+    fmt.Println("Has edge 0-1: " + graph.hasEdge(0, 1));
+    fmt.Println("Has edge 0-3: " + graph.hasEdge(0, 3));
+}

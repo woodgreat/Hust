@@ -1,0 +1,52 @@
+use GO.fmt.*;
+
+class Animal {
+    String name;
+    i32 age;
+    
+    public Animal(String n, i32 a) {
+        this.name = n;
+        this.age = a;
+    }
+    
+    public void speak() {
+        fmt.Println("Animal speaks");
+    }
+    
+    public String getName() {
+        return this.name;
+    }
+    
+    public i32 getAge() {
+        return this.age;
+    }
+}
+
+class Dog extends Animal {
+    String breed;
+    
+    public Dog(String n, i32 a, String b) {
+        this.name = n;
+        this.age = a;
+        this.breed = b;
+    }
+    
+    public void speak() {
+        fmt.Println("Dog barks");
+    }
+    
+    public String getBreed() {
+        return this.breed;
+    }
+}
+
+void main() {
+    Animal a = new Animal("Generic", 5);
+    a.speak();
+    fmt.Println(a.getName());
+    
+    Dog d = new Dog("Buddy", 3, "Golden Retriever");
+    d.speak();
+    fmt.Println(d.getName());
+    fmt.Println(d.getBreed());
+}

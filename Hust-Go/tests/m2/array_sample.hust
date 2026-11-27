@@ -1,0 +1,43 @@
+use GO.fmt.*;
+
+void main() {
+    // Array sampling
+    i32[] numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    
+    // Take every nth element
+    i32 n = 3;
+    i32[] sampled = {};
+    for (i32 i = 0; i < numbers.len(); i += n) {
+        sampled.push(numbers[i]);
+    }
+    
+    fmt.Println("Sampled (every " + n + "):");
+    for (i32 i = 0; i < sampled.len(); i++) {
+        fmt.Println(sampled[i]);
+    }
+    
+    // Take first n elements
+    i32 take = 5;
+    i32[] firstN = {};
+    for (i32 i = 0; i < take && i < numbers.len(); i++) {
+        firstN.push(numbers[i]);
+    }
+    
+    fmt.Println("First " + take + ":");
+    for (i32 i = 0; i < firstN.len(); i++) {
+        fmt.Println(firstN[i]);
+    }
+    
+    // Take last n elements
+    i32[] lastN = {};
+    for (i32 i = numbers.len() - take; i < numbers.len(); i++) {
+        if (i >= 0) {
+            lastN.push(numbers[i]);
+        }
+    }
+    
+    fmt.Println("Last " + take + ":");
+    for (i32 i = 0; i < lastN.len(); i++) {
+        fmt.Println(lastN[i]);
+    }
+}

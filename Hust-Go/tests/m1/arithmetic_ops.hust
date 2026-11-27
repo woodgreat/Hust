@@ -1,0 +1,22 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all arithmetic operators
+    i32 a = 10;
+    i32 b = 3;
+    
+    fmt.Println(a + b);
+    fmt.Println(a - b);
+    fmt.Println(a * b);
+    fmt.Println(a / b);
+    fmt.Println(a % b);
+    
+    // Float arithmetic
+    f32 x = 10.5;
+    f32 y = 3.2;
+    
+    fmt.Println(x + y);
+    fmt.Println(x - y);
+    fmt.Println(x * y);
+    fmt.Println(x / y);
+}

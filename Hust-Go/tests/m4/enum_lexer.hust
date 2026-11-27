@@ -1,0 +1,83 @@
+use GO.fmt.*;
+
+enum TokenType {
+    Identifier,
+    Keyword,
+    Number,
+    String,
+    Operator,
+    Delimiter,
+    Comment
+}
+
+class Token {
+    TokenType type;
+    String value;
+    i32 line;
+    i32 column;
+    
+    public Token(TokenType t, String v, i32 l, i32 c) {
+        this.type = t;
+        this.value = v;
+        this.line = l;
+        this.column = c;
+    }
+    
+    public String getTypeName() {
+        if (this.type == TokenType.Identifier) return "IDENTIFIER";
+        if (this.type == TokenType.Keyword) return "KEYWORD";
+        if (this.type == TokenType.Number) return "NUMBER";
+        if (this.type == TokenType.String) return "STRING";
+        if (this.type == TokenType.Operator) return "OPERATOR";
+        if (this.type == TokenType.Delimiter) return "DELIMITER";
+        return "COMMENT";
+    }
+    
+    public void print() {
+        fmt.Println(this.getTypeName() + " '" + this.value + "' at " + this.line + ":" + this.column);
+    }
+}
+
+class Lexer {
+    String source;
+    i32 position;
+    i32 line;
+    i32 column;
+    
+    public Lexer(String src) {
+        this.source = src;
+        this.position = 0;
+        this.line = 1;
+        this.column = 1;
+    }
+    
+    public Token[] tokenize() {
+        Token[] tokens = {};
+        
+        // Simple tokenizer for demonstration
+        tokens.push(new Token(TokenType.Keyword, "void", 1, 1));
+        tokens.push(new Token(TokenType.Identifier, "main", 1, 6));
+        tokens.push(new Token(TokenType.Delimiter, "(", 1, 10));
+        tokens.push(new Token(TokenType.Delimiter, ")", 1, 11));
+        tokens.push(new Token(TokenType.Delimiter, "{", 1, 13));
+        tokens.push(new Token(TokenType.Identifier, "fmt", 2, 5));
+        tokens.push(new Token(TokenType.Delimiter, ".", 2, 8));
+        tokens.push(new Token(TokenType.Identifier, "Println", 2, 9));
+        tokens.push(new Token(TokenType.Delimiter, "(", 2, 16));
+        tokens.push(new Token(TokenType.String, "Hello", 2, 17));
+        tokens.push(new Token(TokenType.Delimiter, ")", 2, 24));
+        tokens.push(new Token(TokenType.Delimiter, ";", 2, 25));
+        tokens.push(new Token(TokenType.Delimiter, "}", 3, 1));
+        
+        return tokens;
+    }
+}
+
+void main() {
+    Lexer lexer = new Lexer("void main() {\n    fmt.Println(\"Hello\");\n}");
+    Token[] tokens = lexer.tokenize();
+    
+    for (i32 i = 0; i < tokens.len(); i++) {
+        tokens[i].print();
+    }
+}

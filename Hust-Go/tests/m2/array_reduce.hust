@@ -1,0 +1,38 @@
+use GO.fmt.*;
+
+void main() {
+    // Array reduction
+    i32[] numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    
+    // Sum
+    i32 sum = 0;
+    for (i32 i = 0; i < numbers.len(); i++) {
+        sum = sum + numbers[i];
+    }
+    fmt.Println("Sum: " + sum);
+    
+    // Product
+    i32 product = 1;
+    for (i32 i = 0; i < numbers.len(); i++) {
+        product = product * numbers[i];
+    }
+    fmt.Println("Product: " + product);
+    
+    // Max
+    i32 max = numbers[0];
+    for (i32 i = 1; i < numbers.len(); i++) {
+        if (numbers[i] > max) {
+            max = numbers[i];
+        }
+    }
+    fmt.Println("Max: " + max);
+    
+    // Min
+    i32 min = numbers[0];
+    for (i32 i = 1; i < numbers.len(); i++) {
+        if (numbers[i] < min) {
+            min = numbers[i];
+        }
+    }
+    fmt.Println("Min: " + min);
+}

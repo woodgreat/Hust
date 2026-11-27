@@ -1,0 +1,5 @@
+use GO.fmt.*;
+
+void main() {
+    // Empty main function
+}

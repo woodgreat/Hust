@@ -1,0 +1,46 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all variable types and scopes
+    i32 globalVar = 100;
+    
+    fmt.Println("Global: " + globalVar);
+    
+    // Local scope
+    {
+        i32 localVar = 200;
+        fmt.Println("Local: " + localVar);
+        fmt.Println("Global in local: " + globalVar);
+    }
+    
+    // Nested scope
+    {
+        i32 outerVar = 300;
+        {
+            i32 innerVar = 400;
+            fmt.Println("Inner: " + innerVar);
+            fmt.Println("Outer: " + outerVar);
+            fmt.Println("Global in inner: " + globalVar);
+        }
+    }
+    
+    // Loop scope
+    for (i32 i = 0; i < 3; i++) {
+        i32 loopVar = i * 10;
+        fmt.Println("Loop var: " + loopVar);
+    }
+    
+    // If scope
+    if (true) {
+        i32 ifVar = 500;
+        fmt.Println("If var: " + ifVar);
+    }
+    
+    // While scope
+    i32 counter = 0;
+    while (counter < 3) {
+        i32 whileVar = counter * 100;
+        fmt.Println("While var: " + whileVar);
+        counter = counter + 1;
+    }
+}

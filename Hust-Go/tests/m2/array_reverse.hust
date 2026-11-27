@@ -1,0 +1,27 @@
+use GO.fmt.*;
+
+void main() {
+    // Array reversal
+    i32[] arr = {1, 2, 3, 4, 5};
+    
+    fmt.Println("Original:");
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+    
+    // Reverse in place
+    i32 left = 0;
+    i32 right = arr.len() - 1;
+    while (left < right) {
+        i32 temp = arr[left];
+        arr[left] = arr[right];
+        arr[right] = temp;
+        left = left + 1;
+        right = right - 1;
+    }
+    
+    fmt.Println("Reversed:");
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+}

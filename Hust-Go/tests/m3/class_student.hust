@@ -1,0 +1,119 @@
+use GO.fmt.*;
+
+class Student {
+    String id;
+    String name;
+    i32 age;
+    f32 gpa;
+    String[] courses;
+    
+    public Student(String i, String n, i32 a) {
+        this.id = i;
+        this.name = n;
+        this.age = a;
+        this.gpa = 0.0;
+        this.courses = {};
+    }
+    
+    public void enroll(String course) {
+        this.courses.push(course);
+    }
+    
+    public void setGpa(f32 g) {
+        this.gpa = g;
+    }
+    
+    public bool isHonorStudent() {
+        return this.gpa >= 3.5;
+    }
+    
+    public void printInfo() {
+        fmt.Println("ID: " + this.id);
+        fmt.Println("Name: " + this.name);
+        fmt.Println("Age: " + this.age);
+        fmt.Println("GPA: " + this.gpa);
+        fmt.Println("Honor Student: " + this.isHonorStudent());
+        fmt.Println("Courses:");
+        for (i32 i = 0; i < this.courses.len(); i++) {
+            fmt.Println("  " + this.courses[i]);
+        }
+    }
+}
+
+class Classroom {
+    String subject;
+    Student[] students;
+    
+    public Classroom(String s) {
+        this.subject = s;
+        this.students = {};
+    }
+    
+    public void addStudent(Student s) {
+        this.students.push(s);
+    }
+    
+    public f32 getAverageGpa() {
+        if (this.students.len() == 0) {
+            return 0.0;
+        }
+        f32 total = 0.0;
+        for (i32 i = 0; i < this.students.len(); i++) {
+            total = total + this.students[i].gpa;
+        }
+        return total / this.students.len();
+    }
+    
+    public Student getTopStudent() {
+        if (this.students.len() == 0) {
+            return null;
+        }
+        Student top = this.students[0];
+        for (i32 i = 1; i < this.students.len(); i++) {
+            if (this.students[i].gpa > top.gpa) {
+                top = this.students[i];
+            }
+        }
+        return top;
+    }
+    
+    public void printReport() {
+        fmt.Println("Classroom: " + this.subject);
+        fmt.Println("Students: " + this.students.len());
+        fmt.Println("Average GPA: " + this.getAverageGpa());
+        Student top = this.getTopStudent();
+        if (top != null) {
+            fmt.Println("Top Student: " + top.name + " (GPA: " + top.gpa + ")");
+        }
+        fmt.Println("Student List:");
+        for (i32 i = 0; i < this.students.len(); i++) {
+            this.students[i].printInfo();
+            fmt.Println("---");
+        }
+    }
+}
+
+void main() {
+    Classroom cs101 = new Classroom("Computer Science 101");
+    
+    Student alice = new Student("S001", "Alice", 20);
+    alice.enroll("CS101");
+    alice.enroll("MATH101");
+    alice.setGpa(3.8);
+    
+    Student bob = new Student("S002", "Bob", 21);
+    bob.enroll("CS101");
+    bob.enroll("PHYS101");
+    bob.setGpa(3.2);
+    
+    Student charlie = new Student("S003", "Charlie", 19);
+    charlie.enroll("CS101");
+    charlie.enroll("CS102");
+    charlie.setGpa(3.9);
+    
+    cs101.addStudent(alice);
+    cs101.addStudent(bob);
+    cs101.addStudent(charlie);
+    
+    cs101.printReport();
+}

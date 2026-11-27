@@ -1,0 +1,40 @@
+use GO.fmt.*;
+
+void main() {
+    // Array manipulation
+    i32[] arr = {1, 2, 3, 4, 5};
+    
+    // Push
+    arr.push(6);
+    fmt.Println("After push:");
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+    
+    // Pop
+    i32 popped = arr.pop();
+    fmt.Println("Popped: " + popped);
+    fmt.Println("After pop:");
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+    
+    // Insert at index
+    arr.insert(2, 99);
+    fmt.Println("After insert at 2:");
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+    
+    // Remove at index
+    i32 removed = arr.removeAt(2);
+    fmt.Println("Removed: " + removed);
+    fmt.Println("After remove at 2:");
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+    
+    // Clear
+    arr.clear();
+    fmt.Println("After clear, length: " + arr.len());
+}

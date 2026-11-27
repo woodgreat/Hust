@@ -1,0 +1,78 @@
+use GO.fmt.*;
+
+class Vehicle {
+    String brand;
+    i32 year;
+    f32 speed;
+    
+    public Vehicle(String b, i32 y) {
+        this.brand = b;
+        this.year = y;
+        this.speed = 0.0;
+    }
+    
+    public void accelerate(f32 amount) {
+        this.speed = this.speed + amount;
+    }
+    
+    public void brake(f32 amount) {
+        this.speed = this.speed - amount;
+        if (this.speed < 0) {
+            this.speed = 0;
+        }
+    }
+    
+    public f32 getSpeed() {
+        return this.speed;
+    }
+    
+    public void printInfo() {
+        fmt.Println("Brand: " + this.brand);
+        fmt.Println("Year: " + this.year);
+        fmt.Println("Speed: " + this.speed);
+    }
+}
+
+class Car extends Vehicle {
+    i32 doors;
+    
+    public Car(String b, i32 y, i32 d) {
+        this.brand = b;
+        this.year = y;
+        this.doors = d;
+        this.speed = 0.0;
+    }
+    
+    public void honk() {
+        fmt.Println("Beep beep!");
+    }
+}
+
+class Motorcycle extends Vehicle {
+    bool hasSidecar;
+    
+    public Motorcycle(String b, i32 y, bool sidecar) {
+        this.brand = b;
+        this.year = y;
+        this.hasSidecar = sidecar;
+        this.speed = 0.0;
+    }
+    
+    public void wheelie() {
+        fmt.Println("Doing a wheelie!");
+    }
+}
+
+void main() {
+    Car car = new Car("Toyota", 2020, 4);
+    car.printInfo();
+    car.accelerate(50.0);
+    car.printInfo();
+    car.honk();
+    
+    Motorcycle bike = new Motorcycle("Harley", 2021, false);
+    bike.printInfo();
+    bike.accelerate(80.0);
+    bike.printInfo();
+    bike.wheelie();
+}

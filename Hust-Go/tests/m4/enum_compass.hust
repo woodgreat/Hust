@@ -1,0 +1,82 @@
+use GO.fmt.*;
+
+enum Direction {
+    North,
+    South,
+    East,
+    West
+}
+
+class Compass {
+    Direction current;
+    
+    public Compass() {
+        this.current = Direction.North;
+    }
+    
+    public void turnLeft() {
+        if (this.current == Direction.North) {
+            this.current = Direction.West;
+        } else if (this.current == Direction.West) {
+            this.current = Direction.South;
+        } else if (this.current == Direction.South) {
+            this.current = Direction.East;
+        } else {
+            this.current = Direction.North;
+        }
+    }
+    
+    public void turnRight() {
+        if (this.current == Direction.North) {
+            this.current = Direction.East;
+        } else if (this.current == Direction.East) {
+            this.current = Direction.South;
+        } else if (this.current == Direction.South) {
+            this.current = Direction.West;
+        } else {
+            this.current = Direction.North;
+        }
+    }
+    
+    public void turnAround() {
+        this.turnLeft();
+        this.turnLeft();
+    }
+    
+    public String getDirectionName() {
+        if (this.current == Direction.North) return "North";
+        if (this.current == Direction.South) return "South";
+        if (this.current == Direction.East) return "East";
+        return "West";
+    }
+    
+    public i32 getDegrees() {
+        if (this.current == Direction.North) return 0;
+        if (this.current == Direction.East) return 90;
+        if (this.current == Direction.South) return 180;
+        return 270;
+    }
+}
+
+void main() {
+    Compass compass = new Compass();
+    
+    fmt.Println(compass.getDirectionName());
+    fmt.Println(compass.getDegrees());
+    
+    compass.turnRight();
+    fmt.Println(compass.getDirectionName());
+    fmt.Println(compass.getDegrees());
+    
+    compass.turnRight();
+    fmt.Println(compass.getDirectionName());
+    fmt.Println(compass.getDegrees());
+    
+    compass.turnLeft();
+    fmt.Println(compass.getDirectionName());
+    fmt.Println(compass.getDegrees());
+    
+    compass.turnAround();
+    fmt.Println(compass.getDirectionName());
+    fmt.Println(compass.getDegrees());
+}

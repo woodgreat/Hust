@@ -1,0 +1,64 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all control flow in one file
+    i32 x = 10;
+    
+    // if statement
+    if (x > 5) {
+        fmt.Println("x > 5");
+    }
+    
+    // if-else statement
+    if (x > 15) {
+        fmt.Println("x > 15");
+    } else {
+        fmt.Println("x <= 15");
+    }
+    
+    // if-else if-else chain
+    if (x > 20) {
+        fmt.Println("x > 20");
+    } else if (x > 10) {
+        fmt.Println("x > 10");
+    } else if (x > 5) {
+        fmt.Println("x > 5");
+    } else {
+        fmt.Println("x <= 5");
+    }
+    
+    // while loop
+    i32 i = 0;
+    while (i < 5) {
+        fmt.Println("while: " + i);
+        i = i + 1;
+    }
+    
+    // for loop
+    for (i32 j = 0; j < 5; j++) {
+        fmt.Println("for: " + j);
+    }
+    
+    // do-while loop
+    i32 k = 0;
+    do {
+        fmt.Println("do-while: " + k);
+        k = k + 1;
+    } while (k < 5);
+    
+    // break statement
+    for (i32 m = 0; m < 10; m++) {
+        if (m == 5) {
+            break;
+        }
+        fmt.Println("break: " + m);
+    }
+    
+    // continue statement
+    for (i32 n = 0; n < 5; n++) {
+        if (n == 2) {
+            continue;
+        }
+        fmt.Println("continue: " + n);
+    }
+}

@@ -1,0 +1,33 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all variable declarations
+    i32 a = 1;
+    i32 b = 2, c = 3;
+    i32 d = 4, e = 5, f = 6;
+    
+    f32 g = 1.0;
+    f32 h = 2.0, i = 3.0;
+    
+    bool j = true;
+    bool k = false, l = true;
+    
+    String m = "hello";
+    String n = "world", o = "!";
+    
+    fmt.Println(a);
+    fmt.Println(b);
+    fmt.Println(c);
+    fmt.Println(d);
+    fmt.Println(e);
+    fmt.Println(f);
+    fmt.Println(g);
+    fmt.Println(h);
+    fmt.Println(i);
+    fmt.Println(j);
+    fmt.Println(k);
+    fmt.Println(l);
+    fmt.Println(m);
+    fmt.Println(n);
+    fmt.Println(o);
+}

@@ -1,0 +1,42 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all type conversions
+    i32 i32Val = 100;
+    f32 f32Val = 3.14;
+    f64 f64Val = 2.71828;
+    bool boolVal = true;
+    String strVal = "123";
+    
+    // i32 to f32
+    f32 f32FromI32 = i32Val;
+    fmt.Println(f32FromI32);
+    
+    // i32 to f64
+    f64 f64FromI32 = i32Val;
+    fmt.Println(f64FromI32);
+    
+    // f32 to i32
+    i32 i32FromF32 = f32Val;
+    fmt.Println(i32FromF32);
+    
+    // f64 to i32
+    i32 i32FromF64 = f64Val;
+    fmt.Println(i32FromF64);
+    
+    // bool to i32
+    i32 i32FromBool = boolVal;
+    fmt.Println(i32FromBool);
+    
+    // String to i32
+    i32 i32FromStr = strVal;
+    fmt.Println(i32FromStr);
+    
+    // i32 to String
+    String strFromI32 = i32Val;
+    fmt.Println(strFromI32);
+    
+    // f32 to String
+    String strFromF32 = f32Val;
+    fmt.Println(strFromF32);
+}

@@ -1,0 +1,68 @@
+use GO.fmt.*;
+
+enum LogLevel {
+    Debug,
+    Info,
+    Warning,
+    Error,
+    Fatal
+}
+
+class Logger {
+    LogLevel level;
+    
+    public Logger(LogLevel l) {
+        this.level = l;
+    }
+    
+    public void setLevel(LogLevel l) {
+        this.level = l;
+    }
+    
+    public void log(LogLevel msgLevel, String message) {
+        if (msgLevel >= this.level) {
+            fmt.Println("[" + this.getLevelName(msgLevel) + "] " + message);
+        }
+    }
+    
+    public void debug(String message) {
+        this.log(LogLevel.Debug, message);
+    }
+    
+    public void info(String message) {
+        this.log(LogLevel.Info, message);
+    }
+    
+    public void warning(String message) {
+        this.log(LogLevel.Warning, message);
+    }
+    
+    public void error(String message) {
+        this.log(LogLevel.Error, message);
+    }
+    
+    public void fatal(String message) {
+        this.log(LogLevel.Fatal, message);
+    }
+    
+    public String getLevelName(LogLevel l) {
+        if (l == LogLevel.Debug) return "DEBUG";
+        if (l == LogLevel.Info) return "INFO";
+        if (l == LogLevel.Warning) return "WARN";
+        if (l == LogLevel.Error) return "ERROR";
+        return "FATAL";
+    }
+}
+
+void main() {
+    Logger logger = new Logger(LogLevel.Info);
+    
+    logger.debug("This is a debug message");
+    logger.info("This is an info message");
+    logger.warning("This is a warning message");
+    logger.error("This is an error message");
+    logger.fatal("This is a fatal message");
+    
+    logger.setLevel(LogLevel.Debug);
+    logger.debug("Now debug is visible");
+}

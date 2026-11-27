@@ -1,0 +1,20 @@
+use GO.fmt.*;
+
+void main() {
+    i32 a = 10;
+    i32 b = 20;
+    i32 c = a + b;
+    fmt.Println(c);
+    
+    i32 d = a - b;
+    fmt.Println(d);
+    
+    i32 e = a * b;
+    fmt.Println(e);
+    
+    i32 f = b / a;
+    fmt.Println(f);
+    
+    i32 g = b % a;
+    fmt.Println(g);
+}

@@ -1,0 +1,61 @@
+use GO.fmt.*;
+
+void main() {
+    // Array sorting algorithms
+    i32[] arr = {64, 34, 25, 12, 22, 11, 90};
+    
+    fmt.Println("Original:");
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+    
+    // Bubble sort
+    i32[] bubble = arr;
+    for (i32 i = 0; i < bubble.len() - 1; i++) {
+        for (i32 j = 0; j < bubble.len() - i - 1; j++) {
+            if (bubble[j] > bubble[j + 1]) {
+                i32 temp = bubble[j];
+                bubble[j] = bubble[j + 1];
+                bubble[j + 1] = temp;
+            }
+        }
+    }
+    fmt.Println("Bubble sorted:");
+    for (i32 i = 0; i < bubble.len(); i++) {
+        fmt.Println(bubble[i]);
+    }
+    
+    // Selection sort
+    i32[] selection = arr;
+    for (i32 i = 0; i < selection.len() - 1; i++) {
+        i32 minIdx = i;
+        for (i32 j = i + 1; j < selection.len(); j++) {
+            if (selection[j] < selection[minIdx]) {
+                minIdx = j;
+            }
+        }
+        i32 temp = selection[i];
+        selection[i] = selection[minIdx];
+        selection[minIdx] = temp;
+    }
+    fmt.Println("Selection sorted:");
+    for (i32 i = 0; i < selection.len(); i++) {
+        fmt.Println(selection[i]);
+    }
+    
+    // Insertion sort
+    i32[] insertion = arr;
+    for (i32 i = 1; i < insertion.len(); i++) {
+        i32 key = insertion[i];
+        i32 j = i - 1;
+        while (j >= 0 && insertion[j] > key) {
+            insertion[j + 1] = insertion[j];
+            j = j - 1;
+        }
+        insertion[j + 1] = key;
+    }
+    fmt.Println("Insertion sorted:");
+    for (i32 i = 0; i < insertion.len(); i++) {
+        fmt.Println(insertion[i]);
+    }
+}

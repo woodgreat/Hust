@@ -1,0 +1,59 @@
+use GO.fmt.*;
+
+enum Operator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    Power
+}
+
+class Calculator {
+    public i32 calculate(i32 a, i32 b, Operator op) {
+        if (op == Operator.Add) return a + b;
+        if (op == Operator.Subtract) return a - b;
+        if (op == Operator.Multiply) return a * b;
+        if (op == Operator.Divide) {
+            if (b == 0) return 0;
+            return a / b;
+        }
+        if (op == Operator.Modulo) {
+            if (b == 0) return 0;
+            return a % b;
+        }
+        if (op == Operator.Power) {
+            i32 result = 1;
+            for (i32 i = 0; i < b; i++) {
+                result = result * a;
+            }
+            return result;
+        }
+        return 0;
+    }
+    
+    public String getOperatorName(Operator op) {
+        if (op == Operator.Add) return "+";
+        if (op == Operator.Subtract) return "-";
+        if (op == Operator.Multiply) return "*";
+        if (op == Operator.Divide) return "/";
+        if (op == Operator.Modulo) return "%";
+        return "^";
+    }
+    
+    public void printCalculation(i32 a, i32 b, Operator op) {
+        i32 result = this.calculate(a, b, op);
+        fmt.Println(a + " " + this.getOperatorName(op) + " " + b + " = " + result);
+    }
+}
+
+void main() {
+    Calculator calc = new Calculator();
+    
+    calc.printCalculation(10, 5, Operator.Add);
+    calc.printCalculation(10, 5, Operator.Subtract);
+    calc.printCalculation(10, 5, Operator.Multiply);
+    calc.printCalculation(10, 5, Operator.Divide);
+    calc.printCalculation(10, 5, Operator.Modulo);
+    calc.printCalculation(2, 10, Operator.Power);
+}

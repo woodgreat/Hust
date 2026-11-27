@@ -1,0 +1,22 @@
+use GO.fmt.*;
+
+void main() {
+    // Boolean operations
+    bool t = true;
+    bool f = false;
+    
+    fmt.Println(t && t);
+    fmt.Println(t && f);
+    fmt.Println(f && f);
+    
+    fmt.Println(t || t);
+    fmt.Println(t || f);
+    fmt.Println(f || f);
+    
+    fmt.Println(!t);
+    fmt.Println(!f);
+    
+    // Complex boolean expressions
+    bool result = (t && f) || (t && !f);
+    fmt.Println(result);
+}

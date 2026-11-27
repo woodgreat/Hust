@@ -1,0 +1,59 @@
+use GO.fmt.*;
+
+class Stack {
+    i32[] items;
+    i32 top;
+    
+    public Stack() {
+        this.items = {};
+        this.top = -1;
+    }
+    
+    public void push(i32 item) {
+        this.items.push(item);
+        this.top = this.top + 1;
+    }
+    
+    public i32 pop() {
+        if (this.top >= 0) {
+            i32 item = this.items[this.top];
+            this.top = this.top - 1;
+            return item;
+        }
+        return -1;
+    }
+    
+    public i32 peek() {
+        if (this.top >= 0) {
+            return this.items[this.top];
+        }
+        return -1;
+    }
+    
+    public bool isEmpty() {
+        return this.top < 0;
+    }
+    
+    public i32 size() {
+        return this.top + 1;
+    }
+}
+
+void main() {
+    Stack stack = new Stack();
+    
+    fmt.Println(stack.isEmpty());
+    
+    stack.push(1);
+    stack.push(2);
+    stack.push(3);
+    
+    fmt.Println(stack.size());
+    fmt.Println(stack.peek());
+    
+    fmt.Println(stack.pop());
+    fmt.Println(stack.pop());
+    fmt.Println(stack.pop());
+    
+    fmt.Println(stack.isEmpty());
+}

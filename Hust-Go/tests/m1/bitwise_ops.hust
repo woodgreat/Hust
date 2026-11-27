@@ -1,0 +1,23 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all bitwise operators
+    i32 a = 0b1010;  // 10
+    i32 b = 0b1100;  // 12
+    
+    fmt.Println(a & b);   // AND: 0b1000 = 8
+    fmt.Println(a | b);   // OR:  0b1110 = 14
+    fmt.Println(a ^ b);   // XOR: 0b0110 = 6
+    fmt.Println(~a);      // NOT: 0b...0101 = -11
+    fmt.Println(a << 2);  // Left shift: 0b101000 = 40
+    fmt.Println(a >> 1);  // Right shift: 0b101 = 5
+    
+    // Bit manipulation
+    i32 flags = 0b0000;
+    flags = flags | 0b0001;  // Set bit 0
+    fmt.Println(flags);
+    flags = flags | 0b0100;  // Set bit 2
+    fmt.Println(flags);
+    flags = flags & ~0b0001; // Clear bit 0
+    fmt.Println(flags);
+}

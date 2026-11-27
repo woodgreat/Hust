@@ -1,0 +1,21 @@
+use GO.fmt.*;
+
+void main() {
+    i32[] arr = {1, 2, 3, 4, 5};
+    
+    // Array length
+    fmt.Println(arr.len());
+    
+    // Array access
+    fmt.Println(arr[0]);
+    fmt.Println(arr[4]);
+    
+    // Array iteration
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+    
+    // Array modification
+    arr[0] = 10;
+    fmt.Println(arr[0]);
+}

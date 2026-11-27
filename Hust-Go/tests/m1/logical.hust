@@ -1,0 +1,23 @@
+use GO.fmt.*;
+
+void main() {
+    bool a = true;
+    bool b = false;
+    
+    if (a && b) {
+        fmt.Println("a && b");
+    }
+    
+    if (a || b) {
+        fmt.Println("a || b");
+    }
+    
+    if (!b) {
+        fmt.Println("!b");
+    }
+    
+    bool c = a && !b;
+    if (c) {
+        fmt.Println("a && !b");
+    }
+}

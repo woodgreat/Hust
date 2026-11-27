@@ -1,0 +1,102 @@
+use GO.fmt.*;
+
+enum GameState {
+    Menu,
+    Playing,
+    Paused,
+    GameOver,
+    Victory
+}
+
+class Game {
+    GameState state;
+    i32 score;
+    i32 lives;
+    
+    public Game() {
+        this.state = GameState.Menu;
+        this.score = 0;
+        this.lives = 3;
+    }
+    
+    public void start() {
+        if (this.state == GameState.Menu) {
+            this.state = GameState.Playing;
+            this.score = 0;
+            this.lives = 3;
+        }
+    }
+    
+    public void pause() {
+        if (this.state == GameState.Playing) {
+            this.state = GameState.Paused;
+        }
+    }
+    
+    public void resume() {
+        if (this.state == GameState.Paused) {
+            this.state = GameState.Playing;
+        }
+    }
+    
+    public void addScore(i32 points) {
+        if (this.state == GameState.Playing) {
+            this.score = this.score + points;
+        }
+    }
+    
+    public void loseLife() {
+        if (this.state == GameState.Playing) {
+            this.lives = this.lives - 1;
+            if (this.lives <= 0) {
+                this.state = GameState.GameOver;
+            }
+        }
+    }
+    
+    public void win() {
+        if (this.state == GameState.Playing) {
+            this.state = GameState.Victory;
+        }
+    }
+    
+    public String getStateName() {
+        if (this.state == GameState.Menu) return "Menu";
+        if (this.state == GameState.Playing) return "Playing";
+        if (this.state == GameState.Paused) return "Paused";
+        if (this.state == GameState.GameOver) return "Game Over";
+        return "Victory";
+    }
+    
+    public void printStatus() {
+        fmt.Println("State: " + this.getStateName());
+        fmt.Println("Score: " + this.score);
+        fmt.Println("Lives: " + this.lives);
+    }
+}
+
+void main() {
+    Game game = new Game();
+    
+    game.printStatus();
+    
+    game.start();
+    game.printStatus();
+    
+    game.addScore(100);
+    game.addScore(50);
+    game.printStatus();
+    
+    game.pause();
+    game.printStatus();
+    
+    game.resume();
+    game.printStatus();
+    
+    game.loseLife();
+    game.loseLife();
+    game.printStatus();
+    
+    game.loseLife();
+    game.printStatus();
+}

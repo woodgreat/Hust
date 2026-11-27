@@ -1,0 +1,86 @@
+use GO.fmt.*;
+
+enum Month {
+    January,
+    February,
+    March,
+    April,
+    May,
+    June,
+    July,
+    August,
+    September,
+    October,
+    November,
+    December
+}
+
+class Calendar {
+    public i32 getDaysInMonth(Month m, i32 year) {
+        if (m == Month.January) return 31;
+        if (m == Month.February) {
+            if (this.isLeapYear(year)) {
+                return 29;
+            }
+            return 28;
+        }
+        if (m == Month.March) return 31;
+        if (m == Month.April) return 30;
+        if (m == Month.May) return 31;
+        if (m == Month.June) return 30;
+        if (m == Month.July) return 31;
+        if (m == Month.August) return 31;
+        if (m == Month.September) return 30;
+        if (m == Month.October) return 31;
+        if (m == Month.November) return 30;
+        return 31;
+    }
+    
+    public bool isLeapYear(i32 year) {
+        if (year % 400 == 0) return true;
+        if (year % 100 == 0) return false;
+        if (year % 4 == 0) return true;
+        return false;
+    }
+    
+    public String getMonthName(Month m) {
+        if (m == Month.January) return "January";
+        if (m == Month.February) return "February";
+        if (m == Month.March) return "March";
+        if (m == Month.April) return "April";
+        if (m == Month.May) return "May";
+        if (m == Month.June) return "June";
+        if (m == Month.July) return "July";
+        if (m == Month.August) return "August";
+        if (m == Month.September) return "September";
+        if (m == Month.October) return "October";
+        if (m == Month.November) return "November";
+        return "December";
+    }
+    
+    public i32 getQuarter(Month m) {
+        if (m == Month.January || m == Month.February || m == Month.March) return 1;
+        if (m == Month.April || m == Month.May || m == Month.June) return 2;
+        if (m == Month.July || m == Month.August || m == Month.September) return 3;
+        return 4;
+    }
+}
+
+void main() {
+    Calendar cal = new Calendar();
+    
+    fmt.Println(cal.getMonthName(Month.January) + ": " + cal.getDaysInMonth(Month.January, 2024));
+    fmt.Println(cal.getMonthName(Month.February) + ": " + cal.getDaysInMonth(Month.February, 2024));
+    fmt.Println(cal.getMonthName(Month.February) + ": " + cal.getDaysInMonth(Month.February, 2023));
+    fmt.Println(cal.getMonthName(Month.December) + ": " + cal.getDaysInMonth(Month.December, 2024));
+    
+    fmt.Println("2024 is leap: " + cal.isLeapYear(2024));
+    fmt.Println("2023 is leap: " + cal.isLeapYear(2023));
+    fmt.Println("2000 is leap: " + cal.isLeapYear(2000));
+    fmt.Println("1900 is leap: " + cal.isLeapYear(1900));
+    
+    fmt.Println("Q1: " + cal.getQuarter(Month.February));
+    fmt.Println("Q2: " + cal.getQuarter(Month.May));
+    fmt.Println("Q3: " + cal.getQuarter(Month.August));
+    fmt.Println("Q4: " + cal.getQuarter(Month.November));
+}

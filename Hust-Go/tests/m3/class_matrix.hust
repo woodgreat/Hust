@@ -1,0 +1,89 @@
+use GO.fmt.*;
+
+class Matrix {
+    i32[][] data;
+    i32 rows;
+    i32 cols;
+    
+    public Matrix(i32 r, i32 c) {
+        this.rows = r;
+        this.cols = c;
+        this.data = {};
+        for (i32 i = 0; i < r; i++) {
+            i32[] row = {};
+            for (i32 j = 0; j < c; j++) {
+                row.push(0);
+            }
+            this.data.push(row);
+        }
+    }
+    
+    public void set(i32 row, i32 col, i32 value) {
+        this.data[row][col] = value;
+    }
+    
+    public i32 get(i32 row, i32 col) {
+        return this.data[row][col];
+    }
+    
+    public Matrix add(Matrix other) {
+        Matrix result = new Matrix(this.rows, this.cols);
+        for (i32 i = 0; i < this.rows; i++) {
+            for (i32 j = 0; j < this.cols; j++) {
+                result.set(i, j, this.get(i, j) + other.get(i, j));
+            }
+        }
+        return result;
+    }
+    
+    public Matrix multiply(Matrix other) {
+        Matrix result = new Matrix(this.rows, other.cols);
+        for (i32 i = 0; i < this.rows; i++) {
+            for (i32 j = 0; j < other.cols; j++) {
+                i32 sum = 0;
+                for (i32 k = 0; k < this.cols; k++) {
+                    sum = sum + this.get(i, k) * other.get(k, j);
+                }
+                result.set(i, j, sum);
+            }
+        }
+        return result;
+    }
+    
+    public void print() {
+        for (i32 i = 0; i < this.rows; i++) {
+            for (i32 j = 0; j < this.cols; j++) {
+                fmt.Print(this.get(i, j) + " ");
+            }
+            fmt.Println("");
+        }
+    }
+}
+
+void main() {
+    Matrix m1 = new Matrix(2, 2);
+    m1.set(0, 0, 1);
+    m1.set(0, 1, 2);
+    m1.set(1, 0, 3);
+    m1.set(1, 1, 4);
+    
+    Matrix m2 = new Matrix(2, 2);
+    m2.set(0, 0, 5);
+    m2.set(0, 1, 6);
+    m2.set(1, 0, 7);
+    m2.set(1, 1, 8);
+    
+    fmt.Println("Matrix 1:");
+    m1.print();
+    
+    fmt.Println("Matrix 2:");
+    m2.print();
+    
+    fmt.Println("Sum:");
+    Matrix sum = m1.add(m2);
+    sum.print();
+    
+    fmt.Println("Product:");
+    Matrix product = m1.multiply(m2);
+    product.print();
+}

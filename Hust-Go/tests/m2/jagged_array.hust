@@ -1,0 +1,51 @@
+use GO.fmt.*;
+
+void main() {
+    // Array of arrays (jagged array)
+    i32[][] jagged = {
+        {1, 2, 3},
+        {4, 5},
+        {6, 7, 8, 9},
+        {10}
+    };
+    
+    // Print jagged array
+    for (i32 i = 0; i < jagged.len(); i++) {
+        fmt.Println("Row " + i + ":");
+        for (i32 j = 0; j < jagged[i].len(); j++) {
+            fmt.Println(jagged[i][j]);
+        }
+    }
+    
+    // Sum each row
+    for (i32 i = 0; i < jagged.len(); i++) {
+        i32 sum = 0;
+        for (i32 j = 0; j < jagged[i].len(); j++) {
+            sum = sum + jagged[i][j];
+        }
+        fmt.Println("Row " + i + " sum: " + sum);
+    }
+    
+    // Find max in each row
+    for (i32 i = 0; i < jagged.len(); i++) {
+        i32 max = jagged[i][0];
+        for (i32 j = 1; j < jagged[i].len(); j++) {
+            if (jagged[i][j] > max) {
+                max = jagged[i][j];
+            }
+        }
+        fmt.Println("Row " + i + " max: " + max);
+    }
+    
+    // Flatten
+    i32[] flat = {};
+    for (i32 i = 0; i < jagged.len(); i++) {
+        for (i32 j = 0; j < jagged[i].len(); j++) {
+            flat.push(jagged[i][j]);
+        }
+    }
+    fmt.Println("Flattened:");
+    for (i32 i = 0; i < flat.len(); i++) {
+        fmt.Println(flat[i]);
+    }
+}

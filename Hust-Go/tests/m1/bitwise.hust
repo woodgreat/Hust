@@ -1,0 +1,25 @@
+use GO.fmt.*;
+
+void main() {
+    // Bitwise operations
+    i32 a = 0b1010;  // 10
+    i32 b = 0b1100;  // 12
+    
+    i32 and = a & b;  // 0b1000 = 8
+    fmt.Println(and);
+    
+    i32 or = a | b;   // 0b1110 = 14
+    fmt.Println(or);
+    
+    i32 xor = a ^ b;  // 0b0110 = 6
+    fmt.Println(xor);
+    
+    i32 not = ~a;     // 0b...0101 = -11
+    fmt.Println(not);
+    
+    i32 left = a << 2;  // 0b101000 = 40
+    fmt.Println(left);
+    
+    i32 right = a >> 1; // 0b101 = 5
+    fmt.Println(right);
+}

@@ -1,0 +1,39 @@
+use GO.fmt.*;
+
+class Point {
+    f32 x;
+    f32 y;
+    
+    public Point(f32 x, f32 y) {
+        this.x = x;
+        this.y = y;
+    }
+    
+    public f32 distanceTo(Point other) {
+        f32 dx = this.x - other.x;
+        f32 dy = this.y - other.y;
+        return sqrt(dx * dx + dy * dy);
+    }
+    
+    public void move(f32 dx, f32 dy) {
+        this.x = this.x + dx;
+        this.y = this.y + dy;
+    }
+    
+    public void print() {
+        fmt.Println("(" + this.x + ", " + this.y + ")");
+    }
+}
+
+void main() {
+    Point p1 = new Point(0.0, 0.0);
+    Point p2 = new Point(3.0, 4.0);
+    
+    p1.print();
+    p2.print();
+    
+    fmt.Println(p1.distanceTo(p2));
+    
+    p1.move(1.0, 1.0);
+    p1.print();
+}

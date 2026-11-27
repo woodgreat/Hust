@@ -1,0 +1,65 @@
+use GO.fmt.*;
+
+void main() {
+    // Array of strings with various operations
+    String[] words = {"apple", "banana", "cherry", "date", "elderberry", "fig", "grape"};
+    
+    // Print all
+    fmt.Println("Words:");
+    for (i32 i = 0; i < words.len(); i++) {
+        fmt.Println(words[i]);
+    }
+    
+    // Find longest
+    String longest = words[0];
+    for (i32 i = 1; i < words.len(); i++) {
+        if (words[i].len() > longest.len()) {
+            longest = words[i];
+        }
+    }
+    fmt.Println("Longest: " + longest);
+    
+    // Find shortest
+    String shortest = words[0];
+    for (i32 i = 1; i < words.len(); i++) {
+        if (words[i].len() < shortest.len()) {
+            shortest = words[i];
+        }
+    }
+    fmt.Println("Shortest: " + shortest);
+    
+    // Filter by length
+    i32 minLen = 5;
+    fmt.Println("Words with length >= " + minLen + ":");
+    for (i32 i = 0; i < words.len(); i++) {
+        if (words[i].len() >= minLen) {
+            fmt.Println(words[i]);
+        }
+    }
+    
+    // Sort alphabetically
+    String[] sorted = words;
+    for (i32 i = 0; i < sorted.len() - 1; i++) {
+        for (i32 j = 0; j < sorted.len() - i - 1; j++) {
+            if (sorted[j] > sorted[j + 1]) {
+                String temp = sorted[j];
+                sorted[j] = sorted[j + 1];
+                sorted[j + 1] = temp;
+            }
+        }
+    }
+    fmt.Println("Sorted:");
+    for (i32 i = 0; i < sorted.len(); i++) {
+        fmt.Println(sorted[i]);
+    }
+    
+    // Reverse
+    String[] reversed = {};
+    for (i32 i = words.len() - 1; i >= 0; i--) {
+        reversed.push(words[i]);
+    }
+    fmt.Println("Reversed:");
+    for (i32 i = 0; i < reversed.len(); i++) {
+        fmt.Println(reversed[i]);
+    }
+}

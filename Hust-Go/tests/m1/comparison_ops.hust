@@ -1,0 +1,23 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all comparison operators
+    i32 a = 10;
+    i32 b = 20;
+    
+    fmt.Println(a == b);
+    fmt.Println(a != b);
+    fmt.Println(a < b);
+    fmt.Println(a > b);
+    fmt.Println(a <= b);
+    fmt.Println(a >= b);
+    
+    // String comparison
+    String s1 = "hello";
+    String s2 = "world";
+    String s3 = "hello";
+    
+    fmt.Println(s1 == s2);
+    fmt.Println(s1 == s3);
+    fmt.Println(s1 != s2);
+}

@@ -1,0 +1,36 @@
+use GO.fmt.*;
+
+void main() {
+    // Array partitioning
+    i32[] numbers = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    i32 pivot = 5;
+    
+    i32[] less = {};
+    i32[] equal = {};
+    i32[] greater = {};
+    
+    for (i32 i = 0; i < numbers.len(); i++) {
+        if (numbers[i] < pivot) {
+            less.push(numbers[i]);
+        } else if (numbers[i] == pivot) {
+            equal.push(numbers[i]);
+        } else {
+            greater.push(numbers[i]);
+        }
+    }
+    
+    fmt.Println("Less than " + pivot + ":");
+    for (i32 i = 0; i < less.len(); i++) {
+        fmt.Println(less[i]);
+    }
+    
+    fmt.Println("Equal to " + pivot + ":");
+    for (i32 i = 0; i < equal.len(); i++) {
+        fmt.Println(equal[i]);
+    }
+    
+    fmt.Println("Greater than " + pivot + ":");
+    for (i32 i = 0; i < greater.len(); i++) {
+        fmt.Println(greater[i]);
+    }
+}

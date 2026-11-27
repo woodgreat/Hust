@@ -1,0 +1,118 @@
+use GO.fmt.*;
+
+class Library {
+    String name;
+    Book[] books;
+    i32 bookCount;
+    
+    public Library(String n) {
+        this.name = n;
+        this.books = {};
+        this.bookCount = 0;
+    }
+    
+    public void addBook(Book b) {
+        this.books.push(b);
+        this.bookCount = this.bookCount + 1;
+    }
+    
+    public Book findBook(String isbn) {
+        for (i32 i = 0; i < this.bookCount; i++) {
+            if (this.books[i].isbn == isbn) {
+                return this.books[i];
+            }
+        }
+        return null;
+    }
+    
+    public Book[] findByAuthor(String author) {
+        Book[] result = {};
+        for (i32 i = 0; i < this.bookCount; i++) {
+            if (this.books[i].author == author) {
+                result.push(this.books[i]);
+            }
+        }
+        return result;
+    }
+    
+    public bool borrowBook(String isbn) {
+        Book b = this.findBook(isbn);
+        if (b != null && b.available) {
+            b.available = false;
+            return true;
+        }
+        return false;
+    }
+    
+    public bool returnBook(String isbn) {
+        Book b = this.findBook(isbn);
+        if (b != null && !b.available) {
+            b.available = true;
+            return true;
+        }
+        return false;
+    }
+    
+    public void printCatalog() {
+        fmt.Println("Library: " + this.name);
+        fmt.Println("Total Books: " + this.bookCount);
+        for (i32 i = 0; i < this.bookCount; i++) {
+            this.books[i].printInfo();
+        }
+    }
+}
+
+class Book {
+    String isbn;
+    String title;
+    String author;
+    i32 year;
+    bool available;
+    
+    public Book(String i, String t, String a, i32 y) {
+        this.isbn = i;
+        this.title = t;
+        this.author = a;
+        this.year = y;
+        this.available = true;
+    }
+    
+    public void printInfo() {
+        String status = "Available";
+        if (!this.available) {
+            status = "Borrowed";
+        }
+        fmt.Println("[" + this.isbn + "] " + this.title + " by " + this.author + 
+                   " (" + this.year + ") - " + status);
+    }
+}
+
+void main() {
+    Library lib = new Library("City Library");
+    
+    lib.addBook(new Book("001", "The Great Gatsby", "F. Scott Fitzgerald", 1925));
+    lib.addBook(new Book("002", "To Kill a Mockingbird", "Harper Lee", 1960));
+    lib.addBook(new Book("003", "1984", "George Orwell", 1949));
+    lib.addBook(new Book("004", "Pride and Prejudice", "Jane Austen", 1813));
+    lib.addBook(new Book("005", "The Catcher in the Rye", "J.D. Salinger", 1951));
+    
+    lib.printCatalog();
+    
+    fmt.Println("---");
+    fmt.Println("Borrowing book 003...");
+    lib.borrowBook("003");
+    
+    fmt.Println("---");
+    fmt.Println("Finding books by George Orwell:");
+    Book[] orwellBooks = lib.findByAuthor("George Orwell");
+    for (i32 i = 0; i < orwellBooks.len(); i++) {
+        orwellBooks[i].printInfo();
+    }
+    
+    fmt.Println("---");
+    fmt.Println("Returning book 003...");
+    lib.returnBook("003");
+    
+    fmt.Println("---");
+    lib.printCatalog();
+}

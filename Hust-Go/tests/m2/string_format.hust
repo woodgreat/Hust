@@ -1,0 +1,27 @@
+use GO.fmt.*;
+
+void main() {
+    // String formatting
+    String name = "Alice";
+    i32 age = 30;
+    f32 height = 5.6;
+    
+    String info = "Name: " + name + ", Age: " + age + ", Height: " + height;
+    fmt.Println(info);
+    
+    // String repeat
+    String repeated = "ab" * 3;
+    fmt.Println(repeated);
+    
+    // String padding
+    String padded = "  hello  ";
+    fmt.Println(padded.trim());
+    fmt.Println(padded.trimLeft());
+    fmt.Println(padded.trimRight());
+    
+    // String case
+    String mixed = "HeLLo WoRLD";
+    fmt.Println(mixed.toUpperCase());
+    fmt.Println(mixed.toLowerCase());
+    fmt.Println(mixed.capitalize());
+}

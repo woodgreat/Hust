@@ -1,0 +1,29 @@
+use GO.fmt.*;
+
+void main() {
+    // Multiple assignment
+    i32 a = 1;
+    i32 b = 2;
+    i32 c = 3;
+    
+    fmt.Println(a);
+    fmt.Println(b);
+    fmt.Println(c);
+    
+    // Swap
+    i32 temp = a;
+    a = b;
+    b = temp;
+    
+    fmt.Println(a);
+    fmt.Println(b);
+    
+    // Multiple operations
+    i32 x = 10;
+    i32 y = 20;
+    i32 z = x + y * 2;
+    fmt.Println(z);
+    
+    z = (x + y) * 2;
+    fmt.Println(z);
+}

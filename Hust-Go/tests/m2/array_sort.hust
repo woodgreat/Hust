@@ -1,0 +1,28 @@
+use GO.fmt.*;
+
+void main() {
+    // Array sorting (bubble sort)
+    i32[] arr = {64, 34, 25, 12, 22, 11, 90};
+    
+    fmt.Println("Original array:");
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+    
+    // Bubble sort
+    for (i32 i = 0; i < arr.len() - 1; i++) {
+        for (i32 j = 0; j < arr.len() - i - 1; j++) {
+            if (arr[j] > arr[j + 1]) {
+                // Swap
+                i32 temp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = temp;
+            }
+        }
+    }
+    
+    fmt.Println("Sorted array:");
+    for (i32 i = 0; i < arr.len(); i++) {
+        fmt.Println(arr[i]);
+    }
+}

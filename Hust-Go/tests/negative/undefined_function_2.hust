@@ -1,0 +1,6 @@
+use GO.fmt.*;
+
+void main() {
+    undefinedFunction();
+    fmt.Println("test");
+}

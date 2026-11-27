@@ -1,0 +1,91 @@
+use GO.fmt.*;
+
+enum ChessPiece {
+    Pawn,
+    Knight,
+    Bishop,
+    Rook,
+    Queen,
+    King
+}
+
+class ChessBoard {
+    String[][] board;
+    
+    public ChessBoard() {
+        this.board = {};
+        for (i32 i = 0; i < 8; i++) {
+            String[] row = {};
+            for (i32 j = 0; j < 8; j++) {
+                row.push(".");
+            }
+            this.board.push(row);
+        }
+    }
+    
+    public void setup() {
+        // Setup white pieces
+        this.board[0][0] = "R";
+        this.board[0][1] = "N";
+        this.board[0][2] = "B";
+        this.board[0][3] = "Q";
+        this.board[0][4] = "K";
+        this.board[0][5] = "B";
+        this.board[0][6] = "N";
+        this.board[0][7] = "R";
+        for (i32 i = 0; i < 8; i++) {
+            this.board[1][i] = "P";
+        }
+        
+        // Setup black pieces
+        this.board[7][0] = "r";
+        this.board[7][1] = "n";
+        this.board[7][2] = "b";
+        this.board[7][3] = "q";
+        this.board[7][4] = "k";
+        this.board[7][5] = "b";
+        this.board[7][6] = "n";
+        this.board[7][7] = "r";
+        for (i32 i = 0; i < 8; i++) {
+            this.board[6][i] = "p";
+        }
+    }
+    
+    public void printBoard() {
+        fmt.Println("  a b c d e f g h");
+        for (i32 i = 0; i < 8; i++) {
+            fmt.Print(8 - i + " ");
+            for (i32 j = 0; j < 8; j++) {
+                fmt.Print(this.board[i][j] + " ");
+            }
+            fmt.Println(8 - i);
+        }
+        fmt.Println("  a b c d e f g h");
+    }
+    
+    public void move(String from, String to) {
+        i32 fromRow = 8 - (from.charAt(1) - '0');
+        i32 fromCol = from.charAt(0) - 'a';
+        i32 toRow = 8 - (to.charAt(1) - '0');
+        i32 toCol = to.charAt(0) - 'a';
+        
+        this.board[toRow][toCol] = this.board[fromRow][fromCol];
+        this.board[fromRow][fromCol] = ".";
+    }
+}
+
+void main() {
+    ChessBoard board = new ChessBoard();
+    board.setup();
+    board.printBoard();
+    
+    fmt.Println("---");
+    fmt.Println("Moving e2 to e4...");
+    board.move("e2", "e4");
+    board.printBoard();
+    
+    fmt.Println("---");
+    fmt.Println("Moving e7 to e5...");
+    board.move("e7", "e5");
+    board.printBoard();
+}

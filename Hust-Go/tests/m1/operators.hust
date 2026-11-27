@@ -1,0 +1,30 @@
+use GO.fmt.*;
+
+void main() {
+    // Ternary-like operations
+    i32 x = 10;
+    i32 y = 20;
+    
+    i32 max = x > y ? x : y;
+    fmt.Println(max);
+    
+    i32 min = x < y ? x : y;
+    fmt.Println(min);
+    
+    // Compound assignment
+    i32 a = 5;
+    a += 3;
+    fmt.Println(a);
+    
+    a -= 2;
+    fmt.Println(a);
+    
+    a *= 4;
+    fmt.Println(a);
+    
+    a /= 2;
+    fmt.Println(a);
+    
+    a %= 3;
+    fmt.Println(a);
+}

@@ -1,0 +1,71 @@
+use GO.fmt.*;
+
+enum TrafficLight {
+    Red,
+    Yellow,
+    Green
+}
+
+class TrafficSignal {
+    TrafficLight current;
+    i32 timer;
+    
+    public TrafficSignal() {
+        this.current = TrafficLight.Red;
+        this.timer = 0;
+    }
+    
+    public void change() {
+        if (this.current == TrafficLight.Red) {
+            this.current = TrafficLight.Green;
+            this.timer = 30;
+        } else if (this.current == TrafficLight.Green) {
+            this.current = TrafficLight.Yellow;
+            this.timer = 5;
+        } else {
+            this.current = TrafficLight.Red;
+            this.timer = 30;
+        }
+    }
+    
+    public void tick() {
+        if (this.timer > 0) {
+            this.timer = this.timer - 1;
+        }
+        if (this.timer == 0) {
+            this.change();
+        }
+    }
+    
+    public String getColorName() {
+        if (this.current == TrafficLight.Red) return "RED";
+        if (this.current == TrafficLight.Yellow) return "YELLOW";
+        return "GREEN";
+    }
+    
+    public bool canGo() {
+        return this.current == TrafficLight.Green;
+    }
+    
+    public bool shouldStop() {
+        return this.current == TrafficLight.Red;
+    }
+    
+    public bool shouldSlowDown() {
+        return this.current == TrafficLight.Yellow;
+    }
+}
+
+void main() {
+    TrafficSignal signal = new TrafficSignal();
+    
+    fmt.Println("Initial: " + signal.getColorName());
+    
+    for (i32 i = 0; i < 40; i++) {
+        signal.tick();
+        if (i % 10 == 0) {
+            fmt.Println("Time " + i + ": " + signal.getColorName() + 
+                       " (Can go: " + signal.canGo() + ")");
+        }
+    }
+}

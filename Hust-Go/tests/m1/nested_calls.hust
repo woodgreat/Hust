@@ -1,0 +1,27 @@
+use GO.fmt.*;
+
+void main() {
+    // Nested function calls
+    i32 result = add(multiply(2, 3), subtract(10, 5));
+    fmt.Println(result);
+    
+    // Function as argument
+    printValue(add(5, 3));
+    printValue(multiply(4, 7));
+}
+
+i32 add(i32 a, i32 b) {
+    return a + b;
+}
+
+i32 subtract(i32 a, i32 b) {
+    return a - b;
+}
+
+i32 multiply(i32 a, i32 b) {
+    return a * b;
+}
+
+void printValue(i32 value) {
+    fmt.Println("Value: " + value);
+}

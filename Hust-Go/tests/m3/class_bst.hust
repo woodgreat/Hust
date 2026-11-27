@@ -1,0 +1,144 @@
+use GO.fmt.*;
+
+class Node {
+    i32 value;
+    Node left;
+    Node right;
+    
+    public Node(i32 v) {
+        this.value = v;
+        this.left = null;
+        this.right = null;
+    }
+}
+
+class BinaryTree {
+    Node root;
+    
+    public BinaryTree() {
+        this.root = null;
+    }
+    
+    public void insert(i32 value) {
+        this.root = this.insertRec(this.root, value);
+    }
+    
+    public Node insertRec(Node node, i32 value) {
+        if (node == null) {
+            return new Node(value);
+        }
+        if (value < node.value) {
+            node.left = this.insertRec(node.left, value);
+        } else if (value > node.value) {
+            node.right = this.insertRec(node.right, value);
+        }
+        return node;
+    }
+    
+    public bool search(i32 value) {
+        return this.searchRec(this.root, value);
+    }
+    
+    public bool searchRec(Node node, i32 value) {
+        if (node == null) {
+            return false;
+        }
+        if (value == node.value) {
+            return true;
+        }
+        if (value < node.value) {
+            return this.searchRec(node.left, value);
+        }
+        return this.searchRec(node.right, value);
+    }
+    
+    public void inorder() {
+        this.inorderRec(this.root);
+    }
+    
+    public void inorderRec(Node node) {
+        if (node != null) {
+            this.inorderRec(node.left);
+            fmt.Println(node.value);
+            this.inorderRec(node.right);
+        }
+    }
+    
+    public void preorder() {
+        this.preorderRec(this.root);
+    }
+    
+    public void preorderRec(Node node) {
+        if (node != null) {
+            fmt.Println(node.value);
+            this.preorderRec(node.left);
+            this.preorderRec(node.right);
+        }
+    }
+    
+    public void postorder() {
+        this.postorderRec(this.root);
+    }
+    
+    public void postorderRec(Node node) {
+        if (node != null) {
+            this.postorderRec(node.left);
+            this.postorderRec(node.right);
+            fmt.Println(node.value);
+        }
+    }
+    
+    public i32 getHeight() {
+        return this.getHeightRec(this.root);
+    }
+    
+    public i32 getHeightRec(Node node) {
+        if (node == null) {
+            return 0;
+        }
+        i32 leftHeight = this.getHeightRec(node.left);
+        i32 rightHeight = this.getHeightRec(node.right);
+        if (leftHeight > rightHeight) {
+            return leftHeight + 1;
+        }
+        return rightHeight + 1;
+    }
+    
+    public i32 getSize() {
+        return this.getSizeRec(this.root);
+    }
+    
+    public i32 getSizeRec(Node node) {
+        if (node == null) {
+            return 0;
+        }
+        return 1 + this.getSizeRec(node.left) + this.getSizeRec(node.right);
+    }
+}
+
+void main() {
+    BinaryTree tree = new BinaryTree();
+    
+    tree.insert(50);
+    tree.insert(30);
+    tree.insert(70);
+    tree.insert(20);
+    tree.insert(40);
+    tree.insert(60);
+    tree.insert(80);
+    
+    fmt.Println("Inorder:");
+    tree.inorder();
+    
+    fmt.Println("Preorder:");
+    tree.preorder();
+    
+    fmt.Println("Postorder:");
+    tree.postorder();
+    
+    fmt.Println("Height: " + tree.getHeight());
+    fmt.Println("Size: " + tree.getSize());
+    
+    fmt.Println("Search 40: " + tree.search(40));
+    fmt.Println("Search 90: " + tree.search(90));
+}

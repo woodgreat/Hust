@@ -1,0 +1,8 @@
+use GO.fmt.*;
+
+void main() {
+    i32 x = 10;
+    i32 y = 0;
+    i32 z = x / y;
+    fmt.Println(z);
+}

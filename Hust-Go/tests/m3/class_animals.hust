@@ -1,0 +1,132 @@
+use GO.fmt.*;
+
+class Animal {
+    String name;
+    i32 age;
+    
+    public Animal(String n, i32 a) {
+        this.name = n;
+        this.age = a;
+    }
+    
+    public void speak() {
+        fmt.Println(this.name + " makes a sound");
+    }
+    
+    public void eat() {
+        fmt.Println(this.name + " is eating");
+    }
+    
+    public void sleep() {
+        fmt.Println(this.name + " is sleeping");
+    }
+}
+
+class Dog extends Animal {
+    String breed;
+    
+    public Dog(String n, i32 a, String b) {
+        this.name = n;
+        this.age = a;
+        this.breed = b;
+    }
+    
+    public void speak() {
+        fmt.Println(this.name + " barks: Woof! Woof!");
+    }
+    
+    public void fetch() {
+        fmt.Println(this.name + " is fetching the ball");
+    }
+    
+    public void wagTail() {
+        fmt.Println(this.name + " is wagging its tail");
+    }
+}
+
+class Cat extends Animal {
+    bool indoor;
+    
+    public Cat(String n, i32 a, bool i) {
+        this.name = n;
+        this.age = a;
+        this.indoor = i;
+    }
+    
+    public void speak() {
+        fmt.Println(this.name + " meows: Meow!");
+    }
+    
+    public void purr() {
+        fmt.Println(this.name + " is purring");
+    }
+    
+    public void scratch() {
+        fmt.Println(this.name + " is scratching");
+    }
+}
+
+class Bird extends Animal {
+    bool canFly;
+    
+    public Bird(String n, i32 a, bool f) {
+        this.name = n;
+        this.age = a;
+        this.canFly = f;
+    }
+    
+    public void speak() {
+        fmt.Println(this.name + " chirps: Tweet! Tweet!");
+    }
+    
+    public void fly() {
+        if (this.canFly) {
+            fmt.Println(this.name + " is flying");
+        } else {
+            fmt.Println(this.name + " cannot fly");
+        }
+    }
+}
+
+class Fish extends Animal {
+    String waterType;
+    
+    public Fish(String n, i32 a, String w) {
+        this.name = n;
+        this.age = a;
+        this.waterType = w;
+    }
+    
+    public void speak() {
+        fmt.Println(this.name + " bubbles: Blub! Blub!");
+    }
+    
+    public void swim() {
+        fmt.Println(this.name + " is swimming in " + this.waterType + " water");
+    }
+}
+
+void main() {
+    Dog dog = new Dog("Buddy", 3, "Golden Retriever");
+    Cat cat = new Cat("Whiskers", 2, true);
+    Bird bird = new Bird("Tweety", 1, true);
+    Fish fish = new Fish("Nemo", 1, "salt");
+    
+    dog.speak();
+    dog.eat();
+    dog.fetch();
+    dog.wagTail();
+    
+    cat.speak();
+    cat.eat();
+    cat.purr();
+    cat.scratch();
+    
+    bird.speak();
+    bird.eat();
+    bird.fly();
+    
+    fish.speak();
+    fish.eat();
+    fish.swim();
+}

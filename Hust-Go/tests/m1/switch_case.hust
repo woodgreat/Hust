@@ -1,0 +1,19 @@
+use GO.fmt.*;
+
+void main() {
+    i32 x = 2;
+    
+    switch (x) {
+        case 1:
+            fmt.Println("one");
+            break;
+        case 2:
+            fmt.Println("two");
+            break;
+        case 3:
+            fmt.Println("three");
+            break;
+        default:
+            fmt.Println("other");
+    }
+}

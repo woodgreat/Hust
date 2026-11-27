@@ -1,0 +1,24 @@
+use GO.fmt.*;
+
+void main() {
+    // Break and continue
+    for (i32 i = 0; i < 10; i++) {
+        if (i == 5) {
+            break;
+        }
+        if (i % 2 == 0) {
+            continue;
+        }
+        fmt.Println(i);
+    }
+    
+    // While with break
+    i32 j = 0;
+    while (j < 10) {
+        if (j == 7) {
+            break;
+        }
+        fmt.Println(j);
+        j = j + 1;
+    }
+}

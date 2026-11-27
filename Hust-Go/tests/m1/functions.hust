@@ -1,0 +1,76 @@
+use GO.fmt.*;
+
+void main() {
+    // Test all function types
+    fmt.Println("Testing functions...");
+    
+    // No parameters, no return
+    printHello();
+    
+    // With parameters, no return
+    printSum(10, 20);
+    
+    // No parameters, with return
+    i32 result1 = getAnswer();
+    fmt.Println("Answer: " + result1);
+    
+    // With parameters, with return
+    i32 result2 = add(5, 3);
+    fmt.Println("5 + 3 = " + result2);
+    
+    // Multiple parameters
+    i32 result3 = calculate(10, 5, 2);
+    fmt.Println("Calculate: " + result3);
+    
+    // Recursive function
+    i32 fact = factorial(5);
+    fmt.Println("Factorial of 5: " + fact);
+    
+    // Function with array parameter
+    i32[] arr = {1, 2, 3, 4, 5};
+    i32 sum = sumArray(arr);
+    fmt.Println("Array sum: " + sum);
+    
+    // Function with string parameter
+    String greeting = greet("World");
+    fmt.Println(greeting);
+}
+
+void printHello() {
+    fmt.Println("Hello, World!");
+}
+
+void printSum(i32 a, i32 b) {
+    fmt.Println("Sum: " + (a + b));
+}
+
+i32 getAnswer() {
+    return 42;
+}
+
+i32 add(i32 a, i32 b) {
+    return a + b;
+}
+
+i32 calculate(i32 a, i32 b, i32 c) {
+    return a + b * c;
+}
+
+i32 factorial(i32 n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+i32 sumArray(i32[] arr) {
+    i32 sum = 0;
+    for (i32 i = 0; i < arr.len(); i++) {
+        sum = sum + arr[i];
+    }
+    return sum;
+}
+
+String greet(String name) {
+    return "Hello, " + name + "!";
+}

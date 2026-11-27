@@ -1,0 +1,29 @@
+use GO.fmt.*;
+use GO.strings.*;
+
+void main() {
+    String s1 = "Hello";
+    String s2 = "World";
+    
+    // String concatenation
+    String s3 = s1 + ", " + s2 + "!";
+    fmt.Println(s3);
+    
+    // String length
+    fmt.Println(s1.length());
+    
+    // String comparison
+    if (s1 == "Hello") {
+        fmt.Println("Equal");
+    }
+    
+    if (s1 != s2) {
+        fmt.Println("Not equal");
+    }
+    
+    // String methods
+    fmt.Println(s1.toUpperCase());
+    fmt.Println(s1.toLowerCase());
+    fmt.Println(s1.charAt(0));
+    fmt.Println(s1.substring(1, 4));
+}

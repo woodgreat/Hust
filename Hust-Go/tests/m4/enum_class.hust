@@ -1,0 +1,67 @@
+use GO.fmt.*;
+
+enum Status {
+    Pending,
+    Running,
+    Completed,
+    Failed
+}
+
+enum Priority {
+    Low,
+    Medium,
+    High,
+    Critical
+}
+
+class Task {
+    String name;
+    Status status;
+    Priority priority;
+    
+    public Task(String n, Priority p) {
+        this.name = n;
+        this.status = Status.Pending;
+        this.priority = p;
+    }
+    
+    public void start() {
+        this.status = Status.Running;
+    }
+    
+    public void complete() {
+        this.status = Status.Completed;
+    }
+    
+    public void fail() {
+        this.status = Status.Failed;
+    }
+    
+    public void printStatus() {
+        if (this.status == Status.Pending) {
+            fmt.Println(this.name + ": Pending");
+        } else if (this.status == Status.Running) {
+            fmt.Println(this.name + ": Running");
+        } else if (this.status == Status.Completed) {
+            fmt.Println(this.name + ": Completed");
+        } else {
+            fmt.Println(this.name + ": Failed");
+        }
+    }
+}
+
+void main() {
+    Task t1 = new Task("Task 1", Priority.High);
+    Task t2 = new Task("Task 2", Priority.Low);
+    
+    t1.printStatus();
+    t1.start();
+    t1.printStatus();
+    t1.complete();
+    t1.printStatus();
+    
+    t2.printStatus();
+    t2.start();
+    t2.fail();
+    t2.printStatus();
+}

@@ -1,0 +1,21 @@
+use GO.fmt.*;
+
+void main() {
+    // Array of strings
+    String[] names = {"Alice", "Bob", "Charlie"};
+    
+    for (i32 i = 0; i < names.len(); i++) {
+        fmt.Println(names[i]);
+    }
+    
+    // Array of booleans
+    bool[] flags = {true, false, true};
+    
+    for (i32 i = 0; i < flags.len(); i++) {
+        if (flags[i]) {
+            fmt.Println("true");
+        } else {
+            fmt.Println("false");
+        }
+    }
+}

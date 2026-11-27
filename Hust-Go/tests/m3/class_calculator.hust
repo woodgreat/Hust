@@ -1,0 +1,111 @@
+use GO.fmt.*;
+
+class Calculator {
+    public i32 add(i32 a, i32 b) {
+        return a + b;
+    }
+    
+    public i32 subtract(i32 a, i32 b) {
+        return a - b;
+    }
+    
+    public i32 multiply(i32 a, i32 b) {
+        return a * b;
+    }
+    
+    public i32 divide(i32 a, i32 b) {
+        if (b == 0) {
+            return 0;
+        }
+        return a / b;
+    }
+    
+    public i32 power(i32 base, i32 exp) {
+        i32 result = 1;
+        for (i32 i = 0; i < exp; i++) {
+            result = result * base;
+        }
+        return result;
+    }
+    
+    public i32 factorial(i32 n) {
+        if (n <= 1) {
+            return 1;
+        }
+        return n * this.factorial(n - 1);
+    }
+    
+    public bool isPrime(i32 n) {
+        if (n <= 1) {
+            return false;
+        }
+        for (i32 i = 2; i * i <= n; i++) {
+            if (n % i == 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+    
+    public i32 gcd(i32 a, i32 b) {
+        if (b == 0) {
+            return a;
+        }
+        return this.gcd(b, a % b);
+    }
+    
+    public i32 lcm(i32 a, i32 b) {
+        return a * b / this.gcd(a, b);
+    }
+    
+    public f32 sqrt(f32 x) {
+        if (x <= 0) {
+            return 0.0;
+        }
+        f32 guess = x / 2;
+        for (i32 i = 0; i < 10; i++) {
+            guess = (guess + x / guess) / 2;
+        }
+        return guess;
+    }
+    
+    public f32 abs(f32 x) {
+        if (x < 0) {
+            return -x;
+        }
+        return x;
+    }
+    
+    public i32 max(i32 a, i32 b) {
+        if (a > b) {
+            return a;
+        }
+        return b;
+    }
+    
+    public i32 min(i32 a, i32 b) {
+        if (a < b) {
+            return a;
+        }
+        return b;
+    }
+}
+
+void main() {
+    Calculator calc = new Calculator();
+    
+    fmt.Println(calc.add(10, 5));
+    fmt.Println(calc.subtract(10, 5));
+    fmt.Println(calc.multiply(10, 5));
+    fmt.Println(calc.divide(10, 5));
+    fmt.Println(calc.power(2, 10));
+    fmt.Println(calc.factorial(5));
+    fmt.Println(calc.isPrime(7));
+    fmt.Println(calc.isPrime(10));
+    fmt.Println(calc.gcd(48, 18));
+    fmt.Println(calc.lcm(4, 6));
+    fmt.Println(calc.sqrt(16.0));
+    fmt.Println(calc.abs(-5.0));
+    fmt.Println(calc.max(10, 20));
+    fmt.Println(calc.min(10, 20));
+}

@@ -1,0 +1,23 @@
+use GO.fmt.*;
+
+void main() {
+    // Comments test
+    // This is a single line comment
+    
+    /* This is a
+       multi-line comment */
+    
+    i32 x = 10; // Comment at end of line
+    
+    /* Another multi-line
+       comment with code:
+       i32 y = 20;
+    */
+    
+    fmt.Println(x);
+    
+    // Nested comments (should not work)
+    // /* This is not a nested comment */
+    
+    fmt.Println("Comments test passed");
+}

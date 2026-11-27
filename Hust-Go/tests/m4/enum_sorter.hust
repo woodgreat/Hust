@@ -1,0 +1,46 @@
+use GO.fmt.*;
+
+enum SortOrder {
+    Ascending,
+    Descending
+}
+
+class Sorter {
+    public i32[] sort(i32[] arr, SortOrder order) {
+        i32[] result = arr;
+        for (i32 i = 0; i < result.len() - 1; i++) {
+            for (i32 j = 0; j < result.len() - i - 1; j++) {
+                bool shouldSwap = false;
+                if (order == SortOrder.Ascending) {
+                    shouldSwap = result[j] > result[j + 1];
+                } else {
+                    shouldSwap = result[j] < result[j + 1];
+                }
+                if (shouldSwap) {
+                    i32 temp = result[j];
+                    result[j] = result[j + 1];
+                    result[j + 1] = temp;
+                }
+            }
+        }
+        return result;
+    }
+}
+
+void main() {
+    Sorter sorter = new Sorter();
+    
+    i32[] arr1 = {64, 34, 25, 12, 22, 11, 90};
+    i32[] sorted1 = sorter.sort(arr1, SortOrder.Ascending);
+    fmt.Println("Ascending:");
+    for (i32 i = 0; i < sorted1.len(); i++) {
+        fmt.Println(sorted1[i]);
+    }
+    
+    i32[] arr2 = {64, 34, 25, 12, 22, 11, 90};
+    i32[] sorted2 = sorter.sort(arr2, SortOrder.Descending);
+    fmt.Println("Descending:");
+    for (i32 i = 0; i < sorted2.len(); i++) {
+        fmt.Println(sorted2[i]);
+    }
+}

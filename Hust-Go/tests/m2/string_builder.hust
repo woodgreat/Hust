@@ -1,0 +1,29 @@
+use GO.fmt.*;
+
+void main() {
+    // String builder pattern
+    String result = "";
+    
+    for (i32 i = 0; i < 5; i++) {
+        result = result + i + ",";
+    }
+    fmt.Println(result);
+    
+    // String join
+    String[] parts = {"a", "b", "c", "d"};
+    String joined = "";
+    for (i32 i = 0; i < parts.len(); i++) {
+        if (i > 0) {
+            joined = joined + "-";
+        }
+        joined = joined + parts[i];
+    }
+    fmt.Println(joined);
+    
+    // String split
+    String csv = "one,two,three,four";
+    String[] tokens = csv.split(",");
+    for (i32 i = 0; i < tokens.len(); i++) {
+        fmt.Println(tokens[i]);
+    }
+}

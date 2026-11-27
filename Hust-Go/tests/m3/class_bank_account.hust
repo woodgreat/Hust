@@ -1,0 +1,73 @@
+use GO.fmt.*;
+
+class BankAccount {
+    String accountNumber;
+    String owner;
+    f32 balance;
+    String[] transactionHistory;
+    
+    public BankAccount(String num, String o, f32 initialBalance) {
+        this.accountNumber = num;
+        this.owner = o;
+        this.balance = initialBalance;
+        this.transactionHistory = {};
+        this.transactionHistory.push("Account opened with balance: " + initialBalance);
+    }
+    
+    public void deposit(f32 amount) {
+        if (amount > 0) {
+            this.balance = this.balance + amount;
+            this.transactionHistory.push("Deposited: " + amount + ", Balance: " + this.balance);
+        }
+    }
+    
+    public bool withdraw(f32 amount) {
+        if (amount > 0 && amount <= this.balance) {
+            this.balance = this.balance - amount;
+            this.transactionHistory.push("Withdrew: " + amount + ", Balance: " + this.balance);
+            return true;
+        }
+        this.transactionHistory.push("Failed withdrawal: " + amount + ", Balance: " + this.balance);
+        return false;
+    }
+    
+    public bool transfer(BankAccount other, f32 amount) {
+        if (this.withdraw(amount)) {
+            other.deposit(amount);
+            this.transactionHistory.push("Transferred to " + other.accountNumber + ": " + amount);
+            other.transactionHistory.push("Received from " + this.accountNumber + ": " + amount);
+            return true;
+        }
+        return false;
+    }
+    
+    public f32 getBalance() {
+        return this.balance;
+    }
+    
+    public void printStatement() {
+        fmt.Println("Account: " + this.accountNumber);
+        fmt.Println("Owner: " + this.owner);
+        fmt.Println("Current Balance: " + this.balance);
+        fmt.Println("Transaction History:");
+        for (i32 i = 0; i < this.transactionHistory.len(); i++) {
+            fmt.Println("  " + this.transactionHistory[i]);
+        }
+    }
+}
+
+void main() {
+    BankAccount alice = new BankAccount("ACC001", "Alice", 1000.0);
+    BankAccount bob = new BankAccount("ACC002", "Bob", 500.0);
+    
+    alice.deposit(200.0);
+    alice.withdraw(100.0);
+    
+    bob.deposit(300.0);
+    
+    alice.transfer(bob, 150.0);
+    
+    alice.printStatement();
+    fmt.Println("---");
+    bob.printStatement();
+}

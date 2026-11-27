@@ -1,0 +1,74 @@
+use GO.fmt.*;
+
+enum Planet {
+    Mercury,
+    Venus,
+    Earth,
+    Mars,
+    Jupiter,
+    Saturn,
+    Uranus,
+    Neptune
+}
+
+class SolarSystem {
+    public f32 getDistanceFromSun(Planet p) {
+        if (p == Planet.Mercury) return 0.39;
+        if (p == Planet.Venus) return 0.72;
+        if (p == Planet.Earth) return 1.0;
+        if (p == Planet.Mars) return 1.52;
+        if (p == Planet.Jupiter) return 5.20;
+        if (p == Planet.Saturn) return 9.58;
+        if (p == Planet.Uranus) return 19.22;
+        return 30.05;
+    }
+    
+    public f32 getOrbitalPeriod(Planet p) {
+        if (p == Planet.Mercury) return 0.24;
+        if (p == Planet.Venus) return 0.62;
+        if (p == Planet.Earth) return 1.0;
+        if (p == Planet.Mars) return 1.88;
+        if (p == Planet.Jupiter) return 11.86;
+        if (p == Planet.Saturn) return 29.46;
+        if (p == Planet.Uranus) return 84.01;
+        return 164.8;
+    }
+    
+    public String getPlanetName(Planet p) {
+        if (p == Planet.Mercury) return "Mercury";
+        if (p == Planet.Venus) return "Venus";
+        if (p == Planet.Earth) return "Earth";
+        if (p == Planet.Mars) return "Mars";
+        if (p == Planet.Jupiter) return "Jupiter";
+        if (p == Planet.Saturn) return "Saturn";
+        if (p == Planet.Uranus) return "Uranus";
+        return "Neptune";
+    }
+    
+    public bool isTerrestrial(Planet p) {
+        return p == Planet.Mercury || p == Planet.Venus || 
+               p == Planet.Earth || p == Planet.Mars;
+    }
+    
+    public bool isGasGiant(Planet p) {
+        return p == Planet.Jupiter || p == Planet.Saturn || 
+               p == Planet.Uranus || p == Planet.Neptune;
+    }
+}
+
+void main() {
+    SolarSystem solar = new SolarSystem();
+    
+    Planet[] planets = {
+        Planet.Mercury, Planet.Venus, Planet.Earth, Planet.Mars,
+        Planet.Jupiter, Planet.Saturn, Planet.Uranus, Planet.Neptune
+    };
+    
+    for (i32 i = 0; i < planets.len(); i++) {
+        fmt.Println(solar.getPlanetName(planets[i]) + ":");
+        fmt.Println("  Distance: " + solar.getDistanceFromSun(planets[i]) + " AU");
+        fmt.Println("  Orbital Period: " + solar.getOrbitalPeriod(planets[i]) + " years");
+        fmt.Println("  Terrestrial: " + solar.isTerrestrial(planets[i]));
+        fmt.Println("  Gas Giant: " + solar.isGasGiant(planets[i]));
+    }
+}

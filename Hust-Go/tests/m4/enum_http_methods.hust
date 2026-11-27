@@ -1,0 +1,67 @@
+use GO.fmt.*;
+
+enum HttpMethod {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+    PATCH,
+    HEAD,
+    OPTIONS
+}
+
+class HttpRequest {
+    String url;
+    HttpMethod method;
+    String body;
+    
+    public HttpRequest(String u, HttpMethod m) {
+        this.url = u;
+        this.method = m;
+        this.body = "";
+    }
+    
+    public void setBody(String b) {
+        this.body = b;
+    }
+    
+    public String getMethodName() {
+        if (this.method == HttpMethod.GET) return "GET";
+        if (this.method == HttpMethod.POST) return "POST";
+        if (this.method == HttpMethod.PUT) return "PUT";
+        if (this.method == HttpMethod.DELETE) return "DELETE";
+        if (this.method == HttpMethod.PATCH) return "PATCH";
+        if (this.method == HttpMethod.HEAD) return "HEAD";
+        return "OPTIONS";
+    }
+    
+    public bool hasBody() {
+        return this.method == HttpMethod.POST || 
+               this.method == HttpMethod.PUT || 
+               this.method == HttpMethod.PATCH;
+    }
+    
+    public void printRequest() {
+        fmt.Println(this.getMethodName() + " " + this.url);
+        if (this.hasBody() && this.body != "") {
+            fmt.Println("Body: " + this.body);
+        }
+    }
+}
+
+void main() {
+    HttpRequest[] requests = {
+        new HttpRequest("https://api.example.com/users", HttpMethod.GET),
+        new HttpRequest("https://api.example.com/users", HttpMethod.POST),
+        new HttpRequest("https://api.example.com/users/1", HttpMethod.PUT),
+        new HttpRequest("https://api.example.com/users/1", HttpMethod.DELETE)
+    };
+    
+    requests[1].setBody("{\"name\": \"Alice\"}");
+    requests[2].setBody("{\"name\": \"Bob\"}");
+    
+    for (i32 i = 0; i < requests.len(); i++) {
+        requests[i].printRequest();
+        fmt.Println("---");
+    }
+}

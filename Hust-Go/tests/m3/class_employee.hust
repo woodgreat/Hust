@@ -1,0 +1,128 @@
+use GO.fmt.*;
+
+class Employee {
+    String id;
+    String name;
+    String department;
+    f32 salary;
+    Employee manager;
+    
+    public Employee(String i, String n, String d, f32 s) {
+        this.id = i;
+        this.name = n;
+        this.department = d;
+        this.salary = s;
+        this.manager = null;
+    }
+    
+    public void setManager(Employee m) {
+        this.manager = m;
+    }
+    
+    public f32 getSalary() {
+        return this.salary;
+    }
+    
+    public void giveRaise(f32 percent) {
+        this.salary = this.salary * (1 + percent / 100);
+    }
+    
+    public String getInfo() {
+        String info = "ID: " + this.id + ", Name: " + this.name + 
+                     ", Dept: " + this.department + ", Salary: $" + this.salary;
+        if (this.manager != null) {
+            info = info + ", Manager: " + this.manager.name;
+        }
+        return info;
+    }
+}
+
+class Department {
+    String name;
+    Employee[] employees;
+    
+    public Department(String n) {
+        this.name = n;
+        this.employees = {};
+    }
+    
+    public void addEmployee(Employee e) {
+        this.employees.push(e);
+    }
+    
+    public f32 getTotalSalary() {
+        f32 total = 0.0;
+        for (i32 i = 0; i < this.employees.len(); i++) {
+            total = total + this.employees[i].getSalary();
+        }
+        return total;
+    }
+    
+    public f32 getAverageSalary() {
+        if (this.employees.len() == 0) {
+            return 0.0;
+        }
+        return this.getTotalSalary() / this.employees.len();
+    }
+    
+    public Employee getHighestPaid() {
+        if (this.employees.len() == 0) {
+            return null;
+        }
+        Employee highest = this.employees[0];
+        for (i32 i = 1; i < this.employees.len(); i++) {
+            if (this.employees[i].getSalary() > highest.getSalary()) {
+                highest = this.employees[i];
+            }
+        }
+        return highest;
+    }
+    
+    public void printReport() {
+        fmt.Println("Department: " + this.name);
+        fmt.Println("Employees: " + this.employees.len());
+        fmt.Println("Total Salary: $" + this.getTotalSalary());
+        fmt.Println("Average Salary: $" + this.getAverageSalary());
+        Employee highest = this.getHighestPaid();
+        if (highest != null) {
+            fmt.Println("Highest Paid: " + highest.name + " ($" + highest.getSalary() + ")");
+        }
+        fmt.Println("Employee List:");
+        for (i32 i = 0; i < this.employees.len(); i++) {
+            fmt.Println("  " + this.employees[i].getInfo());
+        }
+    }
+}
+
+void main() {
+    Department engineering = new Department("Engineering");
+    Department sales = new Department("Sales");
+    
+    Employee alice = new Employee("E001", "Alice", "Engineering", 90000.0);
+    Employee bob = new Employee("E002", "Bob", "Engineering", 85000.0);
+    Employee charlie = new Employee("E003", "Charlie", "Sales", 75000.0);
+    Employee diana = new Employee("E004", "Diana", "Sales", 80000.0);
+    
+    Employee manager = new Employee("M001", "Manager Mike", "Engineering", 120000.0);
+    
+    alice.setManager(manager);
+    bob.setManager(manager);
+    
+    engineering.addEmployee(alice);
+    engineering.addEmployee(bob);
+    engineering.addEmployee(manager);
+    
+    sales.addEmployee(charlie);
+    sales.addEmployee(diana);
+    
+    engineering.printReport();
+    fmt.Println("---");
+    sales.printReport();
+    
+    // Give raises
+    alice.giveRaise(10.0);
+    bob.giveRaise(5.0);
+    
+    fmt.Println("After raises:");
+    engineering.printReport();
+}

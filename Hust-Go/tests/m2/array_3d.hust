@@ -1,0 +1,42 @@
+use GO.fmt.*;
+
+void main() {
+    // Array of arrays (3D array simulation)
+    i32[][][] cube = {};
+    
+    // Initialize 3x3x3 cube
+    for (i32 i = 0; i < 3; i++) {
+        i32[][] plane = {};
+        for (i32 j = 0; j < 3; j++) {
+            i32[] row = {};
+            for (i32 k = 0; k < 3; k++) {
+                row.push(i * 9 + j * 3 + k);
+            }
+            plane.push(row);
+        }
+        cube.push(plane);
+    }
+    
+    // Print cube
+    fmt.Println("3D Cube:");
+    for (i32 i = 0; i < cube.len(); i++) {
+        fmt.Println("Plane " + i + ":");
+        for (i32 j = 0; j < cube[i].len(); j++) {
+            for (i32 k = 0; k < cube[i][j].len(); k++) {
+                fmt.Print(cube[i][j][k] + " ");
+            }
+            fmt.Println("");
+        }
+    }
+    
+    // Sum all elements
+    i32 sum = 0;
+    for (i32 i = 0; i < cube.len(); i++) {
+        for (i32 j = 0; j < cube[i].len(); j++) {
+            for (i32 k = 0; k < cube[i][j].len(); k++) {
+                sum = sum + cube[i][j][k];
+            }
+        }
+    }
+    fmt.Println("Total sum: " + sum);
+}
