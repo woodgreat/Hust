@@ -10,8 +10,8 @@
     <!-- .NET assembly versions allow only 3-4 numeric parts, each <= 65535, so the
          Wood-style date suffix cannot live in Version. Keep the full version in
          InformationalVersion and Program.cs; NuGet sees a valid 3-part version. -->
-    <Version>0.1.2</Version>
-    <InformationalVersion>0.1.2.20261128125000</InformationalVersion>
+    <Version>0.1.3</Version>
+    <InformationalVersion>0.1.3.20261128125000</InformationalVersion>
     <Description>Hust language core for C#</Description>
   </PropertyGroup>
 

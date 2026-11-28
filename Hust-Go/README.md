@@ -3,7 +3,7 @@
 The Go language core for Hust. Transpiles Hust source code to Go and compiles
 with the Go toolchain.
 
-**Version:** 0.1.1.20261128125000
+**Version:** 0.1.2.20261128125000
 
 ## Role
 

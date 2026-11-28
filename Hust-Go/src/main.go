@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const Version = "0.1.1.20261128125000"
+const Version = "0.1.2.20261128125000"
 
 func main() {
 	if len(os.Args) < 2 {

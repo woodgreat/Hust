@@ -11,7 +11,7 @@ namespace HustCSharp;
 class Program
 {
     private const string CoreName = "csharp";
-    private const string CoreVersion = "0.1.2.20261128125000";
+    private const string CoreVersion = "0.1.3.20261128125000";
     private const int ProtocolVersion = 1;
 
     static int Main(string[] args)

@@ -2,7 +2,7 @@
 
 Hust language core for C# - transpiles Hust source code to C#.
 
-**Version:** 0.1.2.20261128125000
+**Version:** 0.1.3.20261128125000
 
 ## Overview
 
