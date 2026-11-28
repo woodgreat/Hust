@@ -1,0 +1,12 @@
+use GO.fmt.*;
+
+void main() {
+    String a = "line1\nline2";
+    String b = "tab\there";
+    String c = "quote\"slash\\";
+
+    fmt.Println(a);
+    fmt.Println(b);
+    fmt.Println(c);
+    fmt.Println(a.len());
+}

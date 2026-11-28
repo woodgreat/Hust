@@ -1,0 +1,26 @@
+use GO.fmt.*;
+
+void main() {
+    u8 a = 200;
+    u8 b = 55;
+    u8 sum = a + b;
+    u8 diff = a - 50;
+
+    fmt.Println(sum);
+    fmt.Println(diff);
+
+    u16 wide = 60000;
+    u16 quotient = wide / 3;
+    fmt.Println(quotient);
+
+    u32 big = 4000000000;
+    u32 half = big / 2;
+    fmt.Println(half);
+
+    u64 huge = 18000000000000000000;
+    u64 next = huge + 1;
+    fmt.Println(next);
+
+    fmt.Println(a > b);
+    fmt.Println(a <= 255);
+}

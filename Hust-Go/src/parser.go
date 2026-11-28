@@ -982,6 +982,25 @@ func (p *Parser) parsePrimary() (Expr, error) {
 	}
 
 	if tok.is("(") {
+		// Explicit conversion: (i32)x, (f64)(a + b), (char)code.
+		// Only primitive type names are recognised here; class names stay
+		// ordinary parenthesised expressions.
+		if p.peekN(1).Kind == TIdent && p.peekN(2).is(")") && isCastTypeName(p.peekN(1).Text) {
+			line := p.advance().Line
+			typ, err := p.parseType()
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expect(")"); err != nil {
+				return nil, err
+			}
+			operand, err := p.parseUnary()
+			if err != nil {
+				return nil, err
+			}
+			return &CastExpr{Type: typ, X: operand, Line: line}, nil
+		}
+
 		p.advance()
 		expr, err := p.parseExpr()
 		if err != nil {
@@ -1089,6 +1108,8 @@ func exprLine(e Expr) int {
 		return v.Line
 	case *UnaryExpr:
 		return v.Line
+	case *CastExpr:
+		return v.Line
 	case *PostfixExpr:
 		return v.Line
 	case *AssignExpr:
@@ -1110,4 +1131,15 @@ func exprLine(e Expr) int {
 	default:
 		return 0
 	}
+}
+
+// isCastTypeName limits the (Type)expr form to primitive conversions so that
+// ordinary parenthesised expressions are never misread as casts.
+func isCastTypeName(name string) bool {
+	switch name {
+	case "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
+		"f32", "f64", "bool", "char", "String":
+		return true
+	}
+	return false
 }

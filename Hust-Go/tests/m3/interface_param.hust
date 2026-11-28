@@ -1,0 +1,46 @@
+use GO.fmt.*;
+
+interface Shape {
+    public f32 area();
+}
+
+class Circle implements Shape {
+    f32 r;
+
+    public Circle(f32 x) {
+        this.r = x;
+    }
+
+    public f32 area() {
+        return 3.0 * this.r * this.r;
+    }
+}
+
+class Square implements Shape {
+    f32 s;
+
+    public Square(f32 x) {
+        this.s = x;
+    }
+
+    public f32 area() {
+        return this.s * this.s;
+    }
+}
+
+f32 total(Shape a, Shape b) {
+    return a.area() + b.area();
+}
+
+Shape pick(bool circle) {
+    if (circle) {
+        return new Circle(2.0);
+    }
+    return new Square(3.0);
+}
+
+void main() {
+    fmt.Println(total(new Circle(1.0), new Square(2.0)));
+    fmt.Println(pick(true).area());
+    fmt.Println(pick(false).area());
+}

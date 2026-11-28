@@ -1,0 +1,7 @@
+use GO.fmt.*;
+
+void main() {
+    i32[] xs = {1, 2};
+    i32 n = xs.push(3);
+    fmt.Println(n);
+}

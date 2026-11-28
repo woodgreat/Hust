@@ -1,0 +1,13 @@
+use GO.fmt.*;
+
+void main() {
+    for (i32 i = 0; i < 5; ++i) {
+        fmt.Println(i);
+    }
+
+    i32 n = 10;
+    i32 a = n++;
+    i32 b = ++n;
+    fmt.Println(a);
+    fmt.Println(b);
+}

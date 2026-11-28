@@ -1,0 +1,21 @@
+use GO.fmt.*;
+
+void main() {
+    i32 code = (i32)'A';
+    char back = (char)code;
+    f64 ratio = (f64)7 / (f64)2;
+    i32 truncated = (i32)3.9;
+    f32 narrow = (f32)1.25;
+    i32 nested = (i32)((f64)1 + (f64)2.5);
+    String text = (String)42;
+    String flag = (String)true;
+
+    fmt.Println(code);
+    fmt.Println(back);
+    fmt.Println(ratio);
+    fmt.Println(truncated);
+    fmt.Println(narrow);
+    fmt.Println(nested);
+    fmt.Println(text);
+    fmt.Println(flag);
+}

@@ -1,0 +1,23 @@
+use GO.fmt.*;
+
+i32 sum(i32[] xs) {
+    i32 total = 0;
+    for (i32 i = 0; i < xs.len(); i++) {
+        total = total + xs[i];
+    }
+    return total;
+}
+
+void addOne(i32[] xs) {
+    for (i32 i = 0; i < xs.len(); i++) {
+        xs[i] = xs[i] + 1;
+    }
+}
+
+void main() {
+    i32[] xs = {1, 2, 3};
+    fmt.Println(sum(xs));
+    addOne(xs);
+    fmt.Println(sum(xs));
+    fmt.Println(xs.len());
+}

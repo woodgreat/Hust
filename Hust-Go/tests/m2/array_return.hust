@@ -1,0 +1,30 @@
+use GO.fmt.*;
+
+i32[] squares(i32 n) {
+    i32[] out = {};
+    for (i32 i = 0; i < n; i++) {
+        out.push(i * i);
+    }
+    return out;
+}
+
+String[] labels(i32 n) {
+    String[] out = {};
+    for (i32 i = 0; i < n; i++) {
+        out.push("item" + i);
+    }
+    return out;
+}
+
+void main() {
+    i32[] xs = squares(4);
+    for (i32 i = 0; i < xs.len(); i++) {
+        fmt.Println(xs[i]);
+    }
+    fmt.Println(xs.len());
+
+    String[] names = labels(3);
+    for (i32 i = 0; i < names.len(); i++) {
+        fmt.Println(names[i]);
+    }
+}

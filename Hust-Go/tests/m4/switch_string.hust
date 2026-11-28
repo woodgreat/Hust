@@ -1,0 +1,15 @@
+use GO.fmt.*;
+
+void main() {
+    String cmd = "stop";
+    switch (cmd) {
+        case "start":
+            fmt.Println("starting");
+            break;
+        case "stop":
+            fmt.Println("stopping");
+            break;
+        default:
+            fmt.Println("unknown");
+    }
+}

@@ -1,0 +1,13 @@
+use GO.fmt.*;
+
+void main() {
+    i32 mask = 0xFF;
+    i32 bits = 0b1010;
+    i32 mixed = 0x10 + 0b11;
+
+    fmt.Println(mask);
+    fmt.Println(bits);
+    fmt.Println(mixed);
+    fmt.Println(mask & 0x0F);
+    fmt.Println((mask >> 4) & 0x0F);
+}

@@ -1,0 +1,24 @@
+use GO.fmt.*;
+
+i32 firstEven(i32[] xs) {
+    for (i32 i = 0; i < xs.len(); i++) {
+        if (xs[i] % 2 == 0) {
+            return xs[i];
+        }
+    }
+    return -1;
+}
+
+String classify(i32 n) {
+    if (n < 0) return "negative";
+    if (n == 0) return "zero";
+    return "positive";
+}
+
+void main() {
+    i32[] xs = {3, 5, 8, 9};
+    fmt.Println(firstEven(xs));
+    fmt.Println(classify(-3));
+    fmt.Println(classify(0));
+    fmt.Println(classify(7));
+}

@@ -119,8 +119,8 @@ type VarDecl struct {
 	Line  int
 }
 
-func (*VarDecl) stmtNode()  {}
-func (*VarDecl) declNode()  {}
+func (*VarDecl) stmtNode() {}
+func (*VarDecl) declNode() {}
 
 type ExprStmt struct {
 	X    Expr
@@ -231,6 +231,15 @@ type UnaryExpr struct {
 }
 
 func (*UnaryExpr) exprNode() {}
+
+// CastExpr is an explicit conversion: (i32)x, (f64)(a + b), (char)code.
+type CastExpr struct {
+	Type *Type
+	X    Expr
+	Line int
+}
+
+func (*CastExpr) exprNode() {}
 
 type PostfixExpr struct {
 	Op   string

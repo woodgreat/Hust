@@ -41,15 +41,15 @@ func (s *Scope) declare(name string, sym *Symbol) {
 }
 
 type ClassInfo struct {
-	Decl        *ClassDecl
-	Fields      map[string]*VarDecl
-	FieldOrder  []string
-	Methods     map[string]*FuncDecl
-	MethodOrder []string
-	Ctor        *FuncDecl
-	Subclasses  []string
+	Decl         *ClassDecl
+	Fields       map[string]*VarDecl
+	FieldOrder   []string
+	Methods      map[string]*FuncDecl
+	MethodOrder  []string
+	Ctor         *FuncDecl
+	Subclasses   []string
 	Instantiated bool
-	IsInterface bool
+	IsInterface  bool
 	Flattened    bool
 }
 
@@ -67,10 +67,10 @@ type Translator struct {
 	returnTypes map[*FuncDecl]*Type
 	methodOwner map[*FuncDecl]*ClassInfo
 
-	body    strings.Builder
-	indent  int
-	reports map[string]bool
-	errors  []string
+	body     strings.Builder
+	indent   int
+	reports  map[string]bool
+	errors   []string
 	suppress bool
 
 	needsFmt        bool
@@ -80,6 +80,7 @@ type Translator struct {
 	needsInsert     bool
 	needsRemoveAt   bool
 	needsTernary    bool
+	needsCastInt    bool
 	needsCapitalize bool
 
 	currentReturn *Type
@@ -440,6 +441,13 @@ func (t *Translator) emitHelpers() {
 	if t.needsTernary {
 		t.body.WriteString("func __hust_ternary[T any](cond bool, a, b T) T {\n")
 		t.body.WriteString("\tif cond {\n\t\treturn a\n\t}\n\treturn b\n")
+		t.body.WriteString("}\n\n")
+	}
+	if t.needsCastInt {
+		// A direct int32(3.9) is rejected when the operand is an untyped
+		// constant, so route float-to-integer conversions through a function.
+		t.body.WriteString("func __hust_to_int[T ~int8 | ~int16 | ~int32 | ~int64 | ~uint8 | ~uint16 | ~uint32 | ~uint64](v float64) T {\n")
+		t.body.WriteString("\treturn T(v)\n")
 		t.body.WriteString("}\n\n")
 	}
 	if t.needsCapitalize {
@@ -1086,6 +1094,9 @@ func (t *Translator) expr(e Expr, expected *Type) string {
 		}
 		return op + t.expr(v.X, nil)
 
+	case *CastExpr:
+		return t.emitCast(v)
+
 	case *PostfixExpr:
 		return t.expr(v.X, nil) + v.Op
 
@@ -1127,7 +1138,13 @@ func (t *Translator) expr(e Expr, expected *Type) string {
 		common := promote(t.typeOf(v.Then), t.typeOf(v.Else))
 		thenExpr := t.expr(v.Then, common)
 		elseExpr := t.expr(v.Else, common)
-		return fmt.Sprintf("__hust_ternary(%s, %s, %s)", cond, thenExpr, elseExpr)
+		rendered := fmt.Sprintf("__hust_ternary(%s, %s, %s)", cond, thenExpr, elseExpr)
+		// __hust_ternary infers `int`/`float64` from untyped branches, which is
+		// not directly assignable to a narrow declared type (i32, f32, ...).
+		if expected != nil && isNumericType(expected) && !isUntyped(expected) && isUntyped(common) {
+			rendered = t.goType(expected) + "(" + rendered + ")"
+		}
+		return rendered
 	}
 
 	return ""
@@ -1534,6 +1551,65 @@ func (t *Translator) emitNew(v *NewExpr) string {
 	return "nil"
 }
 
+func (t *Translator) emitCast(v *CastExpr) string {
+	rendered := t.expr(v.X, nil)
+	from := t.typeOf(v.X)
+	to := v.Type
+
+	if to == nil {
+		t.report(v.Line, "Unsupported cast")
+		return rendered
+	}
+	if to.isArray() {
+		t.report(v.Line, "Unsupported cast to array type")
+		return rendered
+	}
+
+	if to.Name == "String" {
+		if from != nil && from.Name == "char" && len(from.Dims) == 0 {
+			return "string(" + rendered + ")"
+		}
+		t.needsFmt = true
+		return "fmt.Sprint(" + rendered + ")"
+	}
+	if from != nil && from.Name == "error" {
+		return rendered
+	}
+	if from != nil && len(from.Dims) == 0 && (from.Name == "String" || from.Name == "bool") &&
+		(isNumericType(to) || to.Name == "char") {
+		t.report(v.Line, "Unsupported cast from "+from.Name+" to "+to.Name)
+		return rendered
+	}
+	if to.Name == "char" {
+		if isNumericType(from) {
+			if isFloatType(from) {
+				t.needsCastInt = true
+				return "__hust_to_int[rune](float64(" + rendered + "))"
+			}
+			return "rune(" + rendered + ")"
+		}
+		t.report(v.Line, "Unsupported cast to char")
+		return rendered
+	}
+	if isNumericType(to) {
+		if isFloatType(from) && !isFloatType(to) {
+			t.needsCastInt = true
+			return "__hust_to_int[" + t.goType(to) + "](float64(" + rendered + "))"
+		}
+		return t.goType(to) + "(" + rendered + ")"
+	}
+	if to.Name == "bool" {
+		if from != nil && from.Name == "bool" && len(from.Dims) == 0 {
+			return rendered
+		}
+		t.report(v.Line, "Unsupported cast to bool")
+		return rendered
+	}
+
+	t.report(v.Line, "Unsupported cast to "+to.Name)
+	return rendered
+}
+
 func (t *Translator) emitArrayLit(lit *ArrayLit, expected *Type) string {
 	if expected == nil || !expected.isArray() {
 		// Best effort: infer from the first element.
@@ -1658,6 +1734,9 @@ func (t *Translator) typeOf(e Expr) *Type {
 			return &Type{Name: "bool"}
 		}
 		return t.typeOf(v.X)
+
+	case *CastExpr:
+		return v.Type
 
 	case *PostfixExpr:
 		return t.typeOf(v.X)
@@ -2229,6 +2308,8 @@ func walkProgramExprs(program *Program) []Expr {
 			walkExpr(v.L)
 			walkExpr(v.R)
 		case *UnaryExpr:
+			walkExpr(v.X)
+		case *CastExpr:
 			walkExpr(v.X)
 		case *PostfixExpr:
 			walkExpr(v.X)

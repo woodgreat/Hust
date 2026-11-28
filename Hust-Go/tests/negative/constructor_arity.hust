@@ -1,0 +1,14 @@
+use GO.fmt.*;
+
+class Counter {
+    i32 n;
+
+    public Counter() {
+        this.n = 0;
+    }
+}
+
+void main() {
+    Counter c = new Counter(5);
+    fmt.Println(c.n);
+}

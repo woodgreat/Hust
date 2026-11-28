@@ -1,0 +1,6 @@
+use GO.fmt.*;
+
+void main() {
+    bool flag = (bool)1;
+    fmt.Println(flag);
+}

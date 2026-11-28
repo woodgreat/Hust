@@ -1,0 +1,35 @@
+use GO.fmt.*;
+
+class Point {
+    i32 x;
+    i32 y;
+
+    public Point(i32 a, i32 b) {
+        this.x = a;
+        this.y = b;
+    }
+}
+
+class Factory {
+    public Point make(i32 x, i32 y) {
+        return new Point(x, y);
+    }
+
+    public i32 sum(Point[] ps) {
+        i32 total = 0;
+        for (i32 i = 0; i < ps.len(); i++) {
+            total = total + ps[i].x + ps[i].y;
+        }
+        return total;
+    }
+}
+
+void main() {
+    Factory f = new Factory();
+    Point p = f.make(3, 4);
+    fmt.Println(p.x);
+    fmt.Println(p.y);
+
+    Point[] ps = {new Point(1, 2), new Point(3, 4)};
+    fmt.Println(f.sum(ps));
+}

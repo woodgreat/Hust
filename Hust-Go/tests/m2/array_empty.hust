@@ -1,0 +1,15 @@
+use GO.fmt.*;
+
+void main() {
+    i32[] xs = {};
+    fmt.Println(xs.len());
+    xs.push(7);
+    fmt.Println(xs.len());
+    fmt.Println(xs[0]);
+
+    String[] names = {};
+    fmt.Println(names.len());
+
+    bool[] flags = {};
+    fmt.Println(flags.len());
+}

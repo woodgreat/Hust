@@ -88,7 +88,7 @@ void main() {
 
 ```bash
 cd tests
-./run_tests.sh            # 134/134 + negative 15/15
+./run_tests.sh            # 150/150 + negative 26/26
 ./run_tests.sh --quick    # transpile only
 ./core_contract.sh        # info / transpile / build / dialect / project mode
 ```

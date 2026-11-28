@@ -1,0 +1,6 @@
+use GO.fmt.*;
+
+void main() {
+    i32[] xs = new i32[3];
+    fmt.Println(xs.len());
+}

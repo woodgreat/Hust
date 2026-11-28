@@ -1,0 +1,12 @@
+use GO.fmt.*;
+
+class Foo {
+    public void ok() {
+        fmt.Println("ok");
+    }
+}
+
+void main() {
+    Foo f = new Foo();
+    f.missing();
+}

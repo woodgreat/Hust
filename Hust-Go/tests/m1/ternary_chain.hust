@@ -1,0 +1,16 @@
+use GO.fmt.*;
+
+i32 sign(i32 n) {
+    return n > 0 ? 1 : n < 0 ? -1 : 0;
+}
+
+void main() {
+    fmt.Println(sign(5));
+    fmt.Println(sign(-5));
+    fmt.Println(sign(0));
+
+    i32 a = 1;
+    i32 b = 2;
+    String s = a < b ? a > 0 ? "both" : "b" : "none";
+    fmt.Println(s);
+}

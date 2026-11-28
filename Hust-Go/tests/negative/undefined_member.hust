@@ -1,0 +1,14 @@
+use GO.fmt.*;
+
+class Point {
+    i32 x;
+
+    public Point() {
+        this.x = 1;
+    }
+}
+
+void main() {
+    Point p = new Point();
+    fmt.Println(p.y);
+}

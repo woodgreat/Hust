@@ -1,0 +1,27 @@
+use GO.fmt.*;
+
+f64 average(f64[] xs) {
+    f64 sum = 0.0;
+    for (i32 i = 0; i < xs.len(); i++) {
+        sum = sum + xs[i];
+    }
+    return sum / xs.len();
+}
+
+f64[] scale(f64[] xs, f64 k) {
+    f64[] out = {};
+    for (i32 i = 0; i < xs.len(); i++) {
+        out.push(xs[i] * k);
+    }
+    return out;
+}
+
+void main() {
+    f64[] xs = {1.5, 2.5, 3.0};
+    fmt.Println(average(xs));
+
+    f64[] ys = scale(xs, 2.0);
+    for (i32 i = 0; i < ys.len(); i++) {
+        fmt.Println(ys[i]);
+    }
+}
