@@ -1,0 +1,7 @@
+// Module paths are case-sensitive: the canonical module is `RUST.io`.
+// `RUST.IO` must be rejected instead of silently resolving.
+use RUST.IO;
+
+void main() {
+    println!("uppercase module must not build");
+}

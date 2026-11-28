@@ -1,5 +1,5 @@
-// B1: system namespace use statement
-use RUST.IO;
+// B1: system namespace use statement (module paths are case-sensitive)
+use RUST.io;
 
 void main() {
     println!("B1 test");

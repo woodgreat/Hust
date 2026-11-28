@@ -186,21 +186,22 @@ Runner 覆盖：
 | 原用例 | 修复内容 | 现用例 |
 |--------|----------|--------|
 | `private_field_external_test.hust` | 类体尚未降级时做字段可见性检查；类外访问默认 private 字段直接报错，类内访问保持允许 | `expect_fail_private_field_external.hust` |
-| `unrecognized_use_test.hust` | 未知 `RUST.*` 路径从 warning 改为硬错误；合法系统路径大小写不敏感 | `expect_fail_unrecognized_use.hust` |
+| `unrecognized_use_test.hust` | 未知 `RUST.*` 路径从 warning 改为硬错误 | `expect_fail_unrecognized_use.hust` |
 | `interface_var_test/multiblank_param` | 函数签名正则支持跨行类型/参数；接口参数正确改写为 `dyn` | 项目构建 + 运行通过 |
 | `shape_interface_test/container_pairmap_shape` | 夹具补上 blank 返回名（`item get`, `value getValue`），关联类型按 r44 正确生成 | 项目构建 + 运行通过 |
 
 同时修正：
 
 - 多个正向用例按“字段默认 private”补 `public`，不再依赖未定义的外部访问。
-- `e2e_rust_import_test.hust` 使用映射表规范的小写系统路径。
-- `find_mapping` 对系统模块路径做 ASCII 大小写不敏感匹配，兼容旧写法。
+- 系统模块路径**大小写敏感**：`RUST.io` 为规范写法，`RUST.IO` 是错误；
+  `verify_b1_use.hust` 已改为小写，并新增
+  `expect_fail_uppercase_system_namespace.hust` 锁定该规则。
 
 当前基线（2026-11-28）：
 
 ```text
 Pass:                119
-Negative expected:   4
+Negative expected:   5
 Runtime:             8
 Unit tests:          63 passed
 Known failures:      0
