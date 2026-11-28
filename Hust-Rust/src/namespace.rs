@@ -120,6 +120,8 @@ pub struct NamespaceRegistry {
     pub default_space: String,
     /// Warnings collected during parsing
     pub warnings: Vec<String>,
+    /// Hard errors collected during parsing (unknown system namespaces, etc.)
+    pub errors: Vec<String>,
     /// Use statements per file
     pub use_statements: HashMap<String, Vec<UseStmt>>,
     /// RUST system namespace imports per file (for B方案: generate Rust use statements later)
@@ -485,14 +487,40 @@ impl NamespaceRegistry {
                 if let Some(dash_pos) = path_part.find('-') {
                     let right = path_part[dash_pos + 1..].trim();
                     if right == "*" {
-                        self.warnings.push(format!(
-                            "forbidden use pattern: `use {}-*;` - wildcard without specific module\n\
-                             Please specify a module: `use {}-Module;` or `use {}-Module.*;`",
-                            &path_part[..dash_pos], &path_part[..dash_pos], &path_part[..dash_pos]
-                        ));
-                        let line_to_remove = format!("{}\n", trimmed);
-                        remaining = remaining.replacen(&line_to_remove, "", 1);
-                        continue;
+                        let left = path_part[..dash_pos].trim();
+                        let system_path = left.starts_with("RUST.") || left.starts_with("HUST.");
+                        if system_path {
+                            // `RUST.STD.io-*` is a valid wildcard import. Only
+                            // reject unknown system roots; known ones continue
+                            // through normal system-import parsing below.
+                            if !crate::rust_mappings::is_rust_namespace(left) {
+                                let available = crate::rust_mappings::get_supported_namespaces();
+                                let msg = format!(
+                                    "unrecognized system namespace: `{}`\n\n\
+                                     Supported system namespaces:\n{}\n\n\
+                                     Examples:\n\
+                                     - use RUST.STD.io-*;\n\
+                                     - use RUST.STD.collections-*;\n\
+                                     - use HUST.MATH;\n\n\
+                                     Note: System namespaces use `.` as internal separator (e.g., RUST.STD.io).",
+                                    left, available.join(", ")
+                                );
+                                self.warnings.push(msg.clone());
+                                self.errors.push(msg);
+                                let line_to_remove = format!("{}\n", trimmed);
+                                remaining = remaining.replacen(&line_to_remove, "", 1);
+                                continue;
+                            }
+                        } else {
+                            self.warnings.push(format!(
+                                "forbidden use pattern: `use {}-*;` - wildcard without specific module\n\
+                                 Please specify a module: `use {}-Module;` or `use {}-Module.*;`",
+                                left, left, left
+                            ));
+                            let line_to_remove = format!("{}\n", trimmed);
+                            remaining = remaining.replacen(&line_to_remove, "", 1);
+                            continue;
+                        }
                     }
                 }
 
@@ -568,17 +596,20 @@ impl NamespaceRegistry {
                         }
                         continue;
                     } else {
-                        // Invalid system namespace
+                        // Invalid system namespace: Hust must reject this
+                        // instead of silently dropping the import.
                         let available = crate::rust_mappings::get_supported_namespaces();
-                        self.warnings.push(format!(
+                        let msg = format!(
                             "unrecognized system library: `{}`\n\n\
                              Supported system libraries:\n{}\n\n\
                              Examples:\n\
-                             - use RUST.io;\n\
-                             - use RUST.io.*;\n\
+                             - use RUST.STD.io;\n\
+                             - use RUST.STD.io.*;\n\
                              - use HUST.MATH;",
                             hust_path, available.join(", ")
-                        ));
+                        );
+                        self.warnings.push(msg.clone());
+                        self.errors.push(msg);
                         let line_to_remove = format!("{}\n", trimmed);
                         remaining = remaining.replacen(&line_to_remove, "", 1);
                         if remaining.contains(trimmed) {
@@ -612,7 +643,7 @@ impl NamespaceRegistry {
                         // Invalid system namespace (e.g., RUST.UNKNOWN.SOMETHING)
                         // This is a teaching error - provide helpful guidance
                         let available = crate::rust_mappings::get_supported_namespaces();
-                        self.warnings.push(format!(
+                        let msg = format!(
                             "unrecognized system namespace: `{}`\n\n\
                              Supported system namespaces:\n{}\n\n\
                              Examples:\n\
@@ -621,7 +652,9 @@ impl NamespaceRegistry {
                              - use HUST.MATH;\n\n\
                              Note: System namespaces use `.` as internal separator (e.g., RUST.STD.io).",
                             ns, available.join(", ")
-                        ));
+                        );
+                        self.warnings.push(msg.clone());
+                        self.errors.push(msg);
                         // Remove the invalid use line to prevent further errors
                         let line_to_remove = format!("{}\n", trimmed);
                         remaining = remaining.replacen(&line_to_remove, "", 1);
@@ -1380,6 +1413,34 @@ use Zoo-*;
         assert_eq!(uses.len(), 0);
         assert!(!registry.warnings.is_empty());
         assert!(registry.warnings[0].contains("forbidden use pattern"));
+    }
+
+    #[test]
+    fn test_unrecognized_system_namespace_is_error() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.UNKNOWN.SOMETHING-*;
+"#;
+
+        let (uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert_eq!(uses.len(), 0);
+        assert_eq!(registry.errors.len(), 1);
+        assert!(registry.errors[0].contains("unrecognized system namespace"));
+    }
+
+    #[test]
+    fn test_known_system_wildcard_is_accepted() {
+        let mut registry = NamespaceRegistry::new();
+        let source = r#"
+use RUST.STD.io-*;
+"#;
+
+        let (_uses, _) = registry.parse_use_statements(source, "test.hust");
+        assert!(registry.errors.is_empty());
+        let imports = registry.rust_imports.get("test.hust").unwrap();
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].hust_path, "RUST.STD.io");
+        assert_eq!(imports[0].item, "*");
     }
 
     // 2026-10-06: Comprehensive use syntax tests

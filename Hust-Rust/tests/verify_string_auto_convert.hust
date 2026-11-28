@@ -3,8 +3,8 @@
 // 覆盖五项：数组 push/赋值、函数实参、类方法实参、构造器实参、字段赋值
 
 class Item {
-    String name;
-    i32 price;
+    public String name;
+    public i32 price;
 
     public Item(String n, i32 p) {
         this.name = n;

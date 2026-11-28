@@ -2,7 +2,7 @@
 // sameness (put key == getValue key, same assoc type Key).
 interface Container {
     public add(item);
-    public get(index);
+    public item get(index);
 }
 
 class IntStack implements Container {
@@ -22,7 +22,7 @@ class IntStack implements Container {
 
 interface PairMap {
     public put(key, value);
-    public getValue(key);
+    public value getValue(key);
 }
 
 class IdScoreMap implements PairMap {

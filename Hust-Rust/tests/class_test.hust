@@ -6,8 +6,8 @@ interface Shape {
 }
 
 class Rectangle implements Shape {
-    f64 width;
-    f64 height;
+    public f64 width;
+    public f64 height;
     
     public Rectangle() {}
     
@@ -21,7 +21,7 @@ class Rectangle implements Shape {
 }
 
 class Circle implements Shape {
-    f64 radius;
+    public f64 radius;
     
     public Circle() {}
     

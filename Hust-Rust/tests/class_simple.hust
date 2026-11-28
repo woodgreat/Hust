@@ -1,8 +1,8 @@
 // Simple class test - V0.6
 
 class Point {
-    i32 x;
-    i32 y;
+    public i32 x;
+    public i32 y;
 }
 
 void main() {

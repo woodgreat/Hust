@@ -1,5 +1,5 @@
 class Board {
-    i32 size;
+    public i32 size;
     public Board() { this.size = 19; }
 }
 

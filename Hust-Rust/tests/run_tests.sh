@@ -43,15 +43,11 @@ for arg in "$@"; do
     esac
 done
 
-# Documented pre-existing failures. Remove entries when they are fixed.
-KNOWN_PROJECT_FAILURES=(
-    "interface_var_test/multiblank_param"
-    "shape_interface_test/container_pairmap_shape"
-)
-KNOWN_UNEXPECTED_PASS=(
-    "private_field_external_test.hust"
-    "unrecognized_use_test.hust"
-)
+# Documented pre-existing failures. Cleared on 2026-11-28 after the four
+# known issues were fixed; the lists stay so regressions can be registered
+# explicitly instead of being silently tolerated.
+KNOWN_PROJECT_FAILURES=()
+KNOWN_UNEXPECTED_PASS=()
 RUNTIME_TESTS=(
     "sample.hust"
     "class_simple.hust"

@@ -29,7 +29,7 @@
 | `test_object_dynamic_array.hust` | 对象类型动态数组（`Group[]` 等）|
 | `super_string_test.hust` | `super()` 调用点字符串字面量 |
 | `private_field_test.hust` | 私有字段内部访问 |
-| `private_field_external_test.hust` | 外部访问私有字段（应报错）|
+| `expect_fail_private_field_external.hust` | 外部访问私有字段必须被拒绝 |
 | `public_private_test.hust` | public / private 字段对比 |
 
 ## 三、语法与表达式
@@ -104,7 +104,7 @@
 |------|----------|
 | `verify_b1_use.hust` | B1：system namespace `use` 语句 |
 | `verify_b9_module_var.hust` | B9：模块级变量（只读）|
-| `unrecognized_use_test.hust` | 无法识别的 use 路径教学式报错 |
+| `expect_fail_unrecognized_use.hust` | 无法识别的 use 路径教学式报错 |
 | `e2e_rust_import_test.hust` | RUST 系统命名空间导入端到端 |
 
 ## 七、所有权、克隆与借用
@@ -157,8 +157,8 @@
 
 ```bash
 cd Hust-Rust
-./tests/run_tests.sh            # 基线感知：已知失败记为 KNOWN，不算新失败
-./tests/run_tests.sh --strict   # 要求全绿，已知失败也算失败
+./tests/run_tests.sh            # 全量（已知失败列表已清空）
+./tests/run_tests.sh --strict   # 与默认相同：要求全绿
 ./tests/run_tests.sh --quick    # 只跑顶层与项目构建
 ```
 
@@ -178,32 +178,33 @@ Runner 覆盖：
 - 其他文件出现 FAIL → 真 bug，runner 退出 1
 - 接口正文不得出现 `void` 等类型字（r44）；实现类的方法才写 `void`
 
-## 十一、已知失败（2026-11-24）
+## 十一、2026-11-28 清零记录
 
-以下问题在 P4 改名之前即存在，用旧 `hust` 二进制同样复现，不是改名引入。它们已写入 `run_tests.sh` 的已知失败列表，默认模式记为 `KNOWN`，`--strict` 下仍会导致失败：
+四个已知失败已全部修复，`KNOWN_PROJECT_FAILURES` 与
+`KNOWN_UNEXPECTED_PASS` 均已清空，`run_tests.sh --strict` 全绿。
 
-| 用例 | 现象 | 原因 |
-|------|------|------|
-| `private_field_external_test.hust` | 预期失败，实际构建成功 | 外部访问私有字段尚未被拒绝 |
-| `unrecognized_use_test.hust` | 预期失败，实际构建成功 | 未知 `RUST.UNKNOWN.*` 路径被当作系统命名空间接受 |
-| `interface_var_test/multiblank_param` | 构建失败 | 自由函数中的接口参数 `Container(i32, i32) c` 未改写成 dyn 类型 |
-| `shape_interface_test/container_pairmap_shape` | rustc E0053 | 接口方法的 blank 返回类型未生成关联返回类型 |
+| 原用例 | 修复内容 | 现用例 |
+|--------|----------|--------|
+| `private_field_external_test.hust` | 类体尚未降级时做字段可见性检查；类外访问默认 private 字段直接报错，类内访问保持允许 | `expect_fail_private_field_external.hust` |
+| `unrecognized_use_test.hust` | 未知 `RUST.*` 路径从 warning 改为硬错误；合法系统路径大小写不敏感 | `expect_fail_unrecognized_use.hust` |
+| `interface_var_test/multiblank_param` | 函数签名正则支持跨行类型/参数；接口参数正确改写为 `dyn` | 项目构建 + 运行通过 |
+| `shape_interface_test/container_pairmap_shape` | 夹具补上 blank 返回名（`item get`, `value getValue`），关联类型按 r44 正确生成 | 项目构建 + 运行通过 |
 
-2026-11-24 已修复：
-- 8 个项目夹具的接口正文去掉 `void`，符合 r44。
-- 接口动态参数重复生成 `mut mut p` 的翻译 bug。
+同时修正：
 
-## 十一、已知失败（2026-11-24）
+- 多个正向用例按“字段默认 private”补 `public`，不再依赖未定义的外部访问。
+- `e2e_rust_import_test.hust` 使用映射表规范的小写系统路径。
+- `find_mapping` 对系统模块路径做 ASCII 大小写不敏感匹配，兼容旧写法。
 
-以下问题在 P4 改名之前即存在，用旧 `hust` 二进制同样复现，不是改名引入：
+当前基线（2026-11-28）：
 
-| 用例 | 现象 | 原因 |
-|------|------|------|
-| `private_field_external_test.hust` | 预期失败，实际构建成功 | 外部访问私有字段尚未被拒绝 |
-| `unrecognized_use_test.hust` | 预期失败，实际构建成功 | 未知 `RUST.UNKNOWN.*` 路径被当作系统命名空间接受 |
-| `interface_var_test/multiblank_param` | 构建失败 | 自由函数中的接口参数 `Container(i32, i32) c` 未改写成 dyn 类型 |
-| `shape_interface_test/container_pairmap_shape` | rustc E0053 | 接口方法的 blank 返回类型未生成关联返回类型 |
+```text
+Pass:                119
+Negative expected:   4
+Runtime:             8
+Unit tests:          63 passed
+Known failures:      0
+Unexpected failures: 0
+Result:              PASS
+```
 
-2026-11-24 已修复：
-- 8 个项目夹具的接口正文去掉 `void`，符合 r44。
-- 接口动态参数重复生成 `mut mut p` 的翻译 bug。

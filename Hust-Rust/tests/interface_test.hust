@@ -13,8 +13,8 @@ interface Container {
 }
 
 class Rectangle implements Drawable {
-    i32 width;
-    i32 height;
+    public i32 width;
+    public i32 height;
 
     public Rectangle() {}
 

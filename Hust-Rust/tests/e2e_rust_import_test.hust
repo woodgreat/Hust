@@ -1,8 +1,9 @@
 // End-to-end test for RUST system namespace imports
-// 2026.10.04: Verify use RUST.STD.IO-* generates correct Rust use statements
+// 2026.10.04: Verify use RUST.STD.io-* generates correct Rust use statements
+// 2026-11-28: canonical mapping paths are lowercase (see rust_mappings.rs)
 
-use RUST.STD.IO-*;
-use RUST.STD.COLLECTIONS-*;
+use RUST.STD.io-*;
+use RUST.STD.collections-*;
 
 void main() {
     println!("Hello, Hust!");

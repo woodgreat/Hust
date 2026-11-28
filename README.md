@@ -88,7 +88,7 @@ hustc --cores                       # 列出可用核与工具链
 ```bash
 ./tests/run_all.sh                  # Conductor + 四核 + P3
 ./tests/run_all.sh --with-install   # 加安装端到端
-./tests/run_all.sh --strict         # Hust-Rust 已知问题也判失败
+./tests/run_all.sh --strict         # 严格模式（Rust 已知问题已清零，等同全绿要求）
 ```
 
 当前基线：Hust-C 178/178，Hust-CSharp 112/112 + 负向 11/11，Hust-Go 150/150 + 负向 26/26，

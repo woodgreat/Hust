@@ -5,7 +5,7 @@ class Outer {
     i32 outer_field;
     
     class Inner {
-        i32 inner_field;
+        public i32 inner_field;
         
         public Inner() {}
         

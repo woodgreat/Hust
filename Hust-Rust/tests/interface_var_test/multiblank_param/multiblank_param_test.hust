@@ -1,6 +1,6 @@
 interface Container {
     public add(item);
-    public get(index);
+    public item get(index);
 }
 
 class IntStack implements Container {

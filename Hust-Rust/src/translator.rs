@@ -191,6 +191,11 @@ impl Translator {
         // 语言核可能报错"。先于一切变换执行，行号对应原始文件。
         self.remind_init_before_use(&output)?;
 
+        // Access control (owner decision 2026.09.27): fields are private by
+        // default. Rust module privacy cannot enforce this inside one crate,
+        // so Hust checks member access while class bodies are still intact.
+        self.check_private_field_access(&output)?;
+
         // V0.6 transform rules (order matters!):
         // 1. Interface definitions (before class to handle implements)
         // 2. Class definitions (before functions to handle methods)
@@ -3664,8 +3669,10 @@ impl Translator {
         }
 
         // Param group allows one level of nesting (interface blanks like
-        // `Printer(String)` inside the parameter list).
-        let re = Regex::new(r"(?m)^[ \t]*((?:pub|public)[ \t]+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*\(((?:[^()]|\([^()]*\))*)\)[ \t]*\{")
+        // `Printer(String)` inside the parameter list). Signatures may wrap
+        // across lines: `Container(i32, i32)\n c`, so type/name and name/(
+        // separators accept any whitespace.
+        let re = Regex::new(r"(?m)^[ \t]*((?:pub|public)[ \t]+)?\b(void|i8|i16|i32|i64|u8|u16|u32|u64|usize|f32|f64|bool|char|String|[A-Z]\w*(?:\([^)]*\))?)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(((?:[^()]|\([^()]*\))*)\)\s*\{")
             .map_err(|e| TranspileError::TransformError(e.to_string()))?;
 
         let paren_re = Regex::new(r"^([A-Z]\w*)\s*\(([^)]*)\)$").unwrap();
@@ -3684,7 +3691,7 @@ impl Translator {
         // shared parameter-piece pattern (type word may contain one
         // paren group: `Container(i32, i32, i32) c`).
         let param_re = Regex::new(
-            r"^([A-Za-z_]\w*(?:[ \t]*\([^()]*\))?)[ \t]+([a-zA-Z_]\w*)$"
+            r"^([A-Za-z_]\w*(?:[ \t]*\([^()]*\))?)\s+([a-zA-Z_]\w*)$"
         )
         .unwrap();
 
@@ -5540,7 +5547,7 @@ impl Translator {
         .unwrap();
         let param_word_re = Regex::new(r"^([A-Z]\w*)\s*\(([^)]*)\)$").unwrap();
         let param_re = Regex::new(
-            r"^([A-Za-z_]\w*(?:[ \t]*\([^()]*\))?)[ \t]+([a-zA-Z_]\w*)$"
+            r"^([A-Za-z_]\w*(?:[ \t]*\([^()]*\))?)\s+([a-zA-Z_]\w*)$"
         )
         .unwrap();
 
@@ -5947,6 +5954,15 @@ impl Translator {
 
             // Parse use statements
             let (_uses, remaining) = registry.parse_use_statements(&after_ns, &file_path);
+
+            // Unknown system namespaces are teaching errors, not warnings:
+            // silently dropping `use RUST.UNKNOWN.*` hid the mistake until
+            // the symbol was used later.
+            if !registry.errors.is_empty() {
+                return Err(TranspileError::TransformError(
+                    registry.errors.join("\n\n"),
+                ));
+            }
 
             // 2026.10.06: Generate Rust use statements from parsed RUST system namespace imports
             // This must happen AFTER parse_use_statements (which collects rust_imports)
@@ -7840,6 +7856,153 @@ impl Translator {
         result
     }
 
+    /// Enforce Hust field visibility before class bodies are lowered.
+    ///
+    /// All fields are private by default (owner decision 2026.09.27) and Hust
+    /// has no `protected`: a private field is accessible only from the class
+    /// that declares it. Rust's own field privacy is module-scoped, so a
+    /// single-crate program would otherwise allow external access silently.
+    fn check_private_field_access(&self, source: &str) -> Result<(), TranspileError> {
+        use regex::Regex;
+
+        // Scan code only: a "foo.bar" inside a string literal is data.
+        let segments = Self::str_scan(source);
+        let mut code_bytes = source.as_bytes().to_vec();
+        for seg in &segments {
+            if seg.kind != SegmentKind::Code {
+                for b in &mut code_bytes[seg.start..seg.end] {
+                    if *b != b'\n' {
+                        *b = b' ';
+                    }
+                }
+            }
+        }
+        let code = String::from_utf8(code_bytes)
+            .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        let class_re = Regex::new(
+            r"(?m)^[ \t]*(?:public[ \t]+)?class[ \t]+([A-Za-z_]\w*)(?:[ \t]+extends[ \t]+([A-Za-z_]\w*))?[^{]*\{",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        // (start, end, class name) spans, used to decide "inside which class"
+        // an access appears.
+        let mut scopes: Vec<(usize, usize, String)> = Vec::new();
+        let mut parents: HashMap<String, String> = HashMap::new();
+        let mut fields: HashMap<(String, String), bool> = HashMap::new(); // (class, field) -> public?
+        let mut class_names: HashSet<String> = HashSet::new();
+
+        for caps in class_re.captures_iter(&code) {
+            let whole = caps.get(0).expect("class match has a full span");
+            let class_name = caps[1].to_string();
+            let open = whole.end() - 1;
+            let close = match_brace(source, open);
+            scopes.push((whole.start(), close, class_name.clone()));
+            class_names.insert(class_name.clone());
+            if let Some(parent) = caps.get(2) {
+                parents.insert(class_name.clone(), parent.as_str().to_string());
+            }
+
+            let body = &source[open + 1..close.saturating_sub(1).max(open + 1)];
+            let (parsed_fields, _) = self.parse_class_body(body);
+            for field in parsed_fields {
+                fields.insert(
+                    (class_name.clone(), field.name),
+                    matches!(field.visibility, Visibility::Public),
+                );
+            }
+        }
+
+        if fields.is_empty() {
+            return Ok(());
+        }
+
+        // Direct variable/parameter types: `MyClass obj = ...;`
+        let var_re = Regex::new(
+            r"\b([A-Z][A-Za-z0-9_]*)[ \t]+([a-z_][A-Za-z0-9_]*)[ \t]*([=;,)\n])",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+        let mut var_types: HashMap<String, String> = HashMap::new();
+        for caps in var_re.captures_iter(&code) {
+            if class_names.contains(&caps[1]) {
+                var_types.insert(caps[2].to_string(), caps[1].to_string());
+            }
+        }
+
+        let access_re = Regex::new(
+            r"\b([A-Za-z_][A-Za-z0-9_]*)[ \t]*\.[ \t]*([A-Za-z_][A-Za-z0-9_]*)",
+        )
+        .map_err(|e| TranspileError::TransformError(e.to_string()))?;
+
+        for caps in access_re.captures_iter(&code) {
+            let whole = caps.get(0).expect("member match has a full span");
+            let receiver = &caps[1];
+            let field = &caps[2];
+
+            // Method calls are handled by method visibility rules, not here.
+            if code[whole.end()..].trim_start().starts_with('(') {
+                continue;
+            }
+            // Static/enum/class-name access is not a field access.
+            if class_names.contains(receiver) {
+                continue;
+            }
+
+            let current_class = scopes
+                .iter()
+                .filter(|(start, end, _)| whole.start() >= *start && whole.start() < *end)
+                .max_by_key(|(start, _, _)| *start)
+                .map(|(_, _, name)| name.clone());
+
+            let receiver_class = if receiver == "this" || receiver == "self" {
+                current_class.clone()
+            } else {
+                var_types.get(receiver).cloned()
+            };
+            let Some(mut class_name) = receiver_class else {
+                continue;
+            };
+
+            // Walk the inheritance chain; Hust's "no protected" rule means a
+            // private field stays inaccessible even in a subclass.
+            let mut owner: Option<(String, bool)> = None;
+            let mut seen: HashSet<String> = HashSet::new();
+            loop {
+                if let Some(public) = fields.get(&(class_name.clone(), field.to_string())) {
+                    owner = Some((class_name.clone(), *public));
+                    break;
+                }
+                if !seen.insert(class_name.clone()) {
+                    break;
+                }
+                match parents.get(&class_name) {
+                    Some(parent) => class_name = parent.clone(),
+                    None => break,
+                }
+            }
+
+            let Some((declaring_class, is_public)) = owner else {
+                continue; // not a field: method / unknown member
+            };
+            if is_public || current_class.as_deref() == Some(declaring_class.as_str()) {
+                continue;
+            }
+
+            let line = source[..whole.start()]
+                .bytes()
+                .filter(|b| *b == b'\n')
+                .count()
+                + 1;
+            return Err(TranspileError::TransformError(format!(
+                "line {}: private field `{}` of class `{}` cannot be accessed from outside the class\n\
+                 Help: make the field `public`, add a public accessor method, or move the access into class `{}`",
+                line, field, declaring_class, declaring_class
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Interface implementation methods must be public (owner decision
     /// 2026.09.12): a private method implementing a public interface leaks
     /// via the trait path (reachable once the trait is imported) — Java/Go
@@ -8728,6 +8891,42 @@ fn to_pascal_case(name: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Return the byte offset one past the `}` matching the `{` at `open`.
+/// String literals are skipped so braces inside them do not affect depth.
+fn match_brace(source: &str, open: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut i = open;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_string = false;
+            }
+        } else {
+            match c {
+                b'"' => in_string = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return i + 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    source.len()
 }
 
 /// Mask class/interface bodies with spaces (newlines preserved so line

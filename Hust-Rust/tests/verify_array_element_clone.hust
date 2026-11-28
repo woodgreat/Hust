@@ -8,13 +8,13 @@
 //       `this.items = [];` - that is not Hust syntax (rejected since B40).
 
 class Item {
-    i32 value;
+    public i32 value;
     public Item() { this.value = 0; }
     public i32 get() { return this.value; }
 }
 
 class Box {
-    Item[] items;
+    public Item[] items;
     public Box() {
         Item a = new Item();
         a.value = 10;

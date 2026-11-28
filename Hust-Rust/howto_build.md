@@ -186,8 +186,8 @@ Full suite:
 
 ```bash
 cd Hust-Rust
-./tests/run_tests.sh            # baseline-aware: documented known failures do not fail
-./tests/run_tests.sh --strict   # require a fully green suite
+./tests/run_tests.sh            # full suite (known-failure list is empty)
+./tests/run_tests.sh --strict   # same requirement: fully green
 ./tests/run_tests.sh --quick    # top-level and project builds only
 ```
 

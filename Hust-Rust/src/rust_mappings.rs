@@ -550,7 +550,11 @@ pub const RUST_MAPPINGS: &[RustMapping] = &[
 /// assert_eq!(mapping.rust_path, "std::time");
 /// ```
 pub fn find_mapping(hust_path: &str) -> Option<&'static RustMapping> {
-    RUST_MAPPINGS.iter().find(|m| m.hust_path == hust_path)
+    // System module paths are case-insensitive for compatibility: both
+    // `RUST.IO` (older examples) and `RUST.io` (mapping table) resolve.
+    RUST_MAPPINGS
+        .iter()
+        .find(|m| m.hust_path.eq_ignore_ascii_case(hust_path))
 }
 
 /// Check if a namespace is a recognized RUST system namespace
@@ -658,6 +662,7 @@ mod tests {
     fn test_is_rust_namespace() {
         assert!(is_rust_namespace("RUST.STD.time"));
         assert!(is_rust_namespace("RUST.STD.collections"));
+        assert!(is_rust_namespace("RUST.IO")); // case-insensitive compatibility
         assert!(!is_rust_namespace("Zoo"));
         assert!(!is_rust_namespace("RUST"));  // Too short, not specific enough
     }
