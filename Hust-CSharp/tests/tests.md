@@ -120,3 +120,9 @@ Failed:  0
 2. 正向：创建同名 `.expected`（精确 stdout）；
 3. 负向：放到 `negative/`，创建 `.expected.err`（第一行关键字）；
 4. 运行 `./run_tests.sh`。
+
+## 6. 相关文档
+
+- [C# 核专用说明](../../../Hust-Docs/doc/core_csharp_write_guide_dg_cpt3.md)
+- [语言核测试指引](../../../Hust-Docs/doc/core_testing_guide.md)
+- [核心开发手册](../../../Hust-Docs/doc/core_development_playbook.md)

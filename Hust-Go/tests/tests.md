@@ -116,3 +116,9 @@ Negative: 15/15
 1. 在 `m1`–`m4` 创建 `.hust` 和同名 `.expected`；
 2. 负向放到 `negative/`，创建 `.expected.err`（第一行关键字）；
 3. 运行 `./run_tests.sh`，不允许未登记的已知失败。
+
+## 6. 相关文档
+
+- [Go 核专用说明](../../../Hust-Docs/doc/core_go_write_guide_dg_cpt4.md)
+- [语言核测试指引](../../../Hust-Docs/doc/core_testing_guide.md)
+- [核心开发手册](../../../Hust-Docs/doc/core_development_playbook.md)
