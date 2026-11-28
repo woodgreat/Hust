@@ -1,0 +1,10 @@
+use CSHARP.Console.*;
+
+void main() {
+  f32 a = 3.5;
+  f64 b = 2.25;
+  Console.WriteLine(a);
+  Console.WriteLine(b);
+  Console.WriteLine(a * 2.0);
+  Console.WriteLine(b * 2.0);
+}

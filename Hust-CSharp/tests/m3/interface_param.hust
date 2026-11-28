@@ -1,0 +1,16 @@
+use CSHARP.Console.*;
+
+interface Calc {
+    public i32 apply(i32 x);
+}
+
+class Doubler implements Calc {
+    public i32 apply(i32 x) {
+        return x * 2;
+    }
+}
+
+void main() {
+    Calc c = new Doubler();
+    Console.WriteLine(c.apply(5));
+}

@@ -1,0 +1,10 @@
+use CSHARP.Console.*;
+
+i32[] make() {
+    return new i32[3];
+}
+
+void main() {
+    i32[] a = make();
+    Console.WriteLine(a.len());
+}

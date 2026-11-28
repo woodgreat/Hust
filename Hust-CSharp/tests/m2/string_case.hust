@@ -1,0 +1,7 @@
+use CSHARP.Console.*;
+
+void main() {
+  String s = "AbC";
+  Console.WriteLine(s.toUpperCase());
+  Console.WriteLine(s.toLowerCase());
+}

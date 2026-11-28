@@ -1,0 +1,22 @@
+use CSHARP.Console.*;
+
+class Book {
+    i32 price;
+
+    public Book(i32 p) {
+        this.price = p;
+    }
+}
+
+i32 total(Book[] books) {
+    i32 s = 0;
+    for (i32 i = 0; i < books.len(); i++) {
+        s = s + books[i].price;
+    }
+    return s;
+}
+
+void main() {
+    Book[] books = {new Book(3), new Book(4)};
+    Console.WriteLine(total(books));
+}

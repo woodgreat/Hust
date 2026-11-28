@@ -1,0 +1,13 @@
+use CSHARP.Console.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Console.WriteLine(Color.Red);
+    Console.WriteLine(Color.Green);
+    Console.WriteLine(Color.Blue);
+}

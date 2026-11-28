@@ -1,0 +1,30 @@
+use CSHARP.Console.*;
+
+interface Shape {
+    public i32 area();
+    public String name();
+}
+
+class Rect implements Shape {
+    i32 width;
+    i32 height;
+
+    public Rect(i32 w, i32 h) {
+        this.width = w;
+        this.height = h;
+    }
+
+    public i32 area() {
+        return this.width * this.height;
+    }
+
+    public String name() {
+        return "rect";
+    }
+}
+
+void main() {
+    Shape s = new Rect(3, 4);
+    Console.WriteLine(s.area());
+    Console.WriteLine(s.name());
+}

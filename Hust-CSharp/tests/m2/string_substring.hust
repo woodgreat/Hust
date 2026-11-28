@@ -1,0 +1,7 @@
+use CSHARP.Console.*;
+
+void main() {
+  String s = "abcdef";
+  Console.WriteLine(s.substring(1, 4));
+  Console.WriteLine(s.charAt(2));
+}

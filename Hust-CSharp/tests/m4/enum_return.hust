@@ -1,0 +1,20 @@
+use CSHARP.Console.*;
+
+enum Direction {
+    North,
+    East,
+    South,
+    West
+}
+
+Direction next(Direction d) {
+    if (d == Direction.North) {
+        return Direction.East;
+    }
+    return Direction.West;
+}
+
+void main() {
+    Console.WriteLine(next(Direction.North));
+    Console.WriteLine(next(Direction.East));
+}

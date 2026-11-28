@@ -1,0 +1,22 @@
+use CSHARP.Console.*;
+
+class Person {
+    String name;
+    i32 age;
+
+    public Person(String n, i32 a) {
+        this.name = n;
+        this.age = a;
+    }
+}
+
+void main() {
+    Person[] people = {
+        new Person("Alice", 30),
+        new Person("Bob", 25)
+    };
+    Console.WriteLine(people.len());
+    Console.WriteLine(people[0].name);
+    Console.WriteLine(people[0].age);
+    Console.WriteLine(people[1].name);
+}

@@ -1,0 +1,12 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32 a = 5;
+  i32 b = 9;
+  i32 max = a > b ? a : b;
+  i32 min = a < b ? a : b;
+  i32 distance = a - b < 0 ? b - a : a - b;
+  Console.WriteLine(max);
+  Console.WriteLine(min);
+  Console.WriteLine(distance);
+}

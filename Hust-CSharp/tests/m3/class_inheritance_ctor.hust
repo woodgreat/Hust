@@ -1,0 +1,33 @@
+use CSHARP.Console.*;
+
+class Animal {
+    String name;
+
+    public Animal(String n) {
+        this.name = n;
+    }
+
+    public String getName() {
+        return this.name;
+    }
+
+    public void speak() {
+        Console.WriteLine("animal");
+    }
+}
+
+class Dog extends Animal {
+    public Dog(String n) {
+        this.name = n;
+    }
+
+    public void speak() {
+        Console.WriteLine("dog");
+    }
+}
+
+void main() {
+    Dog d = new Dog("Rex");
+    Console.WriteLine(d.getName());
+    d.speak();
+}

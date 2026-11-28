@@ -1,0 +1,10 @@
+use CSHARP.Console.*;
+
+void main() {
+    i32 x = 1;
+    {
+        i32 inner = 2;
+        Console.WriteLine(inner);
+    }
+    Console.WriteLine(x);
+}

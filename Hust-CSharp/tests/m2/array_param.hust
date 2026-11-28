@@ -1,0 +1,14 @@
+use CSHARP.Console.*;
+
+i32 sum(i32[] a) {
+    i32 s = 0;
+    for (i32 i = 0; i < a.len(); i++) {
+        s = s + a[i];
+    }
+    return s;
+}
+
+void main() {
+    i32[] a = {1, 2, 3};
+    Console.WriteLine(sum(a));
+}

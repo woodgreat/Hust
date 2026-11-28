@@ -1,0 +1,9 @@
+use CSHARP.Console.*;
+
+void main() {
+  String s = "  hi  ";
+  Console.WriteLine(s.trim());
+  if (s.trim() == "hi") {
+      Console.WriteLine("ok");
+  }
+}

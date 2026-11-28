@@ -1,0 +1,14 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32 x = 5;
+  if (x > 0) {
+      if (x > 3) {
+          Console.WriteLine("big");
+      } else {
+          Console.WriteLine("small");
+      }
+  } else {
+      Console.WriteLine("neg");
+  }
+}

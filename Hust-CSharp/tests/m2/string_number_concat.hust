@@ -1,0 +1,8 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32 n = 7;
+  f32 f = 2.5;
+  Console.WriteLine("n=" + n);
+  Console.WriteLine("f=" + f);
+}

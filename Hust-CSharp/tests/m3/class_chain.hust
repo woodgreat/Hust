@@ -1,0 +1,30 @@
+use CSHARP.Console.*;
+
+class A {
+    String name;
+
+    public A(String n) {
+        this.name = n;
+    }
+
+    public String who() {
+        return "A:" + this.name;
+    }
+}
+
+class B extends A {
+    public B(String n) {
+        this.name = n;
+    }
+}
+
+class C extends B {
+    public C(String n) {
+        this.name = n;
+    }
+}
+
+void main() {
+    C c = new C("x");
+    Console.WriteLine(c.who());
+}

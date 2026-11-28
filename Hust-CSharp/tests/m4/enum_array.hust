@@ -1,0 +1,13 @@
+use CSHARP.Console.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Color[] colors = {Color.Red, Color.Blue};
+    Console.WriteLine(colors[0]);
+    Console.WriteLine(colors[1]);
+}

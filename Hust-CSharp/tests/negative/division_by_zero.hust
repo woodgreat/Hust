@@ -1,0 +1,7 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32 x = 10;
+  i32 y = x / 0;
+  Console.WriteLine(y);
+}

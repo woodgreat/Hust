@@ -1,0 +1,17 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32 i = 0;
+  i32 sum = 0;
+  while (i < 10) {
+      i = i + 1;
+      if (i % 2 == 0) {
+          continue;
+      }
+      if (i > 7) {
+          break;
+      }
+      sum = sum + i;
+  }
+  Console.WriteLine(sum);
+}

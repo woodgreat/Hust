@@ -1,0 +1,12 @@
+use CSHARP.Console.*;
+
+void main() {
+  u8 a = 255;
+  u16 b = 65535;
+  u32 c = 4000000000;
+  u64 d = 18000000000000000000;
+  Console.WriteLine(a);
+  Console.WriteLine(b);
+  Console.WriteLine(c);
+  Console.WriteLine(d);
+}

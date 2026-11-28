@@ -1,0 +1,22 @@
+use CSHARP.Console.*;
+
+class Person {
+    String name;
+
+    public Person(String n) {
+        this.name = n;
+    }
+
+    public String getName() {
+        return this.name;
+    }
+}
+
+Person make(String n) {
+    return new Person(n);
+}
+
+void main() {
+    Person p = make("Zed");
+    Console.WriteLine(p.getName());
+}

@@ -1,0 +1,8 @@
+use CSHARP.Console.*;
+
+void main() {
+  String s = "a,b,c";
+  String[] parts = s.split(",");
+  Console.WriteLine(parts.len());
+  Console.WriteLine(parts[1]);
+}

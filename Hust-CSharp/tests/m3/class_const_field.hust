@@ -1,0 +1,14 @@
+use CSHARP.Console.*;
+
+class MathBox {
+    const i32 BASE = 10;
+
+    public i32 plus(i32 x) {
+        return BASE + x;
+    }
+}
+
+void main() {
+    MathBox m = new MathBox();
+    Console.WriteLine(m.plus(5));
+}

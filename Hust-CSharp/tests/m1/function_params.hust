@@ -1,0 +1,15 @@
+use CSHARP.Console.*;
+
+i32 combine(i32 a, i32 b, i32 c) {
+    return a * 100 + b * 10 + c;
+}
+
+bool isEven(i32 n) {
+    return n % 2 == 0;
+}
+
+void main() {
+    Console.WriteLine(combine(1, 2, 3));
+    Console.WriteLine(isEven(4));
+    Console.WriteLine(isEven(5));
+}

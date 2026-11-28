@@ -1,0 +1,6 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32[] a = {};
+  Console.WriteLine(a.len());
+}

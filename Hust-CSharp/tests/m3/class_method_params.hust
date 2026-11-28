@@ -1,0 +1,17 @@
+use CSHARP.Console.*;
+
+class Calc {
+    public i32 add(i32 a, i32 b) {
+        return a + b;
+    }
+
+    public i32 mul(i32 a, i32 b) {
+        return a * b;
+    }
+}
+
+void main() {
+    Calc c = new Calc();
+    Console.WriteLine(c.add(2, 3));
+    Console.WriteLine(c.mul(4, 5));
+}

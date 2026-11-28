@@ -1,0 +1,16 @@
+use CSHARP.Console.*;
+
+void main() {
+  String cmd = "stop";
+  switch (cmd) {
+      case "start":
+          Console.WriteLine("go");
+          break;
+      case "stop":
+          Console.WriteLine("halt");
+          break;
+      default:
+          Console.WriteLine("?");
+          break;
+  }
+}

@@ -32,7 +32,10 @@ public class Translator
     private bool _inMethod = false;     // Inside a method
     private string _currentClass = "";  // Current class name (constructors)
     private HashSet<string> _knownClasses = new();
+    private HashSet<string> _knownInterfaces = new();
+    private HashSet<string> _knownEnums = new();
     private HashSet<string> _defaultCtorClasses = new();
+    private readonly Dictionary<string, int> _functionArity = new();
 
     // Type pattern shared by declarations and methods. Class/enum names are
     // capitalized; primitives cover Hust and C# spellings.
@@ -85,6 +88,18 @@ public class Translator
         return TypeMap.ContainsKey(hustType) ? TypeMap[hustType] : hustType;
     }
 
+    private bool IsKnownType(string hustType)
+    {
+        var baseType = Regex.Replace(hustType, @"(?:\[\d*\])+$", "");
+        if (Regex.IsMatch(baseType, $"^(?:{PrimitiveTypes})$"))
+        {
+            return true;
+        }
+        return _knownClasses.Contains(baseType) ||
+               _knownInterfaces.Contains(baseType) ||
+               _knownEnums.Contains(baseType);
+    }
+
     public TranslationResult Translate(string source, string fileName = "output")
     {
         var result = new TranslationResult();
@@ -130,6 +145,12 @@ public class Translator
             // Pre-scan class names and parameterless constructors so derived
             // classes can rely on an implicit base() call.
             _knownClasses = Regex.Matches(processed, @"\bclass\s+(\w+)")
+                .Select(m => m.Groups[1].Value)
+                .ToHashSet();
+            _knownInterfaces = Regex.Matches(processed, @"\binterface\s+(\w+)")
+                .Select(m => m.Groups[1].Value)
+                .ToHashSet();
+            _knownEnums = Regex.Matches(processed, @"\benum\s+(\w+)")
                 .Select(m => m.Groups[1].Value)
                 .ToHashSet();
             _defaultCtorClasses = Regex.Matches(processed, @"\b(?:public\s+)?(\w+)\s*\(\s*\)\s*\{")
@@ -582,6 +603,7 @@ public class Translator
         var isMain = methodName.ToLower() == "main";
 
         _definedFunctions.Add(methodName);
+        _functionArity[methodName] = CountParameters(parameters);
 
         if (isMain)
         {
@@ -660,6 +682,12 @@ public class Translator
         var type = MapType(hustType);
         var name = match.Groups[2].Value;
         var rest = match.Groups[3].Value;
+
+        if (!IsKnownType(hustType))
+        {
+            var baseType = Regex.Replace(hustType, @"(?:\[\d*\])+$", "");
+            _semanticErrors.Add($"Unknown type: {baseType}");
+        }
 
         // Semantic check: type mismatch
         CheckTypeMismatch(type, rest);
@@ -796,23 +824,62 @@ public class Translator
     {
         // Check for function calls: identifier(...)
         // Skip known patterns: Console.WriteLine, new, etc.
-        var match = Regex.Match(trimmed, @"^(\w+)\s*\(");
+        var match = Regex.Match(trimmed, @"^(\w+)\s*\((.*)\)\s*;?$");
         if (!match.Success) return;
-        
+
         var funcName = match.Groups[1].Value;
-        
+        var arguments = match.Groups[2].Value;
+
         // Skip known built-in functions and keywords
         var knownFunctions = new HashSet<string> { "Console", "new", "if", "for", "while", "return", "switch", "catch" };
         if (knownFunctions.Contains(funcName)) return;
-        
+
         // Skip if it's a method call on an object (contains .)
         if (trimmed.Contains(".")) return;
-        
+
         // Check if function is defined
         if (!_definedFunctions.Contains(funcName))
         {
             _semanticErrors.Add($"Undefined function: {funcName}");
+            return;
         }
+
+        if (_functionArity.TryGetValue(funcName, out var arity))
+        {
+            var actual = CountParameters(arguments);
+            if (actual != arity)
+            {
+                _semanticErrors.Add(
+                    $"Wrong number of arguments for {funcName}: expected {arity}, got {actual}");
+            }
+        }
+    }
+
+    private static int CountParameters(string parameters)
+    {
+        if (string.IsNullOrWhiteSpace(parameters))
+        {
+            return 0;
+        }
+
+        var count = 1;
+        var depth = 0;
+        foreach (var ch in parameters)
+        {
+            if (ch == '(' || ch == '<' || ch == '[')
+            {
+                depth++;
+            }
+            else if (ch == ')' || ch == '>' || ch == ']')
+            {
+                depth--;
+            }
+            else if (ch == ',' && depth == 0)
+            {
+                count++;
+            }
+        }
+        return count;
     }
 
     private string GetOriginalIndent(string line)
@@ -941,12 +1008,18 @@ public class Translator
 
     private string TranslateExpression(string expr)
     {
+        if (Regex.IsMatch(expr, @"(?:^|[^.\d])/\s*0(?![.\d])") &&
+            !_semanticErrors.Contains("Division by zero"))
+        {
+            _semanticErrors.Add("Division by zero");
+        }
+
         // Translate Hust types to C# types in expressions.
         expr = Regex.Replace(expr, @"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)\s+(?=\w)",
             match => MapType(match.Groups[1].Value) + " ");
 
         // Translate array types: i32[] -> int[], new i32[3] -> new int[3]
-        expr = Regex.Replace(expr, @"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)((?:\[\d*\])+)",
+        expr = Regex.Replace(expr, @"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)((?:\[[^\]]*\])+)",
             match => MapType(match.Groups[1].Value) + match.Groups[2].Value);
 
         // Array/string length: arr.len() -> arr.Length

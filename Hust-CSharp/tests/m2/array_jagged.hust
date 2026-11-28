@@ -1,0 +1,9 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32[][] m = {{1}, {2, 3}, {4, 5, 6}};
+  Console.WriteLine(m.len());
+  Console.WriteLine(m[0].len());
+  Console.WriteLine(m[2].len());
+  Console.WriteLine(m[2][2]);
+}

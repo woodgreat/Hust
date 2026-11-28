@@ -1,0 +1,15 @@
+use CSHARP.Console.*;
+
+i32 find(i32 target) {
+    for (i32 i = 0; i < 5; i++) {
+        if (i == target) {
+            return i * 10;
+        }
+    }
+    return -1;
+}
+
+void main() {
+    Console.WriteLine(find(3));
+    Console.WriteLine(find(9));
+}

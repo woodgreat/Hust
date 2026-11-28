@@ -1,0 +1,6 @@
+use CSHARP.Console.*;
+
+void main() {
+  String s = "a-b-a";
+  Console.WriteLine(s.replace("a", "x"));
+}

@@ -1,0 +1,12 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32 sum = 0;
+  for (i32 i = 0; i < 5; i++) {
+      if (i == 2) {
+          continue;
+      }
+      sum = sum + i;
+  }
+  Console.WriteLine(sum);
+}

@@ -1,0 +1,11 @@
+use CSHARP.Console.*;
+
+void main() {
+  bool t = true;
+  bool f = false;
+  Console.WriteLine(t && t);
+  Console.WriteLine(t && f);
+  Console.WriteLine(t || f);
+  Console.WriteLine(!t);
+  Console.WriteLine(!f);
+}

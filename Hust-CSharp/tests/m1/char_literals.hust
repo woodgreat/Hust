@@ -1,0 +1,9 @@
+use CSHARP.Console.*;
+
+void main() {
+  char c = 'A';
+  i32 code = c;
+  Console.WriteLine(c);
+  Console.WriteLine(code);
+  Console.WriteLine(c + 1);
+}

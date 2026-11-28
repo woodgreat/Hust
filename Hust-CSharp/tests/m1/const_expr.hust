@@ -1,0 +1,8 @@
+use CSHARP.Console.*;
+
+void main() {
+  const i32 A = 2;
+  const i32 B = 3;
+  const i32 C = A * B + 1;
+  Console.WriteLine(C);
+}

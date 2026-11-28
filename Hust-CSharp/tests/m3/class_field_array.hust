@@ -1,0 +1,25 @@
+use CSHARP.Console.*;
+
+class Bag {
+    i32[] items;
+
+    public Bag(i32 n) {
+        this.items = new i32[n];
+        for (i32 i = 0; i < n; i++) {
+            this.items[i] = i;
+        }
+    }
+
+    public i32 sum() {
+        i32 s = 0;
+        for (i32 i = 0; i < this.items.len(); i++) {
+            s = s + this.items[i];
+        }
+        return s;
+    }
+}
+
+void main() {
+    Bag b = new Bag(4);
+    Console.WriteLine(b.sum());
+}

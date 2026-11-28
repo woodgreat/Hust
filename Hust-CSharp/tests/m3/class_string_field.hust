@@ -1,0 +1,18 @@
+use CSHARP.Console.*;
+
+class User {
+    String name;
+
+    public User(String n) {
+        this.name = n;
+    }
+
+    public String upper() {
+        return this.name.toUpperCase();
+    }
+}
+
+void main() {
+    User u = new User("abc");
+    Console.WriteLine(u.upper());
+}

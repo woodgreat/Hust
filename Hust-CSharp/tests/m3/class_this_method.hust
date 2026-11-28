@@ -1,0 +1,23 @@
+use CSHARP.Console.*;
+
+class Box {
+    i32 value;
+
+    public Box(i32 x) {
+        this.value = x;
+        this.bump();
+    }
+
+    public void bump() {
+        this.value = this.value + 1;
+    }
+
+    public i32 get() {
+        return this.value;
+    }
+}
+
+void main() {
+    Box b = new Box(5);
+    Console.WriteLine(b.get());
+}

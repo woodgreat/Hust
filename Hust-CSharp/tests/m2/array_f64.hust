@@ -1,0 +1,6 @@
+use CSHARP.Console.*;
+
+void main() {
+  f64[] a = {1.5, 2.5};
+  Console.WriteLine(a[0] + a[1]);
+}

@@ -1,0 +1,28 @@
+use CSHARP.Console.*;
+
+class A {
+    public void speak() {
+        Console.WriteLine("A");
+    }
+}
+
+class B extends A {
+    public void speak() {
+        Console.WriteLine("B");
+    }
+}
+
+class C extends B {
+    public void speak() {
+        Console.WriteLine("C");
+    }
+}
+
+void main() {
+    C c = new C();
+    c.speak();
+    B b = new B();
+    b.speak();
+    A a = new A();
+    a.speak();
+}

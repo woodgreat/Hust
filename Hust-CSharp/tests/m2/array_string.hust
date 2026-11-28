@@ -1,0 +1,8 @@
+use CSHARP.Console.*;
+
+void main() {
+  String[] names = {"a", "bb", "ccc"};
+  Console.WriteLine(names.len());
+  Console.WriteLine(names[1]);
+  Console.WriteLine(names[2].len());
+}

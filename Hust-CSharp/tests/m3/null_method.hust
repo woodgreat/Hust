@@ -1,0 +1,20 @@
+use CSHARP.Console.*;
+
+class Person {
+    String name;
+
+    public Person(String n) {
+        this.name = n;
+    }
+}
+
+void main() {
+    Person p = null;
+    if (p == null) {
+        Console.WriteLine("null");
+    }
+    p = new Person("A");
+    if (p != null) {
+        Console.WriteLine(p.name);
+    }
+}

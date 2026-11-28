@@ -1,0 +1,6 @@
+use CSHARP.Console.*;
+
+void main() {
+  String s = "line1\nline2";
+  Console.WriteLine(s);
+}

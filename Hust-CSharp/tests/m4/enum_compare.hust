@@ -1,0 +1,17 @@
+use CSHARP.Console.*;
+
+enum Level {
+    Low,
+    Mid,
+    High
+}
+
+void main() {
+    Level a = Level.Mid;
+    if (a == Level.Mid) {
+        Console.WriteLine("mid");
+    }
+    if (a != Level.Low) {
+        Console.WriteLine("not low");
+    }
+}

@@ -1,0 +1,7 @@
+use CSHARP.Console.*;
+
+void main() {
+  String s = "";
+  Console.WriteLine(s.len());
+  Console.WriteLine("x" + s);
+}

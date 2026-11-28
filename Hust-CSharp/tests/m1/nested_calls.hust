@@ -1,0 +1,13 @@
+use CSHARP.Console.*;
+
+i32 mul(i32 a, i32 b) {
+    return a * b;
+}
+
+i32 add(i32 a, i32 b) {
+    return a + b;
+}
+
+void main() {
+    Console.WriteLine(add(mul(2, 3), 4));
+}

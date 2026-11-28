@@ -1,0 +1,16 @@
+use CSHARP.Console.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+bool isRed(Color c) {
+    return c == Color.Red;
+}
+
+void main() {
+    Console.WriteLine(isRed(Color.Red));
+    Console.WriteLine(isRed(Color.Blue));
+}

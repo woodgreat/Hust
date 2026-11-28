@@ -1,0 +1,20 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32 x = 2;
+  if (x > 0) {
+      switch (x) {
+          case 1:
+              Console.WriteLine("one");
+              break;
+          case 2:
+              Console.WriteLine("two");
+              break;
+          default:
+              Console.WriteLine("other");
+              break;
+      }
+  } else {
+      Console.WriteLine("neg");
+  }
+}

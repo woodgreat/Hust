@@ -1,0 +1,6 @@
+use CSHARP.Console.*;
+
+void main() {
+  Widget w = 1;
+  Console.WriteLine(w);
+}

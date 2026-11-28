@@ -1,0 +1,6 @@
+use CSHARP.Console.*;
+
+void main() {
+  i32 a = 1, b = 2, c = 3;
+  Console.WriteLine(a + b + c);
+}

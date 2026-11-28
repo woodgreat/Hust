@@ -91,7 +91,7 @@ hustc --cores                       # 列出可用核与工具链
 ./tests/run_all.sh --strict         # Hust-Rust 已知问题也判失败
 ```
 
-当前基线：Hust-C 178/178，Hust-CSharp 47/47，Hust-Go 134/134 + 负向 15/15，
+当前基线：Hust-C 178/178，Hust-CSharp 112/112 + 负向 11/11，Hust-Go 134/134 + 负向 15/15，
 Conductor 76/76，P3 四核 PASS。
 
 单独运行：
