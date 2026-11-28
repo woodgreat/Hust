@@ -110,6 +110,8 @@ cd Hust-Go     && ./tests/run_tests.sh && ./tests/core_contract.sh
 - `../Hust-Docs/doc/develop_guide.md`：开发指引
 - `../Hust-Docs/doc/core_development_playbook.md`：新语言核开发与 Conductor 接入
 - `../Hust-Docs/doc/core_testing_guide.md`：语言核测试指引
+- `../Hust-Docs/doc/core_csharp_write_guide_dg_cpt3.md`：C# 核专用说明
+- `../Hust-Docs/doc/core_go_write_guide_dg_cpt4.md`：Go 核专用说明
 - `../Hust-Docs/doc/conductor_multicore_design.md`：Conductor 多核设计
 
 ## 开源许可 / License
