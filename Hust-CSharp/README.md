@@ -97,10 +97,10 @@ Coverage matrix and known boundaries: `tests/tests.md`.
 
 ## Documentation
 
-- [Development Guide](../Hust-Docs/doc/develop_guide.md)
-- [C# Core Write Guide](../Hust-Docs/doc/core_csharp_write_guide_dg_cpt3.md)
-- [Core Development Playbook](../Hust-Docs/doc/core_development_playbook.md)
-- [Core Testing Guide](../Hust-Docs/doc/core_testing_guide.md)
+- [Development Guide](../../Hust-Docs/doc/develop_guide.md)
+- [C# Core Write Guide](../../Hust-Docs/doc/core_csharp_write_guide_dg_cpt3.md)
+- [Core Development Playbook](../../Hust-Docs/doc/core_development_playbook.md)
+- [Core Testing Guide](../../Hust-Docs/doc/core_testing_guide.md)
 
 ## License
 

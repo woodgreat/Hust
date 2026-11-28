@@ -109,9 +109,9 @@ classes/constructors/inheritance/interfaces, enums, project mode.
 ## Documentation
 
 - `../README.md` - Repo root quick start
-- `../Hust-Docs/doc/core_go_write_guide_dg_cpt4.md` - Go core development guide
-- `../Hust-Docs/doc/core_testing_guide.md` - Testing guide
-- `../Hust-Docs/doc/core_development_playbook.md` - Adding a new core
+- `../../Hust-Docs/doc/core_go_write_guide_dg_cpt4.md` - Go core development guide
+- `../../Hust-Docs/doc/core_testing_guide.md` - Testing guide
+- `../../Hust-Docs/doc/core_development_playbook.md` - Adding a new core
 
 ## License
 
