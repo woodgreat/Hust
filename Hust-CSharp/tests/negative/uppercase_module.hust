@@ -1,0 +1,5 @@
+use CSHARP.CONSOLE.*;
+
+void main() {
+    Console.WriteLine("uppercase module must be rejected");
+}

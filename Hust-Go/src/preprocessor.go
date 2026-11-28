@@ -35,8 +35,43 @@ func (p *Preprocessor) Process(source string) (string, DialectType, error) {
 		return "", PureHust, err
 	}
 
+	if err := validateUsePaths(protected); err != nil {
+		return "", PureHust, err
+	}
 	dialect := detectDialect(protected)
 	return protected, dialect, nil
+}
+
+// supportedGoModules is the exact, case-sensitive set of GO.* system modules
+// this core can provide. Module paths are case-sensitive across all cores.
+var supportedGoModules = map[string]bool{
+	"GO.fmt":     true,
+	"GO.strings": true,
+	"GO.math":    true,
+}
+
+// validateUsePaths rejects unknown or wrongly-cased system modules instead of
+// silently ignoring the import. User modules and other dialect roots are left
+// to dialect detection / the parser.
+func validateUsePaths(src string) error {
+	for _, line := range strings.Split(src, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "use ") {
+			continue
+		}
+		path := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "use "), ";"))
+		root := strings.SplitN(path, ".", 2)[0]
+		switch root {
+		case "GO":
+			module := strings.TrimSuffix(path, ".*")
+			if !supportedGoModules[module] {
+				return fmt.Errorf("unsupported GO system module: `%s`\n\nModule paths are case-sensitive.\nSupported modules: GO.fmt, GO.strings, GO.math", path)
+			}
+		case "HUST":
+			return fmt.Errorf("HUST.* is not implemented for the Go core")
+		}
+	}
+	return nil
 }
 
 func (p *Preprocessor) protect(src string) (string, error) {

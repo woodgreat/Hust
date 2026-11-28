@@ -1,0 +1,5 @@
+use GO.FMT.*;
+
+void main() {
+    fmt.Println("uppercase module must be rejected");
+}

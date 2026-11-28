@@ -15,6 +15,14 @@ public class Preprocessor
 {
     private readonly List<string> _protectedStrings = new();
     private readonly List<string> _protectedComments = new();
+
+    // Exact, case-sensitive system module names for the C# core.
+    private static readonly HashSet<string> SupportedCSharpModules = new(StringComparer.Ordinal)
+    {
+        "CSHARP.Console",
+        "CSHARP.System",
+        "CSHARP.Collections",
+    };
     
     /// <summary>
     /// Dialect check result
@@ -112,28 +120,45 @@ public class Preprocessor
         {
             var trimmed = line.Trim();
             
-            // Check for system imports
-            if (trimmed.StartsWith("use "))
+            // Check for system imports. Module paths are case-sensitive:
+            // CSHARP.Console is valid, CSHARP.CONSOLE is not.
+            if (trimmed.StartsWith("use ", StringComparison.Ordinal))
             {
-                if (trimmed.Contains("CSHARP."))
+                var path = trimmed.Substring(4).Trim();
+                if (path.EndsWith(";", StringComparison.Ordinal))
                 {
-                    hasCSharpImport = true;
+                    path = path.Substring(0, path.Length - 1).Trim();
                 }
-                else if (trimmed.Contains("RUST."))
+                var root = path.Split('.')[0];
+
+                switch (root)
                 {
-                    hasRustImport = true;
-                }
-                else if (trimmed.Contains("GO."))
-                {
-                    hasGoImport = true;
-                }
-                else if (trimmed.Contains("C."))
-                {
-                    hasCImport = true;
-                }
-                else if (trimmed.Contains("HUST."))
-                {
-                    result.Errors.Add("HUST.* imports are not yet implemented");
+                    case "CSHARP":
+                        hasCSharpImport = true;
+                        var module = path.EndsWith(".*", StringComparison.Ordinal)
+                            ? path.Substring(0, path.Length - 2)
+                            : path;
+                        if (!SupportedCSharpModules.Contains(module))
+                        {
+                            result.IsValid = false;
+                            result.Errors.Add(
+                                $"Unsupported CSHARP system module: `{path}`. " +
+                                "Module paths are case-sensitive. " +
+                                "Supported: CSHARP.Console, CSHARP.System, CSHARP.Collections");
+                        }
+                        break;
+                    case "RUST":
+                        hasRustImport = true;
+                        break;
+                    case "GO":
+                        hasGoImport = true;
+                        break;
+                    case "C":
+                        hasCImport = true;
+                        break;
+                    case "HUST":
+                        result.Errors.Add("HUST.* imports are not yet implemented");
+                        break;
                 }
             }
         }

@@ -90,7 +90,7 @@ cd tests
 | 枚举 + 类 | `m4/enum_class.hust`, `m4/enum_robot.hust` |
 | `settings.config` + `--project` | `m4/project_mode/` |
 
-### negative（26）
+### negative（27）
 
 | 场景 | 代表用例 | 期望 |
 |------|----------|------|
@@ -108,6 +108,7 @@ cd tests
 | `push()` 作为表达式 | `negative/push_as_expression.hust` | 编译前报错 |
 | 无法推断空数组字面量 | `negative/array_literal_infer.hust` | 编译前报错 |
 | 非法类型转换 | `negative/invalid_cast.hust`, `negative/invalid_cast_bool.hust` | 编译前报错 |
+| 模块路径大小写 | `negative/uppercase_module.hust` | 明确拒绝（`GO.FMT` 不是 `GO.fmt`） |
 
 ## 3. 当前基线
 
@@ -115,7 +116,7 @@ cd tests
 Total:    150
 Passed:   150
 Failed:   0
-Negative: 26/26
+Negative: 27/27
 ```
 
 核心契约：`PASS: Hust-Go core contract`。

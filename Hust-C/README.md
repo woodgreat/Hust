@@ -80,7 +80,7 @@ Direct core usage (advanced):
 ## Testing
 
 ```bash
-./tests/run_tests.sh            # Full test suite (178 tests)
+./tests/run_tests.sh            # Full test suite (179 tests, negative 11/11)
 ./tests/run_tests.sh negative   # Negative tests only (10 tests)
 ```
 

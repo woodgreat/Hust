@@ -89,7 +89,7 @@ void main() {
 
 ```bash
 cd tests
-./run_tests.sh        # 112/112：transpile -> dotnet build -> run -> diff
+./run_tests.sh        # 112/112：transpile -> dotnet build -> run -> diff（负向 12/12）
 ./core_contract.sh    # info / transpile / build / dialect / project mode
 ```
 

@@ -91,7 +91,7 @@ hustc --cores                       # 列出可用核与工具链
 ./tests/run_all.sh --strict         # 严格模式（Rust 已知问题已清零，等同全绿要求）
 ```
 
-当前基线：Hust-C 178/178，Hust-CSharp 112/112 + 负向 11/11，Hust-Go 150/150 + 负向 26/26，
+当前基线：Hust-C 179/179，Hust-CSharp 112/112 + 负向 12/12，Hust-Go 150/150 + 负向 27/27，
 Conductor 76/76，P3 四核 PASS。
 
 单独运行：

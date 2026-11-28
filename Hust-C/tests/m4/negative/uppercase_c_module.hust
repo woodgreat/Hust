@@ -1,0 +1,5 @@
+use C.STDIO.*;
+
+void main() {
+    printf("uppercase module must be rejected");
+}

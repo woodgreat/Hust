@@ -98,7 +98,7 @@ cd tests
 | switch on String / 嵌套 switch | `m4/switch_string.hust`, `m4/switch_nested.hust` |
 | `settings.config` + `--project` | `m4/project_mode/` |
 
-### negative（11）
+### negative（12）
 
 | 场景 | 用例 | 期望 |
 |------|------|------|
@@ -111,6 +111,7 @@ cd tests
 | 未知类型 | `negative/unknown_type.hust` | `Unknown type: X` |
 | 参数个数错误 | `negative/wrong_arity.hust` | `Wrong number of arguments...` |
 | 除零 | `negative/division_by_zero.hust` | `Division by zero` |
+| 模块路径大小写 | `negative/uppercase_module.hust` | 明确拒绝（`CSHARP.CONSOLE` 不是 `CSHARP.Console`） |
 
 ## 3. 当前基线
 
@@ -118,7 +119,7 @@ cd tests
 Total:    112
 Passed:   112
 Failed:   0
-Negative: 11/11
+Negative: 12/12
 ```
 
 核心契约：`PASS: Hust-CSharp core contract`。
