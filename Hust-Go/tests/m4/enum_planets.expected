@@ -1,0 +1,40 @@
+Mercury:
+  Distance: 0.39 AU
+  Orbital Period: 0.24 years
+  Terrestrial: true
+  Gas Giant: false
+Venus:
+  Distance: 0.72 AU
+  Orbital Period: 0.62 years
+  Terrestrial: true
+  Gas Giant: false
+Earth:
+  Distance: 1 AU
+  Orbital Period: 1 years
+  Terrestrial: true
+  Gas Giant: false
+Mars:
+  Distance: 1.52 AU
+  Orbital Period: 1.88 years
+  Terrestrial: true
+  Gas Giant: false
+Jupiter:
+  Distance: 5.2 AU
+  Orbital Period: 11.86 years
+  Terrestrial: false
+  Gas Giant: true
+Saturn:
+  Distance: 9.58 AU
+  Orbital Period: 29.46 years
+  Terrestrial: false
+  Gas Giant: true
+Uranus:
+  Distance: 19.22 AU
+  Orbital Period: 84.01 years
+  Terrestrial: false
+  Gas Giant: true
+Neptune:
+  Distance: 30.05 AU
+  Orbital Period: 164.8 years
+  Terrestrial: false
+  Gas Giant: true

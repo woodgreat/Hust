@@ -1,0 +1,28 @@
+Department: Engineering
+Employees: 3
+Total Salary: $295000
+Average Salary: $98333.336
+Highest Paid: Manager Mike ($120000)
+Employee List:
+  ID: E001, Name: Alice, Dept: Engineering, Salary: $90000, Manager: Manager Mike
+  ID: E002, Name: Bob, Dept: Engineering, Salary: $85000, Manager: Manager Mike
+  ID: M001, Name: Manager Mike, Dept: Engineering, Salary: $120000
+---
+Department: Sales
+Employees: 2
+Total Salary: $155000
+Average Salary: $77500
+Highest Paid: Diana ($80000)
+Employee List:
+  ID: E003, Name: Charlie, Dept: Sales, Salary: $75000
+  ID: E004, Name: Diana, Dept: Sales, Salary: $80000
+After raises:
+Department: Engineering
+Employees: 3
+Total Salary: $308250
+Average Salary: $102750
+Highest Paid: Manager Mike ($120000)
+Employee List:
+  ID: E001, Name: Alice, Dept: Engineering, Salary: $99000, Manager: Manager Mike
+  ID: E002, Name: Bob, Dept: Engineering, Salary: $89249.99, Manager: Manager Mike
+  ID: M001, Name: Manager Mike, Dept: Engineering, Salary: $120000

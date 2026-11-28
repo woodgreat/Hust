@@ -1,0 +1,23 @@
+use CSHARP.Console.*;
+
+void main() {
+    i8 a = 127;
+    i16 b = 1000;
+    i32 c = 100000;
+    i64 d = 5000000000;
+    u8 e = 255;
+    f32 f = 3.5;
+    f64 g = 2.25;
+    bool h = true;
+    String s = "hust";
+
+    Console.WriteLine(a);
+    Console.WriteLine(b);
+    Console.WriteLine(c);
+    Console.WriteLine(d);
+    Console.WriteLine(e);
+    Console.WriteLine(f);
+    Console.WriteLine(g);
+    Console.WriteLine(h);
+    Console.WriteLine(s);
+}

@@ -1,0 +1,32 @@
+Words:
+apple
+banana
+cherry
+date
+elderberry
+fig
+grape
+Longest: elderberry
+Shortest: fig
+Words with length >= 5:
+apple
+banana
+cherry
+elderberry
+grape
+Sorted:
+apple
+banana
+cherry
+date
+elderberry
+fig
+grape
+Reversed:
+grape
+fig
+elderberry
+date
+cherry
+banana
+apple

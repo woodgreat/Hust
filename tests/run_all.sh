@@ -102,6 +102,32 @@ step_csharp() {
     (cd "$ROOT/Hust-CSharp" && ./tests/run_tests.sh)
 }
 
+step_csharp_contract() {
+    (cd "$ROOT/Hust-CSharp" && ./tests/core_contract.sh)
+}
+
+step_go_build() {
+    local go_bin="${GO_BIN:-}"
+    if [ -z "$go_bin" ] || [ ! -x "$go_bin" ]; then
+        if command -v go >/dev/null 2>&1; then
+            go_bin="$(command -v go)"
+        else
+            go_bin="$HOME/go-sdk/go/bin/go"
+        fi
+    fi
+    (cd "$ROOT/Hust-Go" && "$go_bin" build -o hust_go ./src)
+}
+
+step_go_tests() {
+    local args=""
+    [ "$QUICK" -eq 1 ] && args="--quick"
+    (cd "$ROOT/Hust-Go" && GO_BIN="${GO_BIN:-$HOME/go-sdk/go/bin/go}" ./tests/run_tests.sh $args)
+}
+
+step_go_contract() {
+    (cd "$ROOT/Hust-Go" && GO_BIN="${GO_BIN:-$HOME/go-sdk/go/bin/go}" ./tests/core_contract.sh)
+}
+
 step_p3() {
     "$ROOT/tests/p3_conductor_integration.sh"
 }
@@ -110,8 +136,12 @@ step_install() {
     local prefix="$TMP/prefix"
     local rust_dir="$TMP/installed/rust"
     local c_dir="$TMP/installed/c"
+    local csharp_dir="$TMP/installed/csharp"
+    local go_dir="$TMP/installed/go"
     local rust_core="$prefix/bin/hust_work/hust_core/hust_rust"
     local c_core="$prefix/bin/hust_work/hust_core/hust_c"
+    local csharp_core="$prefix/bin/hust_work/hust_core/hust_csharp"
+    local go_core="$prefix/bin/hust_work/hust_core/hust_go"
     local tool_path
     local cores
     local output
@@ -123,6 +153,9 @@ step_install() {
     [ -x "$rust_core/hust_rust" ] || return 1
     [ -x "$c_core/hust_c" ] || return 1
     [ -f "$c_core/include/hust_vec.h" ] || return 1
+    [ -x "$csharp_core/hust_csharp" ] || return 1
+    [ -f "$csharp_core/hust_csharp.dll" ] || return 1
+    [ -x "$go_core/hust_go" ] || return 1
     [ ! -e "$prefix/bin/hust" ] || return 1
 
     tool_path="$(dirname "$(command -v cargo)"):$(dirname "$(command -v rustc)"):$(dirname "$(command -v gcc)"):/usr/bin:/bin"
@@ -131,8 +164,10 @@ step_install() {
     cores="$("$prefix/bin/hustc" --cores)"
     case "$cores" in *"rust: available"*) ;; *) return 1 ;; esac
     case "$cores" in *"c: available"*) ;; *) return 1 ;; esac
+    case "$cores" in *"csharp: available"*) ;; *) return 1 ;; esac
+    case "$cores" in *"go: available"*) ;; *) return 1 ;; esac
 
-    mkdir -p "$rust_dir" "$c_dir"
+    mkdir -p "$rust_dir" "$c_dir" "$csharp_dir" "$go_dir"
     cat > "$rust_dir/settings.config" <<'EOF'
 [project]
 name = install_rust
@@ -160,15 +195,57 @@ void main() {
 }
 EOF
 
+    cat > "$csharp_dir/settings.config" <<'EOF'
+[project]
+name = install_csharp
+version = 0.1.0
+entry = main.hust
+core = csharp
+EOF
+    cat > "$csharp_dir/main.hust" <<'EOF'
+use CSHARP.Console.*;
+void main() {
+    Console.WriteLine("installed csharp ok");
+}
+EOF
+
+    cat > "$go_dir/settings.config" <<'EOF'
+[project]
+name = install_go
+version = 0.1.0
+entry = main.hust
+core = go
+EOF
+    cat > "$go_dir/main.hust" <<'EOF'
+use GO.fmt.*;
+void main() {
+    fmt.Println("installed go ok");
+}
+EOF
+
     output="$(cd "$rust_dir" && "$prefix/bin/hustc" run . --core-rust)" || return 1
     [ "$output" = "installed rust ok" ] || return 1
 
     output="$(cd "$c_dir" && "$prefix/bin/hustc" run . --core-c)" || return 1
     [ "$output" = "installed c ok" ] || return 1
 
+    output="$(cd "$csharp_dir" && "$prefix/bin/hustc" run . --core-csharp)" || return 1
+    [ "$output" = "installed csharp ok" ] || return 1
+
+    output="$(cd "$go_dir" && "$prefix/bin/hustc" run . --core-go)" || return 1
+    [ "$output" = "installed go ok" ] || return 1
+
     (cd "$c_dir" && "$prefix/bin/hustc" build . --core-c -o bin/app > /dev/null) || return 1
     output="$("$c_dir/bin/app")" || return 1
     [ "$output" = "installed c ok" ] || return 1
+
+    (cd "$csharp_dir" && "$prefix/bin/hustc" build . --core-csharp -o bin/app > /dev/null) || return 1
+    output="$("$csharp_dir/bin/app")" || return 1
+    [ "$output" = "installed csharp ok" ] || return 1
+
+    (cd "$go_dir" && "$prefix/bin/hustc" build . --core-go -o bin/app > /dev/null) || return 1
+    output="$("$go_dir/bin/app")" || return 1
+    [ "$output" = "installed go ok" ] || return 1
 }
 
 run_step "Conductor tests" "$LOGS/conductor.log" step_conductor
@@ -177,6 +254,10 @@ run_step "Hust-C build" "$LOGS/c-build.log" step_c_build
 run_step "Hust-C suite" "$LOGS/c.log" step_c_tests
 run_step "Hust-C core contract" "$LOGS/c-contract.log" step_c_contract
 run_step "Hust-CSharp suite" "$LOGS/csharp.log" step_csharp
+run_step "Hust-CSharp core contract" "$LOGS/csharp-contract.log" step_csharp_contract
+run_step "Hust-Go build" "$LOGS/go-build.log" step_go_build
+run_step "Hust-Go suite" "$LOGS/go.log" step_go_tests
+run_step "Hust-Go core contract" "$LOGS/go-contract.log" step_go_contract
 run_step "P3 real-core integration" "$LOGS/p3.log" step_p3
 if [ "$WITH_INSTALL" -eq 1 ]; then
     run_step "Install smoke" "$LOGS/install.log" step_install

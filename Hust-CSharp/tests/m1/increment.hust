@@ -1,0 +1,14 @@
+use CSHARP.Console.*;
+
+void main() {
+    i32 x = 5;
+
+    x++;
+    Console.WriteLine(x);
+    x--;
+    Console.WriteLine(x);
+    ++x;
+    Console.WriteLine(x);
+    --x;
+    Console.WriteLine(x);
+}

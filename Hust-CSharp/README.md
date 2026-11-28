@@ -2,7 +2,7 @@
 
 Hust language core for C# - transpiles Hust source code to C#.
 
-**Version:** 0.1.1.20261127083700
+**Version:** 0.1.2.20261128125000
 
 ## Overview
 
@@ -12,7 +12,7 @@ Hust-CSharp is the C# language core for the Hust programming language. It transp
 
 ```bash
 cd Hust-CSharp
-dotnet build -c Release
+dotnet build -c Release -o bin/core
 ```
 
 ## Install
@@ -26,13 +26,14 @@ Or manually:
 
 ```bash
 # Build
-dotnet build -c Release
+dotnet build -c Release -o bin/core
 
-# Install to ~/.local/bin/hust_work/hust_core/csharp/
-mkdir -p ~/.local/bin/hust_work/hust_core/csharp
-cp bin/Release/net8.0/hust_csharp ~/.local/bin/hust_work/hust_core/csharp/
-cp -r include ~/.local/bin/hust_work/hust_core/csharp/
-cp -r lib ~/.local/bin/hust_work/hust_core/csharp/
+# Install to ~/.local/bin/hust_work/hust_core/hust_csharp/
+mkdir -p ~/.local/bin/hust_work/hust_core/hust_csharp
+cp bin/core/hust_csharp.dll bin/core/hust_csharp.deps.json \
+   bin/core/hust_csharp.runtimeconfig.json \
+   ~/.local/bin/hust_work/hust_core/hust_csharp/
+# plus a launcher named `hust_csharp` that execs `dotnet .../hust_csharp.dll`
 ```
 
 ## Usage
@@ -74,11 +75,10 @@ The core implements the standard Hust core contract:
 
 ## Dialect
 
-C# dialect uses `C#.*` system imports:
+C# dialect uses `CSHARP.*` system imports:
 
 ```hust
-use C#.Console.*;
-use C#.System.*;
+use CSHARP.Console.*;
 
 void main() {
     Console.WriteLine("Hello from Hust-CSharp!");
@@ -89,8 +89,11 @@ void main() {
 
 ```bash
 cd tests
-./run_tests.sh
+./run_tests.sh        # 47/47：transpile -> dotnet build -> run -> diff
+./core_contract.sh    # info / transpile / build / dialect / project mode
 ```
+
+Coverage matrix and known boundaries: `tests/tests.md`.
 
 ## Documentation
 

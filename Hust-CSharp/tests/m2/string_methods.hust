@@ -1,0 +1,20 @@
+use CSHARP.Console.*;
+
+void main() {
+    String s = "Hello, World!";
+
+    Console.WriteLine(s.length());
+    Console.WriteLine(s.toUpperCase());
+    Console.WriteLine(s.toLowerCase());
+    Console.WriteLine(s.trim());
+    Console.WriteLine(s.contains("World"));
+    Console.WriteLine(s.startsWith("Hello"));
+    Console.WriteLine(s.endsWith("!"));
+    Console.WriteLine(s.indexOf("o"));
+    Console.WriteLine(s.substring(0, 5));
+    Console.WriteLine(s.replace("World", "Hust"));
+
+    String[] parts = s.split(", ");
+    Console.WriteLine(parts[0]);
+    Console.WriteLine(parts[1]);
+}

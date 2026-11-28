@@ -19,6 +19,8 @@ pub enum CorePreference {
     Auto,
     Rust,
     C,
+    CSharp,
+    Go,
 }
 
 impl CorePreference {
@@ -27,8 +29,10 @@ impl CorePreference {
             "" | "auto" => Ok(CorePreference::Auto),
             "rust" => Ok(CorePreference::Rust),
             "c" => Ok(CorePreference::C),
+            "csharp" | "c#" | "cs" => Ok(CorePreference::CSharp),
+            "go" | "golang" => Ok(CorePreference::Go),
             other => Err(format!(
-                "invalid core `{}` (expected auto, rust, or c)",
+                "invalid core `{}` (expected auto, rust, c, csharp, or go)",
                 other
             )),
         }
@@ -211,8 +215,20 @@ mod tests {
 
     #[test]
     fn rejects_invalid_core() {
-        let error = parse("[project]\ncore = go\n").unwrap_err();
+        let error = parse("[project]\ncore = java\n").unwrap_err();
         assert!(error.contains("invalid core"), "{}", error);
+    }
+
+    #[test]
+    fn parses_new_core_preferences() {
+        assert_eq!(
+            parse("[project]\ncore = csharp\n").unwrap().core,
+            CorePreference::CSharp
+        );
+        assert_eq!(
+            parse("[project]\ncore = go\n").unwrap().core,
+            CorePreference::Go
+        );
     }
 
     #[test]

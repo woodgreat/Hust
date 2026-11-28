@@ -1,0 +1,5 @@
+positive
+gte 5
+lte 5
+eq 5
+ne 0

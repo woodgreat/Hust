@@ -1,0 +1,1 @@
+println! is Rust-dialect syntax and cannot run on the Go core

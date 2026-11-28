@@ -1,0 +1,21 @@
+State: Menu
+Score: 0
+Lives: 3
+State: Playing
+Score: 0
+Lives: 3
+State: Playing
+Score: 150
+Lives: 3
+State: Paused
+Score: 150
+Lives: 3
+State: Playing
+Score: 150
+Lives: 3
+State: Playing
+Score: 150
+Lives: 1
+State: Game Over
+Score: 150
+Lives: 0

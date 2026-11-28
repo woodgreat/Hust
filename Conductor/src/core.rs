@@ -25,15 +25,19 @@ pub const EXE_SUFFIX: &str = if cfg!(windows) { ".exe" } else { "" };
 pub enum CoreKind {
     Rust,
     C,
+    CSharp,
+    Go,
 }
 
 impl CoreKind {
-    pub const ALL: [CoreKind; 2] = [CoreKind::Rust, CoreKind::C];
+    pub const ALL: [CoreKind; 4] = [CoreKind::Rust, CoreKind::C, CoreKind::CSharp, CoreKind::Go];
 
     pub fn label(self) -> &'static str {
         match self {
             CoreKind::Rust => "rust",
             CoreKind::C => "c",
+            CoreKind::CSharp => "csharp",
+            CoreKind::Go => "go",
         }
     }
 
@@ -41,6 +45,8 @@ impl CoreKind {
         match self {
             CoreKind::Rust => "hust_rust",
             CoreKind::C => "hust_c",
+            CoreKind::CSharp => "hust_csharp",
+            CoreKind::Go => "hust_go",
         }
     }
 
@@ -48,6 +54,8 @@ impl CoreKind {
         match self {
             CoreKind::Rust => "HUST_RUST_BIN",
             CoreKind::C => "HUST_C_BIN",
+            CoreKind::CSharp => "HUST_CSHARP_BIN",
+            CoreKind::Go => "HUST_GO_BIN",
         }
     }
 
@@ -55,6 +63,8 @@ impl CoreKind {
         match preference {
             CorePreference::Rust => Some(CoreKind::Rust),
             CorePreference::C => Some(CoreKind::C),
+            CorePreference::CSharp => Some(CoreKind::CSharp),
+            CorePreference::Go => Some(CoreKind::Go),
             CorePreference::Auto => None,
         }
     }
@@ -191,6 +201,8 @@ pub struct SearchSpec {
     pub path_var: Option<OsString>,
     pub rust_bin: Option<OsString>,
     pub c_bin: Option<OsString>,
+    pub csharp_bin: Option<OsString>,
+    pub go_bin: Option<OsString>,
 }
 
 impl SearchSpec {
@@ -203,6 +215,8 @@ impl SearchSpec {
             path_var: env::var_os("PATH"),
             rust_bin: env::var_os("HUST_RUST_BIN"),
             c_bin: env::var_os("HUST_C_BIN"),
+            csharp_bin: env::var_os("HUST_CSHARP_BIN"),
+            go_bin: env::var_os("HUST_GO_BIN"),
         }
     }
 
@@ -210,6 +224,8 @@ impl SearchSpec {
         match kind {
             CoreKind::Rust => self.rust_bin.as_ref(),
             CoreKind::C => self.c_bin.as_ref(),
+            CoreKind::CSharp => self.csharp_bin.as_ref(),
+            CoreKind::Go => self.go_bin.as_ref(),
         }
     }
 
@@ -517,6 +533,8 @@ mod tests {
             path_var: Some(OsString::from("/one:/two")),
             rust_bin: Some(OsString::from("/custom/rust")),
             c_bin: Some(OsString::from("/custom/c")),
+            csharp_bin: Some(OsString::from("/custom/csharp")),
+            go_bin: Some(OsString::from("/custom/go")),
         };
         let rust = spec.candidates(CoreKind::Rust);
         // New default: hust_work/hust_core/hust_rust/hust_rust
@@ -536,12 +554,50 @@ mod tests {
     }
 
     #[test]
+    fn new_cores_use_their_own_directories_and_preferences() {
+        let spec = SearchSpec {
+            exe_dir: Some(PathBuf::from("/exe")),
+            path_var: None,
+            rust_bin: None,
+            c_bin: None,
+            csharp_bin: Some(OsString::from("/custom/hust_csharp")),
+            go_bin: Some(OsString::from("/custom/hust_go")),
+        };
+
+        let csharp = spec.candidates(CoreKind::CSharp);
+        assert_eq!(
+            csharp[0],
+            PathBuf::from("/exe/hust_work/hust_core/hust_csharp/hust_csharp")
+        );
+        assert_eq!(csharp.last().unwrap(), &PathBuf::from("/custom/hust_csharp"));
+
+        let go = spec.candidates(CoreKind::Go);
+        assert_eq!(
+            go[0],
+            PathBuf::from("/exe/hust_work/hust_core/hust_go/hust_go")
+        );
+        assert_eq!(go.last().unwrap(), &PathBuf::from("/custom/hust_go"));
+
+        assert_eq!(
+            CoreKind::from_preference(CorePreference::CSharp),
+            Some(CoreKind::CSharp)
+        );
+        assert_eq!(
+            CoreKind::from_preference(CorePreference::Go),
+            Some(CoreKind::Go)
+        );
+        assert_eq!(CoreKind::ALL.len(), 4);
+    }
+
+    #[test]
     fn candidates_are_deduplicated() {
         let spec = SearchSpec {
             exe_dir: Some(PathBuf::from("/one")),
             path_var: Some(OsString::from("/one:/one")),
             rust_bin: None,
             c_bin: None,
+            csharp_bin: None,
+            go_bin: None,
         };
         // hust_work path + legacy path = 2 unique candidates (PATH duplicates removed)
         assert_eq!(spec.candidates(CoreKind::Rust).len(), 2);

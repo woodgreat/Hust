@@ -1,0 +1,9 @@
+use GO.fmt.*;
+
+i32 add(i32 a, i32 b) {
+    return a + b;
+}
+
+void main() {
+    fmt.Println(add(1));
+}

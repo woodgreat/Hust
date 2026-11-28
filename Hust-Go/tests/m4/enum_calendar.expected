@@ -1,0 +1,12 @@
+January: 31
+February: 29
+February: 28
+December: 31
+2024 is leap: true
+2023 is leap: false
+2000 is leap: true
+1900 is leap: false
+Q1: 1
+Q2: 2
+Q3: 3
+Q4: 4

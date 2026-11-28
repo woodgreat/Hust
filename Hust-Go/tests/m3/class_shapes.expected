@@ -1,0 +1,17 @@
+Shape: Circle
+Area: 78.53975
+Perimeter: 31.415901
+---
+Shape: Rectangle
+Area: 24
+Perimeter: 20
+---
+Shape: Triangle
+Area: 6
+Perimeter: 12
+---
+Shape: Square
+Area: 25
+Perimeter: 20
+---
+Total Area: 133.53975

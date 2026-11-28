@@ -1,0 +1,16 @@
+use CSHARP.Console.*;
+
+void main() {
+    String a = "Hello";
+    String b = "World";
+
+    if (a == "Hello") {
+        Console.WriteLine("equal");
+    }
+    if (a != b) {
+        Console.WriteLine("different");
+    }
+
+    Console.WriteLine(a.charAt(0));
+    Console.WriteLine(a.charAt(4));
+}

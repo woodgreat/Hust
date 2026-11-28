@@ -1,0 +1,11 @@
+Account: 123456
+Balance: 1000
+Deposited: 500
+Account: 123456
+Balance: 1500
+Withdrew: 200
+Account: 123456
+Balance: 1300
+Insufficient funds
+Account: 123456
+Balance: 1300

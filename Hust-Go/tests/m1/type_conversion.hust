@@ -1,42 +1,29 @@
 use GO.fmt.*;
 
 void main() {
-    // Test all type conversions
+    // Numeric widths and literals. Hust does not implicitly convert between
+    // String and numeric types, so this test sticks to same-type assignments.
     i32 i32Val = 100;
+    i64 i64Val = 100;
     f32 f32Val = 3.14;
     f64 f64Val = 2.71828;
     bool boolVal = true;
     String strVal = "123";
-    
-    // i32 to f32
-    f32 f32FromI32 = i32Val;
-    fmt.Println(f32FromI32);
-    
-    // i32 to f64
-    f64 f64FromI32 = i32Val;
-    fmt.Println(f64FromI32);
-    
-    // f32 to i32
-    i32 i32FromF32 = f32Val;
-    fmt.Println(i32FromF32);
-    
-    // f64 to i32
-    i32 i32FromF64 = f64Val;
-    fmt.Println(i32FromF64);
-    
-    // bool to i32
-    i32 i32FromBool = boolVal;
-    fmt.Println(i32FromBool);
-    
-    // String to i32
-    i32 i32FromStr = strVal;
-    fmt.Println(i32FromStr);
-    
-    // i32 to String
-    String strFromI32 = i32Val;
-    fmt.Println(strFromI32);
-    
-    // f32 to String
-    String strFromF32 = f32Val;
-    fmt.Println(strFromF32);
+
+    fmt.Println(i32Val);
+    fmt.Println(i64Val);
+    fmt.Println(f32Val);
+    fmt.Println(f64Val);
+    fmt.Println(boolVal);
+    fmt.Println(strVal);
+
+    // Arithmetic keeps the declared width.
+    i32 sum = i32Val + 1;
+    f32 half = f32Val / 2.0;
+    fmt.Println(sum);
+    fmt.Println(half);
+
+    // String concatenation is explicit and works with numbers.
+    String text = "value=" + i32Val;
+    fmt.Println(text);
 }

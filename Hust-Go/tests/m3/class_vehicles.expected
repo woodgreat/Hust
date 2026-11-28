@@ -1,0 +1,31 @@
+Toyota Camry is starting
+Toyota Camry is honking: Beep! Beep!
+Car Info:
+Brand: Toyota
+Model: Camry
+Year: 2023
+Price: $25000
+Doors: 4
+Fuel: Gasoline
+Toyota Camry is stopping
+---
+Harley-Davidson Iron 883 is starting
+Harley-Davidson Iron 883 is doing a wheelie!
+Motorcycle Info:
+Brand: Harley-Davidson
+Model: Iron 883
+Year: 2022
+Price: $15000
+Has Sidecar: false
+Harley-Davidson Iron 883 is stopping
+---
+Ford F-150 is starting
+Loading 1.5 tons of cargo
+Cargo too heavy! Max capacity: 2.5 tons
+Truck Info:
+Brand: Ford
+Model: F-150
+Year: 2023
+Price: $45000
+Cargo Capacity: 2.5 tons
+Ford F-150 is stopping

@@ -614,7 +614,7 @@ fn version_reports_conductor_and_discovered_cores() {
     let output = sandbox.command().arg("--version").output().unwrap();
     let (stdout, stderr) = text(&output);
     assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr);
-    assert!(stdout.contains("hustc 0.1.0"), "stdout: {}", stdout);
+    assert!(stdout.contains("hustc 0.1.2"), "stdout: {}", stdout);
     assert!(stdout.contains("protocol 1"), "stdout: {}", stdout);
     assert!(
         stdout.contains("rust: hust_rust 9.9.9"),
@@ -622,6 +622,8 @@ fn version_reports_conductor_and_discovered_cores() {
         stdout
     );
     assert!(stdout.contains("c: unavailable"), "stdout: {}", stdout);
+    assert!(stdout.contains("csharp: unavailable"), "stdout: {}", stdout);
+    assert!(stdout.contains("go: unavailable"), "stdout: {}", stdout);
 }
 
 #[test]
@@ -790,7 +792,7 @@ fn invalid_config_core_is_a_usage_error() {
     sandbox.install_core("rust", FakeCore::working());
     fs::write(
         sandbox.project().join("settings.config"),
-        "[project]\ncore = go\n",
+        "[project]\ncore = java\n",
     )
     .unwrap();
 

@@ -1,0 +1,37 @@
+use GO.fmt.*;
+
+interface Shape {
+    public f32 area();
+}
+
+class Circle implements Shape {
+    f32 radius;
+
+    public Circle(f32 r) {
+        this.radius = r;
+    }
+
+    public f32 area() {
+        return 3.0 * this.radius * this.radius;
+    }
+}
+
+class Square implements Shape {
+    f32 side;
+
+    public Square(f32 s) {
+        this.side = s;
+    }
+
+    public f32 area() {
+        return this.side * this.side;
+    }
+}
+
+void main() {
+    Shape a = new Circle(2.0);
+    Shape b = new Square(3.0);
+
+    fmt.Println(a.area());
+    fmt.Println(b.area());
+}

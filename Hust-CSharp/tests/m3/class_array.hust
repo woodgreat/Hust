@@ -1,0 +1,21 @@
+use CSHARP.Console.*;
+
+class Book {
+    String title;
+
+    public Book(String t) {
+        this.title = t;
+    }
+
+    public String getTitle() {
+        return this.title;
+    }
+}
+
+void main() {
+    Book[] books = {new Book("Alpha"), new Book("Beta"), new Book("Gamma")};
+
+    for (i32 i = 0; i < books.len(); i++) {
+        Console.WriteLine(books[i].getTitle());
+    }
+}

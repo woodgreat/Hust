@@ -57,6 +57,8 @@ fn execute(options: Options) -> Result<i32> {
     let explicit = options.core.map(|choice| match choice {
         CoreChoice::Rust => CoreKind::Rust,
         CoreChoice::C => CoreKind::C,
+        CoreChoice::CSharp => CoreKind::CSharp,
+        CoreChoice::Go => CoreKind::Go,
     });
     let selected = core::select(explicit, resolved.config.core, &discovery, op)?;
 
@@ -253,6 +255,7 @@ fn install_executable(
             ))
         })?;
     }
+    install_sidecar(executable, &destination)?;
     make_executable(&destination)?;
 
     fs::canonicalize(&destination).map_err(|error| {
@@ -269,6 +272,85 @@ fn same_file(left: &Path, right: &Path) -> bool {
         (Ok(left), Ok(right)) => left == right,
         _ => false,
     }
+}
+
+/// Some cores (notably .NET) produce a launcher plus a sibling payload
+/// directory named `<executable>.files`. Copy it next to the installed
+/// launcher so `-o` stays self-contained.
+fn install_sidecar(executable: &Path, destination: &Path) -> Result<()> {
+    let Some(file_name) = executable.file_name() else {
+        return Ok(());
+    };
+    let source = executable.with_file_name(format!("{}.files", file_name.to_string_lossy()));
+    if !source.is_dir() {
+        return Ok(());
+    }
+
+    let Some(dest_name) = destination.file_name() else {
+        return Ok(());
+    };
+    let target = destination.with_file_name(format!("{}.files", dest_name.to_string_lossy()));
+    if same_file(&source, &target) {
+        return Ok(());
+    }
+    if target.exists() {
+        fs::remove_dir_all(&target).map_err(|error| {
+            Error::build(format!(
+                "cannot replace sidecar directory `{}`: {}",
+                target.display(),
+                error
+            ))
+        })?;
+    }
+    copy_dir_all(&source, &target)
+}
+
+fn copy_dir_all(source: &Path, target: &Path) -> Result<()> {
+    fs::create_dir_all(target).map_err(|error| {
+        Error::build(format!(
+            "cannot create sidecar directory `{}`: {}",
+            target.display(),
+            error
+        ))
+    })?;
+    let entries = fs::read_dir(source).map_err(|error| {
+        Error::build(format!(
+            "cannot read sidecar directory `{}`: {}",
+            source.display(),
+            error
+        ))
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            Error::build(format!(
+                "cannot read sidecar entry in `{}`: {}",
+                source.display(),
+                error
+            ))
+        })?;
+        let child_source = entry.path();
+        let child_target = target.join(entry.file_name());
+        let file_type = entry.file_type().map_err(|error| {
+            Error::build(format!(
+                "cannot inspect sidecar entry `{}`: {}",
+                child_source.display(),
+                error
+            ))
+        })?;
+        if file_type.is_dir() {
+            copy_dir_all(&child_source, &child_target)?;
+        } else {
+            fs::copy(&child_source, &child_target).map_err(|error| {
+                Error::build(format!(
+                    "cannot copy sidecar entry `{}` to `{}`: {}",
+                    child_source.display(),
+                    child_target.display(),
+                    error
+                ))
+            })?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

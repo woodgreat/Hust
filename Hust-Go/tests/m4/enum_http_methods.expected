@@ -1,0 +1,10 @@
+GET https://api.example.com/users
+---
+POST https://api.example.com/users
+Body: {"name": "Alice"}
+---
+PUT https://api.example.com/users/1
+Body: {"name": "Bob"}
+---
+DELETE https://api.example.com/users/1
+---

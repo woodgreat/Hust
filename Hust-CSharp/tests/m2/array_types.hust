@@ -1,0 +1,11 @@
+use CSHARP.Console.*;
+
+void main() {
+    String[] names = {"Alice", "Bob", "Carol"};
+    bool[] flags = {true, false, true};
+
+    Console.WriteLine(names.len());
+    Console.WriteLine(names[1]);
+    Console.WriteLine(flags[0]);
+    Console.WriteLine(flags[1]);
+}

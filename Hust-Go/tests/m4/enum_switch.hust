@@ -1,0 +1,25 @@
+use GO.fmt.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Color c = Color.Blue;
+
+    switch (c) {
+        case Color.Red:
+            fmt.Println("red");
+            break;
+        case Color.Green:
+            fmt.Println("green");
+            break;
+        case Color.Blue:
+            fmt.Println("blue");
+            break;
+        default:
+            fmt.Println("unknown");
+    }
+}

@@ -1,6 +1,6 @@
 [package]
 name = "hust-conductor"
-version = "0.1.1.20261127083800"
+version = "0.1.2+20261128130000"
 edition = "2021"
 description = "Hust multi-core conductor"
 authors = ["wood"]

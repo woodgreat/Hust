@@ -1,0 +1,28 @@
+use CSHARP.Console.*;
+
+class Counter {
+    i32 value;
+
+    public Counter(i32 start) {
+        this.value = start;
+    }
+
+    public void increment() {
+        this.value = this.value + 1;
+    }
+
+    public void add(i32 amount) {
+        this.value = this.value + amount;
+    }
+
+    public i32 get() {
+        return this.value;
+    }
+}
+
+void main() {
+    Counter c = new Counter(10);
+    c.increment();
+    c.add(5);
+    Console.WriteLine(c.get());
+}

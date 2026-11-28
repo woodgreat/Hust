@@ -1,0 +1,28 @@
+=== Stack Test ===
+Stack (top to bottom):
+5
+4
+3
+2
+1
+Peek: 5
+Pop: 5
+Pop: 4
+Stack (top to bottom):
+3
+2
+1
+=== Queue Test ===
+Queue (front to back):
+1
+2
+3
+4
+5
+Front: 1
+Dequeue: 1
+Dequeue: 2
+Queue (front to back):
+3
+4
+5

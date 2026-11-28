@@ -1,0 +1,12 @@
+use CSHARP.Console.*;
+
+void main() {
+    String first = "Hello";
+    String second = "World";
+
+    String greeting = first + ", " + second + "!";
+    Console.WriteLine(greeting);
+
+    i32 count = 3;
+    Console.WriteLine("count=" + count);
+}

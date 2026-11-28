@@ -48,7 +48,7 @@ void main() {
     DataRecord rec = new DataRecord();
     rec.id = "001";
     rec.content = "test data";
-    serialized = rec.serialize();
+    String serialized = rec.serialize();
     fmt.Println("Serialized: " + serialized);
     rec.deserialize(serialized);
 }

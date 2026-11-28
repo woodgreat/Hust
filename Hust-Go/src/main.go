@@ -6,183 +6,256 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
-const (
-	Version = "0.1.0.20261127084900"
-)
+const Version = "0.1.1.20261128125000"
 
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
-		os.Exit(1)
+		os.Exit(2)
 	}
 
-	command := os.Args[1]
-
-	switch command {
+	switch os.Args[1] {
 	case "transpile":
-		handleTranspile()
+		os.Exit(handleTranspile(os.Args[2:]))
 	case "build":
-		handleBuild()
+		os.Exit(handleBuild(os.Args[2:]))
 	case "info":
-		fmt.Printf(`{"protocol":1,"name":"go","language":"go","transpile":true,"build":true,"toolchain":true}`)
+		fmt.Printf(`{"protocol":1,"name":"go","language":"go","transpile":true,"build":true,"toolchain":%t}`+"\n", findGo() != "")
 	case "--version", "-V":
 		fmt.Printf("hust_go %s\n", Version)
 	case "--help", "-h":
 		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n", command)
+		fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n", os.Args[1])
 		printUsage()
 		os.Exit(2)
 	}
 }
 
-func handleTranspile() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Error: transpile requires entry file\n")
-		os.Exit(2)
-	}
-	
-	entry := os.Args[2]
-	outDir := "."
-	
-	// Parse --out-dir
-	for i := 3; i < len(os.Args); i++ {
-		if os.Args[i] == "--out-dir" && i+1 < len(os.Args) {
-			outDir = os.Args[i+1]
-			i++
-		}
-	}
-	
-	// Read source file
-	source, err := os.ReadFile(entry)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot read entry file: %v\n", err)
-		os.Exit(2)
-	}
-	
-	// Transpile
-	translator := NewTranslator()
-	result := translator.Translate(string(source), filepath.Base(entry))
-	
-	if !result.Success {
-		for _, err := range result.Errors {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		}
-		os.Exit(4)
-	}
-	
-	// Write output
-	outputFile := filepath.Join(outDir, filepath.Base(entry[:len(entry)-5])+".go")
-	if err := os.MkdirAll(outDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot create output directory: %v\n", err)
-		os.Exit(2)
-	}
-	
-	if err := os.WriteFile(outputFile, []byte(result.Code), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot write output file: %v\n", err)
-		os.Exit(2)
-	}
-	
-	fmt.Fprintf(os.Stderr, "Transpiled %s -> %s\n", entry, outputFile)
+type options struct {
+	entry   string
+	outDir  string
+	release bool
+	debug   bool
+	project bool
 }
 
-func handleBuild() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Error: build requires entry file\n")
-		os.Exit(2)
-	}
-	
-	entry := os.Args[2]
-	outDir := "."
-	release := true
-	
-	// Parse flags
-	for i := 3; i < len(os.Args); i++ {
-		switch os.Args[i] {
+func parseOptions(args []string) (options, error) {
+	opts := options{outDir: ".", release: true}
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
 		case "--out-dir":
-			if i+1 < len(os.Args) {
-				outDir = os.Args[i+1]
-				i++
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--out-dir requires a value")
 			}
-		case "--debug":
-			release = false
+			i++
+			opts.outDir = args[i]
 		case "--release":
-			release = true
+			opts.release = true
+			opts.debug = false
+		case "--debug":
+			opts.debug = true
+			opts.release = false
+		case "--project":
+			opts.project = true
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return opts, fmt.Errorf("unknown option '%s'", args[i])
+			}
+			if opts.entry != "" {
+				return opts, fmt.Errorf("unexpected argument '%s'", args[i])
+			}
+			opts.entry = args[i]
 		}
 	}
-	
-	// First transpile
-	source, err := os.ReadFile(entry)
+
+	if opts.entry == "" {
+		return opts, fmt.Errorf("missing entry file")
+	}
+
+	resolved, err := resolveEntry(opts.entry)
+	if err != nil {
+		return opts, err
+	}
+	opts.entry = resolved
+	return opts, nil
+}
+
+func resolveEntry(raw string) (string, error) {
+	info, err := os.Stat(raw)
+	if err == nil && !info.IsDir() {
+		return raw, nil
+	}
+	if err == nil && info.IsDir() {
+		config := filepath.Join(raw, "settings.config")
+		if data, err := os.ReadFile(config); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "[") {
+					continue
+				}
+				key, value, ok := strings.Cut(line, "=")
+				if !ok {
+					continue
+				}
+				if strings.TrimSpace(key) == "entry" {
+					candidate := filepath.Join(raw, strings.Trim(strings.TrimSpace(value), `"`))
+					if _, statErr := os.Stat(candidate); statErr == nil {
+						return candidate, nil
+					}
+				}
+			}
+		}
+		main := filepath.Join(raw, "main.hust")
+		if _, statErr := os.Stat(main); statErr == nil {
+			return main, nil
+		}
+	}
+	return "", fmt.Errorf("entry file not found: %s", raw)
+}
+
+func handleTranspile(args []string) int {
+	opts, err := parseOptions(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 2
+	}
+
+	source, err := os.ReadFile(opts.entry)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot read entry file: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
-	
-	translator := NewTranslator()
-	result := translator.Translate(string(source), filepath.Base(entry))
-	
+
+	result := NewTranslator().Translate(string(source), filepath.Base(opts.entry))
 	if !result.Success {
-		for _, err := range result.Errors {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		for _, message := range result.Errors {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", message)
 		}
-		os.Exit(4)
+		return 4
 	}
-	
-	// Write transpiled file
-	if err := os.MkdirAll(outDir, 0755); err != nil {
+
+	if err := os.MkdirAll(opts.outDir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot create output directory: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
-	
-	goFile := filepath.Join(outDir, "main.go")
-	if err := os.WriteFile(goFile, []byte(result.Code), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot write Go file: %v\n", err)
-		os.Exit(2)
+
+	outFile := outputFile(opts.outDir, opts.entry)
+	if err := os.WriteFile(outFile, []byte(result.Code), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot write output file: %v\n", err)
+		return 2
 	}
-	
-	// Build with go
-	executable := filepath.Join(outDir, "main")
+	return 0
+}
+
+func handleBuild(args []string) int {
+	opts, err := parseOptions(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 2
+	}
+
+	goBin := findGo()
+	if goBin == "" {
+		fmt.Fprintf(os.Stderr, "Error: go toolchain not found (set GO_BIN or add go to PATH)\n")
+		return 3
+	}
+
+	source, err := os.ReadFile(opts.entry)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot read entry file: %v\n", err)
+		return 2
+	}
+
+	result := NewTranslator().Translate(string(source), filepath.Base(opts.entry))
+	if !result.Success {
+		for _, message := range result.Errors {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", message)
+		}
+		return 4
+	}
+
+	if err := os.MkdirAll(opts.outDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot create output directory: %v\n", err)
+		return 2
+	}
+
+	goFile := outputFile(opts.outDir, opts.entry)
+	if err := os.WriteFile(goFile, []byte(result.Code), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot write output file: %v\n", err)
+		return 2
+	}
+
+	stem := strings.TrimSuffix(filepath.Base(opts.entry), filepath.Ext(opts.entry))
+	executable := filepath.Join(opts.outDir, stem)
 	if runtime.GOOS == "windows" {
 		executable += ".exe"
 	}
-	
-	// Determine build mode
-	buildMode := "-ldflags=-s -w" // release: strip debug info
-	if !release {
-		buildMode = "" // debug: keep debug info
+
+	buildArgs := []string{"build", "-o", executable}
+	if opts.release {
+		buildArgs = append(buildArgs, "-ldflags=-s -w")
 	}
-	
-	// Find go binary
-	goBin := os.Getenv("GO_BIN")
-	if goBin == "" {
-		goBin = "go"
-	}
-	
-	// Run go build
-	cmd := exec.Command(goBin, "build", "-o", executable, goFile)
-	if buildMode != "" {
-		cmd = exec.Command(goBin, "build", "-ldflags=-s -w", "-o", executable, goFile)
-	}
-	
-	cmd.Stdout = os.Stdout
+	buildArgs = append(buildArgs, goFile)
+
+	cmd := exec.Command(goBin, buildArgs...)
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-	
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: go build failed: %v\n", err)
-		os.Exit(5)
+		return 5
 	}
-	
-	// Output executable path (contract requirement)
-	absPath, err := filepath.Abs(executable)
+
+	abs, err := filepath.Abs(executable)
 	if err != nil {
-		absPath = executable
+		abs = executable
 	}
-	fmt.Printf("executable=%s\n", absPath)
+	// Contract: stdout carries only the executable line.
+	fmt.Printf("executable=%s\n", abs)
+	return 0
+}
+
+func outputFile(outDir, entry string) string {
+	// Always use main.go: a source named `foo_test.hust` would otherwise
+	// produce `foo_test.go`, which the Go toolchain ignores as a test file.
+	return filepath.Join(outDir, "main.go")
+}
+
+func findGo() string {
+	if candidate := os.Getenv("GO_BIN"); candidate != "" {
+		if isExecutable(candidate) {
+			return candidate
+		}
+	}
+	if path, err := exec.LookPath("go"); err == nil {
+		return path
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidate := filepath.Join(home, "go-sdk", "go", "bin", "go")
+		if isExecutable(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func isExecutable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode()&0o111 != 0
 }
 
 func printUsage() {
+	fmt.Fprintf(os.Stderr, "Hust-Go core %s\n", Version)
 	fmt.Fprintf(os.Stderr, "Usage:\n")
 	fmt.Fprintf(os.Stderr, "  hust_go transpile <entry> [--project] --out-dir <dir>\n")
 	fmt.Fprintf(os.Stderr, "  hust_go build <entry> [--project] --out-dir <dir> [--release|--debug]\n")

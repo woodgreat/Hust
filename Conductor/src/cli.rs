@@ -16,6 +16,8 @@ pub enum Command {
 pub enum CoreChoice {
     Rust,
     C,
+    CSharp,
+    Go,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +64,8 @@ Options:
   --project            Treat the target as a project
   --core-rust          Use the Rust core
   --core-c             Use the C core
+  --core-csharp        Use the C# core
+  --core-go            Use the Go core
   --release            Build in release mode (default for build)
   --debug              Build in debug mode (default for run)
   -o, --output <path>  Output path for the built executable (build only)
@@ -149,6 +153,8 @@ where
             Some("--project") => project = true,
             Some("--core-rust") => set_core(&mut core, CoreChoice::Rust)?,
             Some("--core-c") => set_core(&mut core, CoreChoice::C)?,
+            Some("--core-csharp") => set_core(&mut core, CoreChoice::CSharp)?,
+            Some("--core-go") => set_core(&mut core, CoreChoice::Go)?,
             Some("--release") => set_mode(&mut mode, BuildMode::Release)?,
             Some("--debug") => set_mode(&mut mode, BuildMode::Debug)?,
             Some("--keep-temp") => keep_temp = true,
@@ -227,7 +233,7 @@ fn set_core(slot: &mut Option<CoreChoice>, value: CoreChoice) -> Result<()> {
     if let Some(existing) = slot {
         if *existing != value {
             return Err(Error::usage(
-                "`--core-rust` and `--core-c` cannot be combined",
+                "`--core-rust`, `--core-c`, `--core-csharp`, and `--core-go` cannot be combined",
             ));
         }
     } else {

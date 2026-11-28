@@ -1,0 +1,30 @@
+use CSHARP.Console.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+class TrafficLight {
+    Color color;
+
+    public TrafficLight(Color c) {
+        this.color = c;
+    }
+
+    public String name() {
+        if (this.color == Color.Red) {
+            return "red";
+        }
+        if (this.color == Color.Green) {
+            return "green";
+        }
+        return "blue";
+    }
+}
+
+void main() {
+    TrafficLight light = new TrafficLight(Color.Green);
+    Console.WriteLine(light.name());
+}

@@ -1,1 +1,1 @@
-Type mismatch: cannot add int32 and string
+Type mismatch: cannot assign string to int32

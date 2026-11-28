@@ -1,0 +1,27 @@
+use CSHARP.Console.*;
+
+i32 add(i32 a, i32 b) {
+    return a + b;
+}
+
+i32 factorial(i32 n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+String greet(String name) {
+    return "Hi " + name;
+}
+
+void printValue(i32 value) {
+    Console.WriteLine(value);
+}
+
+void main() {
+    Console.WriteLine(add(2, 3));
+    Console.WriteLine(factorial(5));
+    Console.WriteLine(greet("Hust"));
+    printValue(7);
+}

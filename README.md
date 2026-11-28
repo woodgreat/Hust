@@ -1,15 +1,16 @@
 # Hust
 
-Hust 是面向 Rust 与 C 的源到源转译语言。当前仓库包含指导器和两个独立语言核。
+Hust 是面向 Rust、C、C# 与 Go 的源到源转译语言。当前仓库包含指导器和四个独立语言核。
 
 ## 核心版本
 
 | 核心 | 产物 | 版本 |
 |------|------|------|
-| Conductor | `hustc` | 0.1.1.20261127083800 |
-| Rust 语言核 | `hust_rust` | 0.3.12.20261127083900 |
+| Conductor | `hustc` | 0.1.2+20261128130000 |
+| Rust 语言核 | `hust_rust` | 0.3.13+20261128130000 |
 | C 语言核 | `hust_c` | 0.1.1.20261127084000 |
-| C# 语言核 | `hust_csharp` | 0.1.1.20261127083700 |
+| C# 语言核 | `hust_csharp` | 0.1.2.20261128125000 |
+| Go 语言核 | `hust_go` | 0.1.1.20261128125000 |
 
 ## 仓库布局
 
@@ -18,6 +19,8 @@ Hust 是面向 Rust 与 C 的源到源转译语言。当前仓库包含指导器
 | `Conductor/` | `hustc` | 指导器：读取配置、发现核、选核、编排构建与运行 |
 | `Hust-Rust/` | `hust_rust` | Rust 语言核 |
 | `Hust-C/` | `hust_c` | C 语言核 |
+| `Hust-CSharp/` | `hust_csharp` | C# 语言核 |
+| `Hust-Go/` | `hust_go` | Go 语言核 |
 | `tests/` | - | 跨核集成与全量回归入口 |
 
 一个项目只使用一个语言核，不支持混核。
@@ -34,7 +37,9 @@ hustc --cores
 安装到 `~/.local/bin/`：
 - `hustc` - Conductor CLI
 - `hust_work/hust_core/hust_c/` - C 核心（含 include/ 和 lib/）
-- `hust_work/hust_core/hust_rust/` - Rust 核心（含 include/ 和 lib/）
+- `hust_work/hust_core/hust_rust/` - Rust 核心
+- `hust_work/hust_core/hust_csharp/` - C# 核心（dll + 启动器）
+- `hust_work/hust_core/hust_go/` - Go 核心
 
 ### 单独构建各部件
 
@@ -47,20 +52,30 @@ cd Hust-Rust && cargo build --release
 
 # C 核心
 cd Hust-C && make
+
+# C# 核心
+cd Hust-CSharp && dotnet build -c Release -o bin/core
+
+# Go 核心
+cd Hust-Go && go build -o hust_go ./src
 ```
 
 详见各部件的 README.md：
 - `Conductor/README.md`
 - `Hust-Rust/howto_build.md`
 - `Hust-C/README.md`
+- `Hust-CSharp/README.md`
+- `Hust-Go/README.md`
 
 ### 常用命令
 
 ```bash
-hustc run main.hust                 # 单文件运行（默认 Rust 核）
+hustc run main.hust                 # 单文件运行（auto：Rust -> C -> C# -> Go）
 hustc run myproj --core-c           # 项目运行（显式 C 核）
+hustc run myproj --core-csharp      # C# 核
+hustc run myproj --core-go          # Go 核
 hustc build myproj -o bin/app       # 构建产物
-hustc check myproj --core-rust      # 只转译，不调用目标编译器
+hustc check myproj --core-go        # 只转译，不调用目标编译器
 hustc --cores                       # 列出可用核与工具链
 ```
 
@@ -71,17 +86,21 @@ hustc --cores                       # 列出可用核与工具链
 ## 测试
 
 ```bash
-./tests/run_all.sh                  # Conductor + 两核 + P3
+./tests/run_all.sh                  # Conductor + 四核 + P3
 ./tests/run_all.sh --with-install   # 加安装端到端
 ./tests/run_all.sh --strict         # Hust-Rust 已知问题也判失败
 ```
 
+当前基线：Hust-C 178/178，Hust-CSharp 47/47，Hust-Go 134/134 + 负向 15/15，
+Conductor 76/76，P3 四核 PASS。
+
 单独运行：
 
 ```bash
-cd Hust-Rust && ./tests/run_tests.sh
-cd Hust-C   && ./tests/run_tests.sh
-cd Hust-C   && ./tests/run_tests.sh negative
+cd Hust-Rust   && ./tests/run_tests.sh
+cd Hust-C      && ./tests/run_tests.sh
+cd Hust-CSharp && ./tests/run_tests.sh && ./tests/core_contract.sh
+cd Hust-Go     && ./tests/run_tests.sh && ./tests/core_contract.sh
 ```
 
 完整测试方法与基线见 `../Hust-Docs/doc/core_testing_guide.md`。

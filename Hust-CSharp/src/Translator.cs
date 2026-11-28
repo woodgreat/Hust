@@ -24,9 +24,22 @@ public class Translator
     
     // Context tracking
     private int _braceDepth = 0;        // Track { } depth
+    private int _classDepth = -1;
+    private int _methodDepth = -1;
+    private int _interfaceDepth = -1;
     private bool _inClass = false;      // Inside a class declaration
     private bool _inInterface = false;  // Inside an interface declaration
     private bool _inMethod = false;     // Inside a method
+    private string _currentClass = "";  // Current class name (constructors)
+    private HashSet<string> _knownClasses = new();
+    private HashSet<string> _defaultCtorClasses = new();
+
+    // Type pattern shared by declarations and methods. Class/enum names are
+    // capitalized; primitives cover Hust and C# spellings.
+    private const string PrimitiveTypes =
+        "i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char|void|" +
+        "int|long|short|byte|sbyte|uint|ulong|ushort|float|double|string|object";
+    private const string TypePattern = @"(?:" + PrimitiveTypes + @"|[A-Z]\w*)(?:\[\d*\])*";
     
     // Semantic analysis
     private readonly HashSet<string> _definedFunctions = new();  // Track defined functions
@@ -58,8 +71,8 @@ public class Translator
     
     private string MapType(string hustType)
     {
-        // Handle array types: i32[] -> int[], i32[5] -> int[5]
-        var arrayMatch = Regex.Match(hustType, @"^(\w+)(\[\d*\])$");
+        // Handle array types: i32[] -> int[], i32[5] -> int[5], Person[][] -> Person[][]
+        var arrayMatch = Regex.Match(hustType, @"^(\w+)((?:\[\d*\])*)$");
         if (arrayMatch.Success)
         {
             var baseType = arrayMatch.Groups[1].Value;
@@ -67,7 +80,7 @@ public class Translator
             var mappedBase = TypeMap.ContainsKey(baseType) ? TypeMap[baseType] : baseType;
             return mappedBase + arraySuffix;
         }
-        
+
         // Handle simple types
         return TypeMap.ContainsKey(hustType) ? TypeMap[hustType] : hustType;
     }
@@ -87,8 +100,15 @@ public class Translator
             
             // Step 1: Preprocess (protect strings/comments, normalize blocks)
             var (processed, dialect) = _preprocessor.Process(source);
-            
-            if (dialect.DetectedDialect != Preprocessor.DialectType.PureHust && 
+
+            if (!dialect.IsValid || dialect.Errors.Count > 0)
+            {
+                result.Success = false;
+                result.Errors.AddRange(dialect.Errors);
+                return result;
+            }
+
+            if (dialect.DetectedDialect != Preprocessor.DialectType.PureHust &&
                 dialect.DetectedDialect != Preprocessor.DialectType.CSharpDialect)
             {
                 result.Success = false;
@@ -96,6 +116,7 @@ public class Translator
                 {
                     Preprocessor.DialectType.CDialect => "C.* imports detected in C# core project",
                     Preprocessor.DialectType.RustDialect => "RUST.* imports detected in C# core project",
+                    Preprocessor.DialectType.GoDialect => "GO.* imports detected in C# core project",
                     Preprocessor.DialectType.MixedDialect => "Mixed dialects detected",
                     _ => $"Unsupported dialect: {dialect.DetectedDialect}"
                 };
@@ -104,7 +125,17 @@ public class Translator
             }
             
             // Step 2: Translate line by line
-            var lines = processed.Split('\n');
+            var lines = ExpandInlineBlocks(processed.Split('\n'));
+
+            // Pre-scan class names and parameterless constructors so derived
+            // classes can rely on an implicit base() call.
+            _knownClasses = Regex.Matches(processed, @"\bclass\s+(\w+)")
+                .Select(m => m.Groups[1].Value)
+                .ToHashSet();
+            _defaultCtorClasses = Regex.Matches(processed, @"\b(?:public\s+)?(\w+)\s*\(\s*\)\s*\{")
+                .Select(m => m.Groups[1].Value)
+                .Where(name => _knownClasses.Contains(name))
+                .ToHashSet();
             
             // Emit header
             EmitHeader();
@@ -227,6 +258,87 @@ public class Translator
         return result;
     }
 
+    /// <summary>
+    /// Splits `void main() { ... }` and `if (x) { ... }` so the line-based
+    /// translator can handle one-line blocks.
+    /// </summary>
+    private static List<string> ExpandInlineBlocks(IEnumerable<string> lines)
+    {
+        var expanded = new List<string>();
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("class ") || trimmed.StartsWith("interface ") ||
+                trimmed.StartsWith("enum ") || trimmed.StartsWith("using ") ||
+                trimmed.StartsWith("use "))
+            {
+                expanded.Add(line);
+                continue;
+            }
+
+            var open = trimmed.IndexOf('{');
+            var close = trimmed.LastIndexOf('}');
+            if (open < 0 || close <= open)
+            {
+                expanded.Add(line);
+                continue;
+            }
+
+            var header = trimmed.Substring(0, open).Trim();
+            // Only expand blocks: a method/if/for/while header contains "()".
+            if (!header.Contains('(') || !header.Contains(')'))
+            {
+                expanded.Add(line);
+                continue;
+            }
+
+            var body = trimmed.Substring(open + 1, close - open - 1).Trim();
+            expanded.Add(header + " {");
+            foreach (var statement in SplitTopLevelStatements(body))
+            {
+                expanded.Add(statement);
+            }
+            expanded.Add("}");
+        }
+
+        return expanded;
+    }
+
+    private static IEnumerable<string> SplitTopLevelStatements(string body)
+    {
+        var start = 0;
+        var depth = 0;
+
+        for (var i = 0; i < body.Length; i++)
+        {
+            var ch = body[i];
+            if (ch == '{' || ch == '(' || ch == '[')
+            {
+                depth++;
+            }
+            else if (ch == '}' || ch == ')' || ch == ']')
+            {
+                depth--;
+            }
+            else if (ch == ';' && depth == 0)
+            {
+                var statement = body.Substring(start, i - start + 1).Trim();
+                if (statement.Length > 0)
+                {
+                    yield return statement;
+                }
+                start = i + 1;
+            }
+        }
+
+        var tail = body.Substring(Math.Min(start, body.Length)).Trim();
+        if (tail.Length > 0)
+        {
+            yield return tail;
+        }
+    }
+
     private void EmitHeader()
     {
         _output.AppendLine("// Generated by Hust-CSharp");
@@ -266,8 +378,7 @@ public class Translator
             bases.AddRange(interfaces.Split(',').Select(i => i.Trim()));
             _output.AppendLine($"{INDENT_1}public class {className} : {string.Join(", ", bases)}");
             _output.AppendLine($"{INDENT_1}{{");
-            _inClass = true;
-            _braceDepth++;
+            OpenClass(className);
             return;
         }
         
@@ -280,8 +391,7 @@ public class Translator
             var bases = interfaces.Split(',').Select(i => i.Trim()).ToArray();
             _output.AppendLine($"{INDENT_1}public class {className} : {string.Join(", ", bases)}");
             _output.AppendLine($"{INDENT_1}{{");
-            _inClass = true;
-            _braceDepth++;
+            OpenClass(className);
             return;
         }
         
@@ -293,8 +403,7 @@ public class Translator
             var baseClass = matchExt.Groups[2].Value;
             _output.AppendLine($"{INDENT_1}public class {className} : {baseClass}");
             _output.AppendLine($"{INDENT_1}{{");
-            _inClass = true;
-            _braceDepth++;
+            OpenClass(className);
             return;
         }
         
@@ -305,9 +414,23 @@ public class Translator
             var className = matchSimple.Groups[1].Value;
             _output.AppendLine($"{INDENT_1}public class {className}");
             _output.AppendLine($"{INDENT_1}{{");
-            _inClass = true;
-            _braceDepth++;
+            OpenClass(className);
             return;
+        }
+    }
+
+    private void OpenClass(string className)
+    {
+        _inClass = true;
+        _currentClass = className;
+        _braceDepth++;
+        _classDepth = _braceDepth;
+
+        // C# requires a parameterless base constructor for derived classes.
+        // Add one when the Hust class has only parameterized constructors.
+        if (!_defaultCtorClasses.Contains(className))
+        {
+            _output.AppendLine($"{INDENT_2}public {className}() {{ }}");
         }
     }
 
@@ -324,18 +447,25 @@ public class Translator
             _output.AppendLine($"{INDENT_1}{{");
             _inInterface = true;
             _braceDepth++;
+            _interfaceDepth = _braceDepth;
         }
     }
 
     private bool IsMethodDeclaration(string trimmed)
     {
-        // Regular method: void main() { or int foo(int x) {
-        // Also match: public void draw() { (with public prefix)
-        if (Regex.IsMatch(trimmed, @"^(public\s+)?(void|int|float|double|string|bool)\s+\w+\s*\("))
+        // Constructors: ClassName(...) or public ClassName(...)
+        if (_inClass && !string.IsNullOrEmpty(_currentClass))
+        {
+            var ctorProbe = trimmed.StartsWith("public ") ? trimmed.Substring(7).Trim() : trimmed;
+            if (Regex.IsMatch(ctorProbe, $@"^{Regex.Escape(_currentClass)}\s*\("))
+                return true;
+        }
+
+        // Regular method: Type name(...) with an optional access modifier.
+        if (Regex.IsMatch(trimmed, $@"^(public\s+|private\s+|protected\s+)?{TypePattern}\s+\w+\s*\("))
             return true;
-        
+
         // Shape interface method: draw(); or public draw();
-        // Only match if we're inside an interface
         if (_inInterface)
         {
             var trimmedForShape = trimmed;
@@ -343,25 +473,43 @@ public class Translator
             {
                 trimmedForShape = trimmedForShape.Substring(7).Trim();
             }
-            // Match: methodName(...); or methodName(...)
-            // But not if it starts with a type keyword (that's a regular method)
-            if (!Regex.IsMatch(trimmedForShape, @"^(void|int|float|double|string|bool)\s+") &&
+            if (!Regex.IsMatch(trimmedForShape, $@"^{TypePattern}\s+") &&
                 Regex.IsMatch(trimmedForShape, @"^\w+\s*\(.*?\)(\s*;)?$"))
                 return true;
         }
-        
+
+        // Shape method implementation inside a class: public draw() { ... }
+        if (_inClass && !string.IsNullOrWhiteSpace(_currentClass))
+        {
+            var candidate = trimmed.StartsWith("public ") ? trimmed.Substring(7).Trim() : trimmed;
+            if (!Regex.IsMatch(candidate, @"^(if|for|while|switch|catch|using|return|else|do)\b") &&
+                Regex.IsMatch(candidate, @"^\w+\s*\([^)]*\)\s*\{?$"))
+                return true;
+        }
+
         return false;
     }
 
     private bool TranslateMethodDeclaration(string trimmed)
     {
-        // void main() { -> public static void Main() {
-        // void draw(); -> void draw(); (interface method, no body)
-        // public void draw() { -> public void draw() { (class method with public)
-        // draw(); -> void draw(); (shape interface method, no type)
-        // public draw(); -> void draw(); (shape interface method with public)
-        
-        // Check for shape interface method first (no return type)
+        // Constructors: Person(...) or public Person(...)
+        if (_inClass && !string.IsNullOrEmpty(_currentClass))
+        {
+            var ctorProbe = trimmed.StartsWith("public ") ? trimmed.Substring(7).Trim() : trimmed;
+            var ctorMatch = Regex.Match(ctorProbe, $@"^{Regex.Escape(_currentClass)}\s*\((.*?)\)");
+            if (ctorMatch.Success)
+            {
+                _definedFunctions.Add(_currentClass);
+                _output.AppendLine($"{INDENT_2}public {_currentClass}({TranslateParameters(ctorMatch.Groups[1].Value)})");
+                _output.AppendLine($"{INDENT_2}{{");
+                _inMethod = true;
+                _braceDepth++;
+                _methodDepth = _braceDepth;
+                return false;
+            }
+        }
+
+        // Shape interface method: draw(); or public draw();
         if (_inInterface)
         {
             var trimmedForShape = trimmed;
@@ -369,66 +517,72 @@ public class Translator
             {
                 trimmedForShape = trimmedForShape.Substring(7).Trim();
             }
-            
-            // Match shape interface method: methodName(...); or methodName(...)
-            // But not if it starts with a type keyword
-            if (!Regex.IsMatch(trimmedForShape, @"^(void|int|float|double|string|bool)\s+") &&
+
+            if (!Regex.IsMatch(trimmedForShape, $@"^{TypePattern}\s+") &&
                 Regex.IsMatch(trimmedForShape, @"^\w+\s*\(.*?\)(\s*;)?$"))
             {
-                // Check for return variable name: returnVar methodName(...)
                 var shapeMatchWithReturn = Regex.Match(trimmedForShape, @"^(\w+)\s+(\w+)\s*\((.*?)\)(\s*;)?$");
                 if (shapeMatchWithReturn.Success)
                 {
-                    // Has return variable name
-                    var returnVarName = shapeMatchWithReturn.Groups[1].Value;
                     var shapeMethodName = shapeMatchWithReturn.Groups[2].Value;
                     var shapeParameters = shapeMatchWithReturn.Groups[3].Value;
-                    
-                    // Record defined function for semantic analysis
                     _definedFunctions.Add(shapeMethodName);
-                    
-                    // Translate to C# interface method with object return type
                     _output.AppendLine($"{INDENT_2}object {shapeMethodName}({TranslateShapeParameters(shapeParameters)});");
                     return false;
                 }
-                
-                // No return variable name (void)
+
                 var shapeMatch = Regex.Match(trimmedForShape, @"^(\w+)\s*\((.*?)\)(\s*;)?$");
                 if (shapeMatch.Success)
                 {
                     var shapeMethodName = shapeMatch.Groups[1].Value;
                     var shapeParameters = shapeMatch.Groups[2].Value;
-                    
-                    // Record defined function for semantic analysis
                     _definedFunctions.Add(shapeMethodName);
-                    
-                    // Translate to C# interface method (no access modifier in interface)
-                    // C# interface methods are implicitly public
                     _output.AppendLine($"{INDENT_2}void {shapeMethodName}({TranslateShapeParameters(shapeParameters)});");
                     return false;
                 }
             }
         }
-        
-        // Regular method with return type
+
+        // Shape method implementation inside a class: public draw() { ... }
+        if (_inClass && !string.IsNullOrWhiteSpace(_currentClass))
+        {
+            var candidate = trimmed.StartsWith("public ") ? trimmed.Substring(7).Trim() : trimmed;
+            if (!Regex.IsMatch(candidate, @"^(if|for|while|switch|catch|using|return|else|do)\b") &&
+                !Regex.IsMatch(candidate, $@"^{TypePattern}\s+"))
+            {
+                var shapeImpl = Regex.Match(candidate, @"^(\w+)\s*\((.*?)\)\s*\{?$");
+                if (shapeImpl.Success && shapeImpl.Groups[1].Value != _currentClass)
+                {
+                    var shapeMethodName = shapeImpl.Groups[1].Value;
+                    _definedFunctions.Add(shapeMethodName);
+                    _output.AppendLine($"{INDENT_2}public void {shapeMethodName}({TranslateParameters(shapeImpl.Groups[2].Value)})");
+                    _output.AppendLine($"{INDENT_2}{{");
+                    _inMethod = true;
+                    _braceDepth++;
+                    _methodDepth = _braceDepth;
+                    return false;
+                }
+            }
+        }
+
+        // Regular method with a return type.
         var trimmedForParse = trimmed;
         if (trimmedForParse.StartsWith("public "))
         {
             trimmedForParse = trimmedForParse.Substring(7).Trim();
         }
-        
-        var match = Regex.Match(trimmedForParse, @"^(void|int|float|double|string|bool)\s+(\w+)\s*\((.*?)\)(\s*;)?");
+
+        var match = Regex.Match(trimmedForParse, $@"^({TypePattern})\s+(\w+)\s*\((.*?)\)(\s*;)?");
         if (!match.Success) return false;
-        
+
         var returnType = TranslateType(match.Groups[1].Value);
         var methodName = match.Groups[2].Value;
         var parameters = match.Groups[3].Value;
-        var isInterfaceMethod = match.Groups[4].Success; // Ends with ;
+        var isInterfaceMethod = match.Groups[4].Success;
         var isMain = methodName.ToLower() == "main";
-        
-        // Record defined function for semantic analysis
+
         _definedFunctions.Add(methodName);
-        
+
         if (isMain)
         {
             methodName = "Main";
@@ -438,10 +592,8 @@ public class Translator
         }
         else if (_inInterface)
         {
-            // Interface method: no body, just signature
-            // C# interface methods are implicitly public, no access modifier needed
             _output.AppendLine($"{INDENT_2}{returnType} {methodName}({TranslateParameters(parameters)});");
-            // Don't set _inMethod for interface methods
+            return false;
         }
         else if (_inClass)
         {
@@ -451,12 +603,13 @@ public class Translator
         }
         else
         {
-            _output.AppendLine($"{INDENT_1}public {returnType} {methodName}({TranslateParameters(parameters)})");
+            _output.AppendLine($"{INDENT_1}public static {returnType} {methodName}({TranslateParameters(parameters)})");
             _output.AppendLine($"{INDENT_1}{{");
             _inMethod = true;
         }
-        
+
         _braceDepth++;
+        _methodDepth = _braceDepth;
         return isMain;
     }
 
@@ -483,48 +636,55 @@ public class Translator
 
     private bool IsVariableDeclaration(string trimmed)
     {
-        // Hust types: i8,i16,i32,i64,u8,u16,u32,u64,f32,f64,bool,String,char,void
-        // Also support C# types for compatibility: int,float,double,string
-        return Regex.IsMatch(trimmed, @"^(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char|int|float|double|string)\s+\w+");
+        var candidate = trimmed.StartsWith("const ") ? trimmed.Substring(6).Trim() : trimmed;
+        if (candidate.StartsWith("return ") || candidate.StartsWith("new "))
+        {
+            return false;
+        }
+        return Regex.IsMatch(candidate, $@"^{TypePattern}\s+\w+");
     }
 
     private void TranslateVariableDeclaration(string line, string trimmed)
     {
-        // Hust types: i8,i16,i32,i64,u8,u16,u32,u64,f32,f64,bool,String,char,void
-        // Also support C# types for compatibility: int,float,double,string
-        var match = Regex.Match(trimmed, @"^(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char|int|float|double|string)\s+(\w+)(.*)$");
+        var isConst = trimmed.StartsWith("const ");
+        var candidate = isConst ? trimmed.Substring(6).Trim() : trimmed;
+
+        var match = Regex.Match(candidate, $@"^({TypePattern})\s+(\w+)(.*)$");
         if (!match.Success)
         {
             TranslateExpressionStatement(line, trimmed);
             return;
         }
-        
+
         var hustType = match.Groups[1].Value;
-        var type = MapType(hustType);  // Use type mapping
+        var type = MapType(hustType);
         var name = match.Groups[2].Value;
         var rest = match.Groups[3].Value;
-        
+
         // Semantic check: type mismatch
         CheckTypeMismatch(type, rest);
-        
+
+        // Map types and methods inside the initializer: new i32[3] -> new int[3].
+        rest = TranslateExpression(rest);
+        rest = TranslateArrayInitializer(hustType, rest);
+
+        var prefix = isConst ? "const " : "";
+
         string indent;
         if (_inClass && !_inMethod)
         {
-            // Class field: 2 levels
             indent = INDENT_2;
-            _output.AppendLine($"{indent}public {type} {name}{rest}");
+            _output.AppendLine($"{indent}public {prefix}{type} {name}{rest}");
         }
         else if (_inMethod)
         {
-            // Method local: fixed indent, ignore preprocessor indent
             indent = _inClass ? INDENT_3 : INDENT_2;
-            _output.AppendLine($"{indent}{type} {name}{rest}");
+            _output.AppendLine($"{indent}{prefix}{type} {name}{rest}");
         }
         else
         {
-            // Top level (shouldn't happen)
             indent = INDENT_1;
-            _output.AppendLine($"{indent}{type} {name}{rest}");
+            _output.AppendLine($"{indent}{prefix}{type} {name}{rest}");
         }
     }
 
@@ -560,6 +720,7 @@ public class Translator
         // Method body statements: fixed indent, ignore preprocessor indent
         var indent = _inClass ? INDENT_3 : INDENT_2;
         _output.AppendLine($"{indent}{TranslateExpression(trimmed)}");
+        AdjustDepth(trimmed);
     }
 
     private void TranslateReturnStatement(string line, string trimmed)
@@ -571,30 +732,32 @@ public class Translator
     private void TranslateClosingBrace()
     {
         _braceDepth--;
-        
-        if (_inMethod)
+
+        if (_inMethod && _braceDepth < _methodDepth)
         {
-            // End of method
             var indent = _inClass ? INDENT_2 : INDENT_1;
             _output.AppendLine($"{indent}}}");
             _inMethod = false;
+            _methodDepth = -1;
         }
-        else if (_inInterface)
+        else if (_inInterface && _braceDepth < _interfaceDepth)
         {
-            // End of interface
             _output.AppendLine($"{INDENT_1}}}");
             _inInterface = false;
+            _interfaceDepth = -1;
         }
-        else if (_inClass)
+        else if (_inClass && _braceDepth < _classDepth)
         {
-            // End of class
             _output.AppendLine($"{INDENT_1}}}");
             _inClass = false;
+            _currentClass = "";
+            _classDepth = -1;
         }
         else
         {
-            // End of Program (shouldn't happen here)
-            _output.AppendLine("}");
+            // Inner block (if/for/while/switch) inside a method or class.
+            var indent = _inMethod ? (_inClass ? INDENT_3 : INDENT_2) : INDENT_2;
+            _output.AppendLine($"{indent}}}");
         }
     }
 
@@ -608,12 +771,25 @@ public class Translator
             return;
         }
         
+        // Enums are nested inside Program; make them public so public methods
+        // can expose them.
+        if (trimmed.StartsWith("enum ") && !trimmed.StartsWith("public "))
+        {
+            trimmed = "public " + trimmed;
+        }
+
         // Check for undefined function calls
         CheckUndefinedFunction(trimmed);
         
         // Method body statements: fixed indent, ignore preprocessor indent
         var stmtIndent = _inClass ? INDENT_3 : INDENT_2;
         _output.AppendLine($"{stmtIndent}{TranslateExpression(trimmed)}");
+        AdjustDepth(trimmed);
+    }
+
+    private void AdjustDepth(string text)
+    {
+        _braceDepth += text.Count(c => c == '{') - text.Count(c => c == '}');
     }
 
     private void CheckUndefinedFunction(string trimmed)
@@ -662,12 +838,15 @@ public class Translator
         var translated = parts.Select(p =>
         {
             var trimmed = p.Trim();
-            // Hust types: i8,i16,i32,i64,u8,u16,u32,u64,f32,f64,bool,String,char
-            // Also support C# types for compatibility: int,float,double,string
-            var match = Regex.Match(trimmed, @"^(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char|int|float|double|string)\s+(\w+)$");
+            var match = Regex.Match(trimmed, $@"^({TypePattern})\s+(\w+)$");
             if (match.Success)
             {
                 return $"{MapType(match.Groups[1].Value)} {match.Groups[2].Value}";
+            }
+            // Untyped shape-interface parameter: use object.
+            if (Regex.IsMatch(trimmed, @"^\w+$"))
+            {
+                return $"object {trimmed}";
             }
             return trimmed;
         });
@@ -675,27 +854,123 @@ public class Translator
         return string.Join(", ", translated);
     }
 
+    /// <summary>
+    /// C# requires "new T[] { ... }" for nested array initializers, while Hust
+    /// uses the shorter "{ ... }" form.
+    /// </summary>
+    private string TranslateArrayInitializer(string hustType, string rest)
+    {
+        var literalMatch = Regex.Match(rest, @"^\s*=\s*(\{.*\})\s*;\s*$", RegexOptions.Singleline);
+        if (!literalMatch.Success)
+        {
+            return rest;
+        }
+
+        var typeMatch = Regex.Match(hustType, @"^(\w+)((?:\[\d*\])*)$");
+        if (!typeMatch.Success)
+        {
+            return rest;
+        }
+
+        var dims = Regex.Matches(typeMatch.Groups[2].Value, @"\[").Count;
+        if (dims == 0)
+        {
+            return rest;
+        }
+
+        var baseType = MapType(typeMatch.Groups[1].Value);
+        return $"= {BuildArrayInitializer(literalMatch.Groups[1].Value, baseType, dims)};";
+    }
+
+    private string BuildArrayInitializer(string literal, string baseType, int dims)
+    {
+        var text = literal.Trim();
+        if (!text.StartsWith("{") || !text.EndsWith("}"))
+        {
+            return text;
+        }
+
+        var body = text.Substring(1, text.Length - 2).Trim();
+        if (dims == 1)
+        {
+            return $"new {baseType}[] {text}";
+        }
+
+        var elements = SplitTopLevel(body);
+        var rendered = elements
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Select(e => BuildArrayInitializer(e.Trim(), baseType, dims - 1));
+        var arrayType = baseType + string.Concat(Enumerable.Repeat("[]", dims));
+        return $"new {arrayType} {{ {string.Join(", ", rendered)} }}";
+    }
+
+    private static List<string> SplitTopLevel(string text)
+    {
+        var parts = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var depth = 0;
+
+        foreach (var ch in text)
+        {
+            if (ch == '{' || ch == '(' || ch == '[')
+            {
+                depth++;
+            }
+            else if (ch == '}' || ch == ')' || ch == ']')
+            {
+                depth--;
+            }
+
+            if (ch == ',' && depth == 0)
+            {
+                parts.Add(current.ToString());
+                current.Clear();
+            }
+            else
+            {
+                current.Append(ch);
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            parts.Add(current.ToString());
+        }
+        return parts;
+    }
+
     private string TranslateExpression(string expr)
     {
-        // Translate Hust expressions to C#
-        // For now, mostly pass-through with some replacements
-        
-        // Console.WriteLine -> Console.WriteLine (already correct)
-        // new Person() -> new Person() (already correct)
-        
-        // Translate Hust types to C# types in expressions
-        // Match type keywords followed by space and identifier (variable declarations)
-        expr = Regex.Replace(expr, @"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)\s+(?=\w)", 
+        // Translate Hust types to C# types in expressions.
+        expr = Regex.Replace(expr, @"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)\s+(?=\w)",
             match => MapType(match.Groups[1].Value) + " ");
-        
+
         // Translate array types: i32[] -> int[], new i32[3] -> new int[3]
-        expr = Regex.Replace(expr, @"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)(\[\d*\])", 
+        expr = Regex.Replace(expr, @"\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|char)((?:\[\d*\])+)",
             match => MapType(match.Groups[1].Value) + match.Groups[2].Value);
-        
+
+        // Array/string length: arr.len() -> arr.Length
+        expr = Regex.Replace(expr, @"\.(?:len|length)\(\)", ".Length");
+
+        // String methods
+        expr = Regex.Replace(expr, @"([\w.]+)\.charAt\(([^)]+)\)", "$1[$2]");
+        expr = Regex.Replace(expr, @"([\w.]+)\.substring\(([^,]+),\s*([^)]+)\)",
+            match => $"{match.Groups[1].Value}.Substring({match.Groups[2].Value}, {match.Groups[3].Value} - {match.Groups[2].Value})");
+        expr = Regex.Replace(expr, @"\.toUpperCase\(\)", ".ToUpper()");
+        expr = Regex.Replace(expr, @"\.toLowerCase\(\)", ".ToLower()");
+        expr = Regex.Replace(expr, @"\.trim\(\)", ".Trim()");
+        expr = Regex.Replace(expr, @"\.trimLeft\(\)", ".TrimStart()");
+        expr = Regex.Replace(expr, @"\.trimRight\(\)", ".TrimEnd()");
+        expr = Regex.Replace(expr, @"\.contains\(", ".Contains(");
+        expr = Regex.Replace(expr, @"\.startsWith\(", ".StartsWith(");
+        expr = Regex.Replace(expr, @"\.endsWith\(", ".EndsWith(");
+        expr = Regex.Replace(expr, @"\.indexOf\(", ".IndexOf(");
+        expr = Regex.Replace(expr, @"\.replace\(", ".Replace(");
+        expr = Regex.Replace(expr, @"\.split\(", ".Split(");
+
         // Fix float literals: add F suffix for C#
-        // Match: number.number (not followed by F/f)
         expr = Regex.Replace(expr, @"(\d+\.\d+)(?![Ff\d])", "$1f");
-        
+
         return expr;
     }
 

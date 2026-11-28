@@ -1,0 +1,42 @@
+Name: document.txt
+Type: Text
+Size: 1024 bytes
+Is Media: false
+Is Document: true
+---
+Name: photo.jpg
+Type: Image
+Size: 2048 bytes
+Is Media: true
+Is Document: false
+---
+Name: song.mp3
+Type: Audio
+Size: 4096 bytes
+Is Media: true
+Is Document: false
+---
+Name: movie.mp4
+Type: Video
+Size: 8192 bytes
+Is Media: true
+Is Document: false
+---
+Name: report.pdf
+Type: Document
+Size: 1536 bytes
+Is Media: false
+Is Document: true
+---
+Name: backup.zip
+Type: Archive
+Size: 3072 bytes
+Is Media: false
+Is Document: false
+---
+Name: program.exe
+Type: Executable
+Size: 5120 bytes
+Is Media: false
+Is Document: false
+---

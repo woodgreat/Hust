@@ -1,0 +1,23 @@
+use CSHARP.Console.*;
+
+class Node {
+    i32 value;
+
+    public Node(i32 v) {
+        this.value = v;
+    }
+}
+
+void main() {
+    Node n = null;
+
+    if (n == null) {
+        Console.WriteLine("null");
+    }
+
+    n = new Node(5);
+
+    if (n != null) {
+        Console.WriteLine(n.value);
+    }
+}

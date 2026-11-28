@@ -1,0 +1,10 @@
+Sliding window sums:
+Window 0: 6
+Window 1: 9
+Window 2: 12
+Window 3: 15
+Window 4: 18
+Window 5: 21
+Window 6: 24
+Window 7: 27
+Max sum: 27 at index 7

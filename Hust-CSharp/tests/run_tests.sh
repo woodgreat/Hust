@@ -25,28 +25,35 @@ GROUPS="m1 m2 m3 m4 negative"
 
 # Build the core first
 echo "=== Building Hust-CSharp Core ==="
-cd "$CORE_DIR"
-if ! dotnet build -c Release 2>&1 | tail -5; then
-    echo -e "${RED}Failed to build Hust-CSharp core${NC}"
+
+# Use dotnet from DOTNET_CMD, ~/.dotnet, or PATH
+DOTNET_CMD="${DOTNET_CMD:-$HOME/.dotnet/dotnet}"
+if [ ! -x "$DOTNET_CMD" ]; then
+    DOTNET_CMD="$(command -v dotnet || true)"
+fi
+if [ -z "$DOTNET_CMD" ] || [ ! -x "$DOTNET_CMD" ]; then
+    echo -e "${RED}dotnet command not found${NC}"
     exit 1
 fi
+
+cd "$CORE_DIR"
+CORE_OUT="$CORE_DIR/bin/core"
+BUILD_LOG="$(mktemp)"
+if ! "$DOTNET_CMD" build -c Release -o "$CORE_OUT" >"$BUILD_LOG" 2>&1; then
+    echo -e "${RED}Failed to build Hust-CSharp core${NC}"
+    tail -30 "$BUILD_LOG"
+    rm -f "$BUILD_LOG"
+    exit 1
+fi
+tail -3 "$BUILD_LOG"
+rm -f "$BUILD_LOG"
 echo -e "${GREEN}Core built successfully${NC}"
 echo ""
 
 # Find the executable
-CORE_DLL="$CORE_DIR/bin/Release/net8.0/hust_csharp.dll"
+CORE_DLL="$CORE_OUT/hust_csharp.dll"
 if [ ! -f "$CORE_DLL" ]; then
     echo -e "${RED}Core DLL not found: $CORE_DLL${NC}"
-    exit 1
-fi
-
-# Use dotnet to run the DLL
-DOTNET_CMD="${DOTNET_CMD:-$HOME/.dotnet/dotnet}"
-if [ ! -f "$DOTNET_CMD" ]; then
-    DOTNET_CMD="dotnet"
-fi
-if ! command -v "$DOTNET_CMD" &> /dev/null; then
-    echo -e "${RED}dotnet command not found${NC}"
     exit 1
 fi
 
@@ -57,6 +64,10 @@ run_test() {
     local test_dir="$(dirname "$test_file")"
     local expected_file="${test_file%.hust}.expected"
     local expected_err_file="${test_file%.hust}.expected.err"
+    local project_flag=""
+    if [ -f "$test_dir/settings.config" ]; then
+        project_flag="--project"
+    fi
     
     TOTAL=$((TOTAL + 1))
     
@@ -67,7 +78,8 @@ run_test() {
     
     # Transpile
     local transpile_output
-    transpile_output=$("$DOTNET_CMD" "$CORE_DLL" transpile "$test_file" --out-dir "$out_dir" 2>&1)
+    # shellcheck disable=SC2086
+    transpile_output=$("$DOTNET_CMD" "$CORE_DLL" transpile "$test_file" $project_flag --out-dir "$out_dir" 2>&1)
     local transpile_exit=$?
     
     if [ $transpile_exit -ne 0 ]; then
@@ -122,12 +134,13 @@ run_test() {
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>app</AssemblyName>
   </PropertyGroup>
 </Project>
 EOF
         
         local build_output
-        build_output=$(cd "$out_dir" && "$DOTNET_CMD" build -c Release 2>&1)
+        build_output=$(cd "$out_dir" && "$DOTNET_CMD" build -c Release -o "$out_dir/bin" 2>&1)
         local build_exit=$?
         
         if [ $build_exit -ne 0 ]; then
@@ -141,7 +154,7 @@ EOF
         # Run if expected output exists
         if [ -f "$expected_file" ]; then
             # Find the generated DLL (not the executable)
-            local dll_file=$(find "$out_dir/bin" -name "*.dll" | grep -v "ref" | head -1)
+            local dll_file="$out_dir/bin/app.dll"
             if [ -n "$dll_file" ]; then
                 local run_output
                 run_output=$("$DOTNET_CMD" "$dll_file" 2>&1)
@@ -181,12 +194,10 @@ for group in m1 m2 m3 m4 negative; do
     
     echo "=== Testing $group ==="
     
-    # Find all .hust files
-    for test_file in "$group_dir"/*.hust; do
-        if [ -f "$test_file" ]; then
-            run_test "$test_file"
-        fi
-    done
+    # Find all .hust files, including project subdirectories
+    while IFS= read -r test_file; do
+        [ -f "$test_file" ] && run_test "$test_file"
+    done < <(find "$group_dir" -name '*.hust' | sort)
     
     echo ""
 done

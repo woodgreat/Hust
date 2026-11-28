@@ -1,0 +1,10 @@
+use CSHARP.Console.*;
+
+void main() {
+    // Line comments must not disturb translation.
+    i32 x = 10; // trailing comment
+
+    /* Block comments
+       are preserved too. */
+    Console.WriteLine(x);
+}

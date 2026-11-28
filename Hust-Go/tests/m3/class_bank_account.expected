@@ -1,0 +1,18 @@
+Account: ACC001
+Owner: Alice
+Current Balance: 950
+Transaction History:
+  Account opened with balance: 1000
+  Deposited: 200, Balance: 1200
+  Withdrew: 100, Balance: 1100
+  Withdrew: 150, Balance: 950
+  Transferred to ACC002: 150
+---
+Account: ACC002
+Owner: Bob
+Current Balance: 950
+Transaction History:
+  Account opened with balance: 500
+  Deposited: 300, Balance: 800
+  Deposited: 150, Balance: 950
+  Received from ACC001: 150

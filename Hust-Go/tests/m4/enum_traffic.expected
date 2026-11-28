@@ -1,0 +1,5 @@
+Initial: RED
+Time 0: GREEN (Can go: true)
+Time 10: GREEN (Can go: true)
+Time 20: GREEN (Can go: true)
+Time 30: YELLOW (Can go: false)

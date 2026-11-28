@@ -1,0 +1,26 @@
+use CSHARP.Console.*;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+void main() {
+    Color c = Color.Blue;
+
+    switch (c) {
+        case Color.Red:
+            Console.WriteLine("red");
+            break;
+        case Color.Green:
+            Console.WriteLine("green");
+            break;
+        case Color.Blue:
+            Console.WriteLine("blue");
+            break;
+        default:
+            Console.WriteLine("unknown");
+            break;
+    }
+}

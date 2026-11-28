@@ -1,0 +1,32 @@
+Classroom: Computer Science 101
+Students: 3
+Average GPA: 3.6333332
+Top Student: Charlie (GPA: 3.9)
+Student List:
+ID: S001
+Name: Alice
+Age: 20
+GPA: 3.8
+Honor Student: true
+Courses:
+  CS101
+  MATH101
+---
+ID: S002
+Name: Bob
+Age: 21
+GPA: 3.2
+Honor Student: false
+Courses:
+  CS101
+  PHYS101
+---
+ID: S003
+Name: Charlie
+Age: 19
+GPA: 3.9
+Honor Student: true
+Courses:
+  CS101
+  CS102
+---

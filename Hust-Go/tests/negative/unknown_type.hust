@@ -1,0 +1,6 @@
+use GO.fmt.*;
+
+void main() {
+    Widget w = 1;
+    fmt.Println(w);
+}

@@ -1,0 +1,22 @@
+Library: City Library
+Total Books: 5
+[001] The Great Gatsby by F. Scott Fitzgerald (1925) - Available
+[002] To Kill a Mockingbird by Harper Lee (1960) - Available
+[003] 1984 by George Orwell (1949) - Available
+[004] Pride and Prejudice by Jane Austen (1813) - Available
+[005] The Catcher in the Rye by J.D. Salinger (1951) - Available
+---
+Borrowing book 003...
+---
+Finding books by George Orwell:
+[003] 1984 by George Orwell (1949) - Borrowed
+---
+Returning book 003...
+---
+Library: City Library
+Total Books: 5
+[001] The Great Gatsby by F. Scott Fitzgerald (1925) - Available
+[002] To Kill a Mockingbird by Harper Lee (1960) - Available
+[003] 1984 by George Orwell (1949) - Available
+[004] Pride and Prejudice by Jane Austen (1813) - Available
+[005] The Catcher in the Rye by J.D. Salinger (1951) - Available

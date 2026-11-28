@@ -1,0 +1,13 @@
+Global: 100
+Local: 200
+Global in local: 100
+Inner: 400
+Outer: 300
+Global in inner: 100
+Loop var: 0
+Loop var: 10
+Loop var: 20
+If var: 500
+While var: 0
+While var: 100
+While var: 200

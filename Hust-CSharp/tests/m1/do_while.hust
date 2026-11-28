@@ -1,0 +1,12 @@
+use CSHARP.Console.*;
+
+void main() {
+    i32 k = 0;
+
+    do {
+        Console.WriteLine(k);
+        k = k + 1;
+    } while (k < 3);
+
+    Console.WriteLine(k);
+}

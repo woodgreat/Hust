@@ -1,0 +1,5 @@
+[INFO] This is an info message
+[WARN] This is a warning message
+[ERROR] This is an error message
+[FATAL] This is a fatal message
+[DEBUG] Now debug is visible

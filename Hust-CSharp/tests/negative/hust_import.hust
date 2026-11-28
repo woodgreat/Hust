@@ -1,0 +1,5 @@
+use HUST.io.*;
+
+void main() {
+    i32 x = 1;
+}

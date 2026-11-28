@@ -1,0 +1,24 @@
+Status: 200 OK
+Body: Success
+Success: true
+Client Error: false
+Server Error: false
+---
+Status: 201 Created
+Body: Resource created
+Success: true
+Client Error: false
+Server Error: false
+---
+Status: 404 Not Found
+Body: Resource not found
+Success: false
+Client Error: true
+Server Error: false
+---
+Status: 500 Internal Server Error
+Body: Server error
+Success: false
+Client Error: false
+Server Error: true
+---

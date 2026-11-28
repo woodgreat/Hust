@@ -33,7 +33,8 @@ public class Preprocessor
         CSharpDialect, // C#.* imports
         MixedDialect,  // Multiple dialects (error)
         RustDialect,   // RUST.* imports (error for C# core)
-        CDialect       // C.* imports (error for C# core)
+        CDialect,      // C.* imports (error for C# core)
+        GoDialect      // GO.* imports (error for C# core)
     }
 
     /// <summary>
@@ -105,7 +106,7 @@ public class Preprocessor
         var hasCSharpImport = false;
         var hasRustImport = false;
         var hasCImport = false;
-        var hasHustImport = false;
+        var hasGoImport = false;
         
         foreach (var line in lines)
         {
@@ -122,20 +123,23 @@ public class Preprocessor
                 {
                     hasRustImport = true;
                 }
+                else if (trimmed.Contains("GO."))
+                {
+                    hasGoImport = true;
+                }
                 else if (trimmed.Contains("C."))
                 {
                     hasCImport = true;
                 }
                 else if (trimmed.Contains("HUST."))
                 {
-                    hasHustImport = true;
                     result.Errors.Add("HUST.* imports are not yet implemented");
                 }
             }
         }
         
         // Determine dialect
-        var dialectCount = (hasCSharpImport ? 1 : 0) + (hasRustImport ? 1 : 0) + (hasCImport ? 1 : 0);
+        var dialectCount = (hasCSharpImport ? 1 : 0) + (hasRustImport ? 1 : 0) + (hasCImport ? 1 : 0) + (hasGoImport ? 1 : 0);
         
         if (dialectCount > 1)
         {
@@ -148,6 +152,12 @@ public class Preprocessor
             result.DetectedDialect = DialectType.RustDialect;
             result.IsValid = false;
             result.Errors.Add("RUST.* imports detected in C# core project");
+        }
+        else if (hasGoImport)
+        {
+            result.DetectedDialect = DialectType.GoDialect;
+            result.IsValid = false;
+            result.Errors.Add("GO.* imports detected in C# core project");
         }
         else if (hasCImport)
         {

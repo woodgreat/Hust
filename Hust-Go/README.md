@@ -3,7 +3,7 @@
 The Go language core for Hust. Transpiles Hust source code to Go and compiles
 with the Go toolchain.
 
-**Version:** 0.1.0.20261127084900
+**Version:** 0.1.1.20261128125000
 
 ## Role
 
@@ -19,7 +19,7 @@ Prerequisites:
 
 ```bash
 cd Hust-Go
-go build -o hust_go src/main.go
+go build -o hust_go ./src
 ```
 
 Binary: `hust_go`
@@ -34,13 +34,14 @@ cd ..          # repo root
 ```
 
 This installs:
-- `hust_go` to `~/.local/bin/hust_work/hust_core/go/hust_go`
+- `hust_go` to `~/.local/bin/hust_work/hust_core/hust_go/hust_go`
 
 Manual install (advanced):
 
 ```bash
-go build -o hust_go src/main.go
-cp hust_go ~/.local/bin/
+go build -o hust_go ./src
+mkdir -p ~/.local/bin/hust_work/hust_core/hust_go
+cp hust_go ~/.local/bin/hust_work/hust_core/hust_go/
 ```
 
 ## Usage
@@ -87,8 +88,23 @@ void main() {
 
 ```bash
 cd tests
-./run_tests.sh
+./run_tests.sh            # 134/134 + negative 15/15
+./run_tests.sh --quick    # transpile only
+./core_contract.sh        # info / transpile / build / dialect / project mode
 ```
+
+Coverage matrix, known boundaries, and how to add tests: `tests/tests.md`.
+
+## Implementation
+
+- `src/lexer.go`, `src/parser.go`, `src/ast.go`: structured front end
+- `src/translator.go`: type inference + Go emission
+- `src/preprocessor.go`: comment/string protection + dialect detection
+- `src/main.go`: core contract CLI
+
+Supported: primitives, variables/constants, operators, control flow, functions,
+arrays (1D/2D/3D, push/pop/insert/removeAt/clear/slice/concat), strings,
+classes/constructors/inheritance/interfaces, enums, project mode.
 
 ## Documentation
 

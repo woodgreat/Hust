@@ -1,0 +1,16 @@
+use GO.fmt.*;
+
+void main() {
+    String s = "ABC";
+    char first = 'A';
+    char second = s.charAt(1);
+
+    fmt.Println(first);
+    fmt.Println(second);
+
+    i32 diff = second - 'A';
+    fmt.Println(diff);
+
+    String text = "char=" + s.charAt(2);
+    fmt.Println(text);
+}
